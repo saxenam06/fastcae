@@ -6,11 +6,12 @@
 
 ## Built
 
-Extract and Model. Generate, Simulate, Learn and Optimize are visible in the interface and not
+Extract and Model. Generate has its first module - the signed distance field a design is edited
+in - and nothing above it. Simulate, Learn and Optimize are visible in the interface and not
 implemented.
 
-- 45 tracked files, ~4,400 lines of Python, ~2,000 of TypeScript
-- 40 tests, all passing
+- 49 tracked files, ~5,000 lines of Python, ~2,000 of TypeScript
+- 51 tests, all passing
 - One project in `assets/`: **GRC Gearbox Housing** — a STEP file and a 4-page drawing
 
 ## What the pipeline produces today

@@ -58,6 +58,8 @@ src/fastcae/
   features.py     generic detection: axes, bores, bosses, hole patterns, planar groups, fillets
   drawing.py      PDF text extraction and callout parsing
   extract.py      the deterministic pipeline, and drawing-to-CAD association
+  generate/
+    field.py      the narrow-band signed distance field a design is edited in
   provenance.py   Evidence, Fact, Conflict - how anything is known
   api/app.py      HTTP surface; routes contain no logic
 ui/src/
@@ -71,6 +73,7 @@ ui/src/
 
 - [architecture.md](docs/architecture.md) — how it is built, and the rule that keeps it general
 - [extract.md](docs/extract.md) — the pipeline, and the limits of associating a drawing with a model
+- [generate.md](docs/generate.md) — how a design variant is represented, and what the field costs
 - [tasks.md](docs/tasks.md) — how the system asks a person for work; designed, not built
 - [verification.md](docs/verification.md) — the human-verification workflow; designed, not built
 - [status.md](docs/status.md) — what is true today, what is unverified, what is next
@@ -78,7 +81,7 @@ ui/src/
 ## Development
 
 ```
-uv run pytest tests -q          40 tests
+uv run pytest tests -q          51 tests
 uv run ruff check src tests
 cd ui && npx tsc -b
 ```
