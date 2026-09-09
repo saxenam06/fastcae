@@ -1,0 +1,124 @@
+/*
+ * Engineering sheet, not SaaS console.
+ *
+ * Hairline rules, a quiet machined-surface ground, white sheet surfaces, one disciplined blue.
+ * Evidence state is carried by line pattern as well as by colour, so it survives greyscale,
+ * screenshots and colour-vision differences - a conflict must not be invisible to someone who
+ * cannot separate red from green.
+ */
+
+:root {
+  --ground: #f2f3f1;
+  --sheet: #ffffff;
+  --ink: #1b1f1e;
+  --muted: #6b7270;
+  --faint: #9aa19e;
+  --hairline: #d8dbd7;
+
+  --blue: #0f3d91;
+  --blue-wash: #e7edf9;
+  --measured: #2f6b4f;
+  --measured-wash: #e8f1eb;
+  --conflict: #9e2b2b;
+  --conflict-wash: #f7eaea;
+  --running: #8a6a1f;
+  --running-wash: #f6f0e0;
+
+  --sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+
+  --rail: 300px;
+  --inspector: 340px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--ground);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Tabular numerals everywhere a quantity appears, so columns of numbers line up and a changing
+   value does not make the row jitter. */
+.num,
+.mono {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: 600;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: var(--sheet);
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+  padding: 4px 9px;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--muted);
+}
+
+button[data-active="true"] {
+  background: var(--blue-wash);
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+/* Evidence state. Colour plus a line pattern, never colour alone. */
+.state {
+  display: inline-block;
+  padding: 0 5px;
+  border-radius: 2px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-bottom: 2px solid;
+}
+
+.state[data-state="measured"] {
+  color: var(--measured);
+  background: var(--measured-wash);
+  border-bottom-style: solid;
+}
+
+.state[data-state="derived"] {
+  color: var(--muted);
+  background: var(--ground);
+  border-bottom-style: solid;
+  opacity: 0.85;
+}
+
+.state[data-state="assumed"] {
+  color: var(--running);
+  background: var(--running-wash);
+  border-bottom-style: dashed;
+}
+
+.state[data-state="conflicted"] {
+  color: var(--conflict);
+  background: var(--conflict-wash);
+  border-bottom-style: double;
+  border-bottom-width: 3px;
+}

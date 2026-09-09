@@ -1,0 +1,831 @@
+.shell {
+  display: grid;
+  grid-template-columns: var(--rail) 1fr var(--inspector);
+  grid-template-rows: 48px 1fr 26px;
+  grid-template-areas:
+    "topbar topbar topbar"
+    "index  stage  inspector"
+    "title  title  title";
+  height: 100%;
+}
+
+.topbar {
+  grid-area: topbar;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  background: var(--sheet);
+  border-bottom: 1px solid var(--hairline);
+}
+
+/* The crane, cropped from the stacked lockup. Height-constrained and free in width, because the
+   mark is 797x544 and fixing both axes would squash it. */
+.topbar .mark {
+  height: 26px;
+  width: auto;
+  display: block;
+}
+
+/* Vendor, product and study all take the same two-line form: name over qualifier. Same shape for
+   all three so the eye reads them as peers rather than as a hierarchy - they are different kinds
+   of thing, not levels of one thing. */
+.topbar .lockup {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  line-height: 1.15;
+  min-width: 0;
+}
+
+.topbar .lockup b {
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.topbar .lockup em {
+  font-style: normal;
+  font-size: 10.5px;
+  color: var(--faint);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* A hairline rule rather than a bullet: this is a drawing, and a drawing separates fields with
+   a rule. */
+.topbar .divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 10px 2px;
+  background: var(--hairline);
+}
+
+.topbar .spacer {
+  flex: 1;
+}
+
+.index {
+  grid-area: index;
+  overflow: auto;
+  background: var(--sheet);
+  border-right: 1px solid var(--hairline);
+}
+
+.stage {
+  grid-area: stage;
+  position: relative;
+  min-width: 0;
+}
+
+.stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+}
+
+.stage .overlay {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.stage .hint {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.inspector {
+  grid-area: inspector;
+  overflow: auto;
+  background: var(--sheet);
+  border-left: 1px solid var(--hairline);
+}
+
+/* The drawing's title block: what revision of what, on what evidence. Always visible, because a
+   number on screen without its geometry hash is a number you cannot reproduce. */
+.titleblock {
+  grid-area: title;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 14px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--muted);
+  background: var(--sheet);
+  border-top: 1px solid var(--hairline);
+}
+
+.section {
+  border-bottom: 1px solid var(--hairline);
+}
+
+.section > header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 9px 12px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.section > header .count {
+  font-family: var(--mono);
+  color: var(--faint);
+}
+
+.section .body {
+  padding: 0 12px 10px;
+}
+
+.row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 12px;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.row:hover {
+  background: var(--ground);
+  border-color: var(--hairline);
+}
+
+.row[data-selected="true"] {
+  background: var(--blue-wash);
+  border-left-color: var(--blue);
+}
+
+.row .name {
+  font-weight: 500;
+}
+
+.row .detail {
+  flex: 1;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 118px 1fr;
+  gap: 2px 10px;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.kv dt {
+  color: var(--muted);
+}
+
+.kv dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.evidence {
+  margin: 6px 0 0;
+  padding: 7px 9px;
+  background: var(--ground);
+  border-left: 2px solid var(--hairline);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.evidence[data-kind="cad"] {
+  border-left-color: var(--measured);
+}
+
+.evidence[data-kind="drawing"] {
+  border-left-color: var(--blue);
+}
+
+.evidence[data-kind="report"] {
+  border-left-color: var(--blue);
+  border-left-style: dashed;
+}
+
+.evidence[data-kind="assumed"] {
+  border-left-color: var(--running);
+  border-left-style: dashed;
+}
+
+.evidence .locator {
+  font-family: var(--mono);
+  color: var(--ink);
+}
+
+.evidence .method {
+  color: var(--muted);
+}
+
+.conflict {
+  margin: 8px 0;
+  padding: 8px 10px;
+  background: var(--conflict-wash);
+  border-left: 3px double var(--conflict);
+}
+
+.conflict .subject {
+  font-weight: 600;
+  color: var(--conflict);
+}
+
+.empty {
+  padding: 10px 12px;
+  color: var(--faint);
+  font-style: italic;
+}
+
+.loading {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--muted);
+}
+
+.error {
+  margin: 24px;
+  padding: 14px;
+  background: var(--conflict-wash);
+  border-left: 3px solid var(--conflict);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+/* --- stage rail -------------------------------------------------------------------------- */
+
+/* Every stage is shown, built or not. A shell that hides its unbuilt stages describes a tool;
+   one that shows them describes a product, and it tells anyone looking where what they are doing
+   now actually leads. */
+.stages {
+  display: flex;
+  gap: 2px;
+}
+
+.stages button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  padding: 4px 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.stages button:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--ground);
+}
+
+.stages button[data-active="true"] {
+  color: var(--blue);
+  border-bottom-color: var(--blue);
+  background: transparent;
+}
+
+.stages button:disabled {
+  color: var(--faint);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* --- stage content ----------------------------------------------------------------------- */
+
+.stage-scroll {
+  height: 100%;
+  overflow: auto;
+  padding: 16px 20px 28px;
+}
+
+.stage-scroll > .metrics {
+  margin-bottom: 20px;
+}
+
+.stage-pending h2 {
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.block {
+  margin-bottom: 22px;
+}
+
+.block h2 {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.block h2 .count {
+  font-family: var(--mono);
+  color: var(--faint);
+}
+
+.note {
+  margin: 8px 0 0;
+  max-width: 68ch;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* --- metrics ----------------------------------------------------------------------------- */
+
+.metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  background: var(--hairline);
+  border: 1px solid var(--hairline);
+}
+
+.metric {
+  flex: 1 1 auto;
+  min-width: 110px;
+  padding: 8px 12px;
+  background: var(--sheet);
+}
+
+.metric-value {
+  font-size: 17px;
+  line-height: 1.2;
+}
+
+.metric-unit {
+  margin-left: 3px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.metric-label {
+  margin-top: 1px;
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.metric[data-tone="ok"] .metric-value {
+  color: var(--measured);
+}
+
+.metric[data-tone="warn"] .metric-value {
+  color: var(--running);
+}
+
+.metric[data-tone="bad"] .metric-value {
+  color: var(--conflict);
+}
+
+/* --- cards ------------------------------------------------------------------------------- */
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 10px;
+}
+
+.card {
+  padding: 9px 11px;
+  background: var(--sheet);
+  border: 1px solid var(--hairline);
+}
+
+.card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.card-title {
+  font-weight: 600;
+}
+
+.card-note {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.kind {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.status {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.status-failed {
+  color: var(--conflict);
+}
+
+/* Coverage as a bar, because a fraction of a whole is the one thing a bar says better than a
+   number, and this fraction is usually uncomfortably small. */
+.bar {
+  height: 5px;
+  margin: 7px 0 2px;
+  background: var(--ground);
+  border: 1px solid var(--hairline);
+}
+
+.bar span {
+  display: block;
+  height: 100%;
+  background: var(--blue);
+}
+
+/* --- chips and rows ---------------------------------------------------------------------- */
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 12px 8px;
+}
+
+.chips button {
+  padding: 2px 7px;
+  font-size: 11px;
+}
+
+.chips .count {
+  font-family: var(--mono);
+  color: var(--faint);
+  margin-left: 3px;
+}
+
+.axis-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.axis-row .detail {
+  flex: 1;
+  text-align: right;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.slider {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.slider input {
+  flex: 1;
+}
+
+/* --- shell before a project is open ------------------------------------------------------- */
+
+/* One column until something is extracted. Reserving an empty index and inspector around an empty
+   stage would draw the frame of a tool that has nothing in it. */
+.shell[data-open="false"] {
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    "topbar"
+    "stage";
+  grid-template-rows: 48px 1fr;
+}
+
+.shell[data-open="false"] .stage-scroll {
+  grid-area: stage;
+}
+
+.stages button[data-reached="true"] {
+  color: var(--blue);
+  border-bottom-color: var(--blue);
+  opacity: 1;
+}
+
+.stages button[data-active="true"] {
+  color: var(--blue);
+  border-bottom-color: var(--blue);
+  background: var(--blue-wash);
+  opacity: 1;
+}
+
+/* --- upload ------------------------------------------------------------------------------- */
+
+.upload {
+  grid-area: stage;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  padding: 32px 20px;
+}
+
+.upload-inner {
+  width: 100%;
+  max-width: 720px;
+}
+
+.project-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 10px;
+}
+
+.project-tabs button {
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+  color: var(--muted);
+}
+
+.project-tabs button[data-active="true"] {
+  color: var(--blue);
+  border-bottom-color: var(--blue);
+  background: transparent;
+}
+
+.panel {
+  background: var(--sheet);
+  border: 1px solid var(--hairline);
+}
+
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.panel-head h1 {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.panel-head .mono {
+  font-size: 11px;
+}
+
+.fields {
+  padding: 6px 16px 10px;
+}
+
+/* Label, path, size, remove. The path is the field: it is what a person checks and what they
+   change, so it takes the width and everything else sits out of its way. */
+.field {
+  display: grid;
+  grid-template-columns: 62px 1fr 62px 22px;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 0;
+}
+
+.field + .field {
+  border-top: 1px solid var(--hairline);
+}
+
+.field label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.field input {
+  width: 100%;
+  padding: 5px 8px;
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--ground);
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+}
+
+.field input:focus {
+  outline: none;
+  border-color: var(--blue);
+  background: var(--sheet);
+}
+
+.field[data-bad="true"] input {
+  border-color: var(--conflict);
+  background: var(--conflict-wash);
+}
+
+.field[data-bad="true"] .size {
+  color: var(--conflict);
+}
+
+.field .size {
+  font-size: 11px;
+  text-align: right;
+}
+
+button.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--faint);
+  padding: 2px 6px;
+}
+
+button.ghost:hover {
+  color: var(--ink);
+  border-color: var(--hairline);
+}
+
+button.ghost.add {
+  margin-top: 6px;
+  font-size: 11.5px;
+}
+
+.panel-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--hairline);
+  background: var(--ground);
+}
+
+.panel-foot .dim {
+  font-size: 11.5px;
+}
+
+button.primary {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: #fff;
+  padding: 5px 18px;
+  font-weight: 500;
+}
+
+button.primary:hover:not(:disabled) {
+  background: #0c3277;
+}
+
+button.primary:disabled {
+  background: var(--hairline);
+  border-color: var(--hairline);
+  color: var(--faint);
+  cursor: not-allowed;
+}
+
+.upload code {
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 1px 4px;
+  background: var(--ground);
+  border: 1px solid var(--hairline);
+}
+
+.error-inline {
+  margin: 0 16px 10px;
+  padding: 8px 10px;
+  background: var(--conflict-wash);
+  border-left: 3px solid var(--conflict);
+  font-size: 11.5px;
+  font-family: var(--mono);
+}
+
+/* --- pipeline ----------------------------------------------------------------------------- */
+
+.card[data-status="skipped"] {
+  border-style: dashed;
+  opacity: 0.78;
+}
+
+.card[data-status="failed"] {
+  border-left: 3px solid var(--conflict);
+}
+
+.card[data-status="done"] {
+  border-left: 3px solid var(--measured);
+}
+
+.status-done {
+  color: var(--measured);
+}
+
+.status-skipped {
+  color: var(--faint);
+}
+
+.status-failed {
+  color: var(--conflict);
+}
+
+.status-running {
+  color: var(--running);
+}
+
+.status {
+  margin-left: 0;
+  margin-right: 2px;
+}
+
+.kv.compact {
+  grid-template-columns: 132px 1fr;
+  margin-top: 5px;
+  font-size: 11px;
+}
+
+.warn {
+  margin-top: 5px;
+  padding: 5px 8px;
+  background: var(--running-wash);
+  border-left: 2px dashed var(--running);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.dim {
+  color: var(--faint);
+}
+
+/* --- callouts ----------------------------------------------------------------------------- */
+
+/* The raw string is the locator. Showing it beside every parsed value is what makes a reading
+   checkable against the page rather than taken on trust. */
+.callout {
+  display: grid;
+  grid-template-columns: 34px 190px 1fr;
+  gap: 10px;
+  align-items: baseline;
+  padding: 4px 0;
+  border-top: 1px solid var(--hairline);
+  font-size: 12px;
+}
+
+.callout .raw {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewswitch {
+  display: flex;
+  gap: 2px;
+  padding: 8px 12px;
+}
+
+.viewswitch button {
+  flex: 1;
+  font-size: 11.5px;
+  padding: 4px 6px;
+}

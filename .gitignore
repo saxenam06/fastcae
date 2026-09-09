@@ -1,0 +1,34 @@
+# Environments and dependencies. Reconstructible from pyproject.toml, uv.lock and package.json.
+.venv/
+node_modules/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Build output.
+dist/
+build/
+.vite/
+
+# Tool caches.
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.hypothesis/
+
+# Project data. Artifacts are inputs, not source: a STEP file is megabytes of geometry that
+# belongs to a part rather than to this application, and the code is written to read whatever is
+# in a folder rather than to know one. Put a project folder in assets/ to run.
+assets/
+
+# Session and editor state.
+.remember/
+.claude/
+.vscode/
+.idea/
+*.log
+
+# OS noise.
+Thumbs.db
+.DS_Store
+*.tsbuildinfo
