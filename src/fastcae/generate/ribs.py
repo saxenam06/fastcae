@@ -2,6 +2,7 @@
 
 **A rib is a plate on a line.** Its line lies in the plane its formation is drawn in; it is extruded
 along the pull direction - the way the mould opens - to its height, and it is ``thickness`` across.
+Its top may slope, straight from one end's height to the other's.
 Draft closes the flanks in with height, as a casting needs to leave its mould; the free edges are
 rounded. The ends are flat, because a rib ends inside a wall or boss and is trimmed there; nothing
 of an end is ever seen.
@@ -29,20 +30,28 @@ import numpy as np
 
 
 def _section(
-    t: np.ndarray, h: np.ndarray, thickness: float, height: float, draft_deg: float, rho: float
+    t: np.ndarray,
+    h: np.ndarray,
+    thickness: float,
+    height: float | np.ndarray,
+    draft_deg: float,
+    rho: float,
+    top_scale: float = 1.0,
 ) -> np.ndarray:
     """Signed distance in a rib's cross-section: a drafted rectangle, its top corners rounded.
 
     ``t`` is the offset across the rib from its mid-plane, ``h`` the height up the pull from its
-    root. Shared by every rib, straight or curved, so they all have one section.
+    root. Shared by every rib, straight or curved, so they all have one section. ``height`` may
+    vary point by point, for a top that slopes along the rib; ``top_scale`` turns a height above
+    that top into a distance to it.
     """
     slope = math.tan(math.radians(draft_deg))
     cos = math.cos(math.radians(draft_deg))
     half = thickness / 2.0
-    rho = min(rho, half * 0.999, height / 2.0)
+    rho = min(rho, half * 0.999, float(np.min(height)) / 2.0)
 
     flank = (np.abs(t) - (half - h * slope)) * cos
-    top = h - height
+    top = (h - height) * top_scale
     bottom = -h
     vertical = np.maximum(top, bottom)
     if rho > 0.0:
@@ -89,7 +98,8 @@ class Rib(_Shape):
     """A drafted plate standing on a line.
 
     ``start`` and ``end`` are the line's two ends, on the face or level the rib stands on. The rib
-    rises from there along ``pull`` by ``height_mm``, ``thickness_mm`` across at its root.
+    rises from there along ``pull`` by ``height_mm``, ``thickness_mm`` across at its root. With
+    ``end_height_mm`` its top slopes, straight, from ``height_mm`` at its start to that at its end.
     """
 
     start: tuple[float, float, float]
@@ -99,6 +109,18 @@ class Rib(_Shape):
     pull: tuple[float, float, float] = (0.0, 0.0, 1.0)
     draft_deg: float = 0.0
     edge_round_mm: float = 0.0
+    end_height_mm: float | None = None
+
+    @property
+    def heights(self) -> tuple[float, float]:
+        """How tall it is at its start and at its end."""
+        end = self.height_mm if self.end_height_mm is None else self.end_height_mm
+        return self.height_mm, end
+
+    def height_at(self, fraction: np.ndarray) -> np.ndarray:
+        """How tall it is a fraction of the way along its line, from its start."""
+        low, high = self.heights
+        return low + (high - low) * np.clip(np.asarray(fraction, dtype=float), 0.0, 1.0)
 
     def frame(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float]:
         """Origin; unit axes along the line, across it and up the pull; and the line's length."""
@@ -119,8 +141,16 @@ class Rib(_Shape):
         origin, along, across, up, length = self.frame()
         p = np.asarray(points, dtype=float) - origin
         s, t, h = p @ along, p @ across, p @ up
+        low, high = self.heights
+        rise = (high - low) / length
         section = _section(
-            t, h, self.thickness_mm, self.height_mm, self.draft_deg, self.edge_round_mm
+            t,
+            h,
+            self.thickness_mm,
+            self.height_at(s / length) if rise else self.height_mm,
+            self.draft_deg,
+            self.edge_round_mm,
+            top_scale=1.0 / math.sqrt(1.0 + rise * rise),
         )
         return _extruded(section, np.abs(s - length / 2.0) - length / 2.0)
 
@@ -139,9 +169,10 @@ class Rib(_Shape):
         """The axis-aligned box holding the rib, grown by ``margin_mm``."""
         origin, along, across, up, length = self.frame()
         half = self.thickness_mm / 2.0
+        heights = self.heights
         corners = np.array(
             [
-                origin + a * along * length + b * across * half + c * up * self.height_mm
+                origin + a * along * length + b * across * half + c * up * heights[a]
                 for a in (0, 1)
                 for b in (-1, 1)
                 for c in (0, 1)
@@ -169,6 +200,10 @@ class ArcRib(_Shape):
     pull: tuple[float, float, float] = (0.0, 0.0, 1.0)
     draft_deg: float = 0.0
     edge_round_mm: float = 0.0
+
+    def height_at(self, fraction: np.ndarray) -> np.ndarray:
+        """How tall it is a fraction of the way along its arc: the same everywhere."""
+        return np.full(np.shape(fraction), self.height_mm, dtype=float)
 
     def _frame(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         axis = np.asarray(self.axis, dtype=float)

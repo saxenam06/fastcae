@@ -18,6 +18,11 @@ arc ends in open air, ribs are cut there by the arc's own planes rather than by 
 
 **Protected cells come back.** After blending, every protected cell is given its base value again,
 so a protected surface is exactly the baseline's and a check can prove it by comparing cells.
+
+**The edge of the grid is always outside.** Nothing is ever made solid on the grid's outermost
+layer, so every design's surface closes - a surface that reached the edge would end there, open. A
+rib that gets that far has left the part or outgrown the grid; the cells it was held back from are
+kept, and a check rejects the design with where.
 """
 
 from __future__ import annotations
@@ -110,6 +115,7 @@ class Composition:
     ribs: np.ndarray | None = None
     nearest: np.ndarray | None = None
     clipped: np.ndarray | None = None
+    off_grid: np.ndarray | None = None
 
 
 def margin_for(base: Field, radius_mm: float) -> float:
@@ -234,13 +240,33 @@ def compose(base: Field, window: Window, ribs: list, radius_mm: float) -> Compos
         clipped = touched[held][solid[held] & ~was_solid]
         value[held] = base.at(samples)
         solid[held] = was_solid
-    composition = _splice(base, window.samples_of(touched), value.astype(np.float32), solid)
+
+    samples = window.samples_of(touched)
+    edge = _on_grid_edge(samples, base.grid.shape)
+    off_grid = np.empty(0, dtype=np.int64)
+    if edge.any():
+        was_solid = base.inside.ravel()[samples[edge]]
+        off_grid = touched[edge][solid[edge] & ~was_solid]
+        value[edge] = base.at(samples[edge])
+        solid[edge] = was_solid
+
+    composition = _splice(base, samples, value.astype(np.float32), solid)
     composition.touched = touched
     composition.part = a
     composition.ribs = b
     composition.nearest = nearest[touched]
     composition.clipped = clipped
+    composition.off_grid = off_grid
     return composition
+
+
+def _on_grid_edge(samples: np.ndarray, shape: tuple[int, int, int]) -> np.ndarray:
+    """Which of the given flat samples lie on the grid's outermost layer."""
+    index = np.unravel_index(samples, shape)
+    edge = np.zeros(samples.shape, dtype=bool)
+    for axis in range(3):
+        edge |= (index[axis] == 0) | (index[axis] == shape[axis] - 1)
+    return edge
 
 
 def _crossing(x: np.ndarray, y: np.ndarray, radius: float) -> np.ndarray:

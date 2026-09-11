@@ -75,6 +75,10 @@ class Finding:
     assumed: bool = True
     where: tuple[float, float, float] | None = None
     value: float | None = None
+    section: str = "check"
+    """``check``: what the platform holds every rib to. ``constraint``: what the engineer asked."""
+    cites: tuple[str, ...] = ()
+    """For a constraint, the engineer's words it answers to."""
 
 
 def check(
@@ -88,6 +92,7 @@ def check(
     """Every check, on one design."""
     return [
         _protected(base, window, design),
+        _grid_edge(window, design),
         _floating(base, design),
         _thickness(ribs, base.grid.spacing_mm, rules),
         _gaps(base, ribs, rules),
@@ -130,6 +135,22 @@ def _protected(base: Field, window: Window, design: Composition) -> Finding:
         rule,
         False,
     )
+
+
+def _grid_edge(window: Window, design: Composition) -> Finding:
+    rule = "no rib reaches the edge of the grid"
+    held = design.off_grid if design.off_grid is not None else np.empty(0, dtype=np.int64)
+    if held.size:
+        return Finding(
+            "within the grid",
+            "reject",
+            f"a rib runs off the grid ({held.size:,} cells held back): it has left the part, "
+            "or needs more room than the grid was built with",
+            rule,
+            False,
+            _centre_of(window, held),
+        )
+    return Finding("within the grid", "pass", "every rib inside the grid", rule, False)
 
 
 def _floating(base: Field, design: Composition) -> Finding:
@@ -527,7 +548,8 @@ def _exposed(base: Field, rib) -> list[np.ndarray]:
     points = np.concatenate(points)
     up = np.asarray(rib.pull, dtype=float)
     up = up / np.linalg.norm(up)
-    open_air = base.sample(points + 0.5 * rib.height_mm * up) > 0.0
+    along = np.linspace(0.0, 1.0, len(points))
+    open_air = base.sample(points + 0.5 * rib.height_at(along)[:, None] * up) > 0.0
     edges = np.flatnonzero(np.diff(np.concatenate([[0], open_air.astype(int), [0]])))
     return [
         points[start:stop]
@@ -572,7 +594,8 @@ def _tips(rib, spacing: float) -> tuple[np.ndarray, np.ndarray]:
         origin, along, _, up, length = rib.frame()
         count = max(int(length / (2 * spacing)), 2)
         line = origin + np.linspace(0.0, length, count)[:, None] * along
-    return line + (rib.height_mm - 0.5 * spacing) * up, up
+    heights = rib.height_at(np.linspace(0.0, 1.0, len(line)))
+    return line + (heights - 0.5 * spacing)[:, None] * up, up
 
 
 def _trilinear(window: Window, values: np.ndarray, points: np.ndarray) -> np.ndarray:
