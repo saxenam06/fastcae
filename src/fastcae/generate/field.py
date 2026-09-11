@@ -23,10 +23,12 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 from scipy import ndimage
 
+from .. import cache
 from ..geometry.brep import Tessellation
 
 # Voxel size as a fraction of the model's bounding diagonal, and the range it is held within.
@@ -46,15 +48,35 @@ MAX_SPACING_MM = 10.0
 # in.
 BAND_VOXELS = 3
 
+# How far outside the part a design may add material, as a fraction of the bounding diagonal.
+#
+# The grid has to be big enough for what a design *will* be, not for what the base part *is*. A rib
+# taller than the space above the part is silently clipped by the edge of the grid otherwise, and
+# what that looks like is a dial that stops working partway along - which is how it was found.
+#
+# Proportional, because a rib on a two-metre casting is not the size of a rib on a bracket. Two
+# percent of the diagonal is 40 mm here, and costs about a quarter more cells.
+HEADROOM_FRACTION = 0.02
+
 # Triangles whose distance is evaluated against cells in one pass. Bounds peak memory: each pass
 # materialises one (cell, triangle) pair per candidate, and a large planar triangle covers a large
 # box.
 PAIR_BUDGET = 4_000_000
 
+# What a stored field depends on: how it is built, and the shape of the tessellation it is built
+# from. Nothing else can change it, so nothing else invalidates it - three minutes is too long to
+# throw away because a route or a colour changed.
+CODE = ("generate/field.py", "geometry/brep.py")
+
 
 def scale_spacing(diagonal_mm: float) -> float:
     """A voxel size proportional to the model, clamped to a usable range."""
     return min(max(diagonal_mm * SPACING_FRACTION, MIN_SPACING_MM), MAX_SPACING_MM)
+
+
+def scale_headroom(diagonal_mm: float, spacing_mm: float) -> float:
+    """How far past the part the grid reaches. Never less than the band needs."""
+    return max(diagonal_mm * HEADROOM_FRACTION, (BAND_VOXELS + 2) * spacing_mm)
 
 
 @dataclass(frozen=True)
@@ -95,7 +117,14 @@ class Field:
     band_mm: np.ndarray
     inside: np.ndarray
     reach_mm: float
+
+    headroom_mm: float = 0.0
+    """How far past the part the grid reaches, and therefore how much a design may add."""
+
     source_digest: str = ""
+
+    key: str = ""
+    """What this field is stored under. Anything derived from it is keyed on this in turn."""
 
     @property
     def n_band(self) -> int:
@@ -114,6 +143,91 @@ class Field:
         """
         return float(self.n_inside) * self.grid.spacing_mm**3
 
+    def shell(self) -> np.ndarray:
+        """Flat indices of the solid cells that touch something that is not solid.
+
+        The field drawn as itself. A contour is a *reconstruction* - one vertex per cell, placed by
+        a least-squares fit - and it can be wrong in ways the field is not; these are the cells,
+        exactly as stored, and a cube each is the whole picture.
+
+        It is also far cheaper. On the part in ``assets/`` at 10 mm this is about 90 thousand cells
+        against 223 thousand triangles, and one position per cell against three vertices with
+        normals and ids per triangle.
+
+        Only the cells on the boundary: the interior is solid and hidden, and drawing eight million
+        cubes to see the outside of them is work for nothing.
+        """
+        inside = self.inside
+        exposed = np.zeros(inside.shape, dtype=bool)
+        for axis in range(3):
+            lower = [slice(None)] * 3
+            upper = [slice(None)] * 3
+            lower[axis] = slice(None, -1)
+            upper[axis] = slice(1, None)
+            low, high = tuple(lower), tuple(upper)
+            exposed[low] |= inside[low] & ~inside[high]
+            exposed[high] |= inside[high] & ~inside[low]
+        return np.flatnonzero(exposed.ravel())
+
+    def plane(self, axis: int, index: int) -> np.ndarray:
+        """Signed distance across one plane of the grid, as a 2D array in mm.
+
+        The most direct thing a field can be asked for, and the only view that shows the numbers
+        rather than an interpretation of them: the sign, the band, how thick a wall is, whether a
+        cavity is open. A surface has to be reconstructed and can be reconstructed wrongly; a plane
+        of the field cannot.
+
+        Beyond the band the value is the reach, signed - which is the truth. The field does not
+        know how far away a distant cell is, only which side it is on.
+        """
+        if axis not in (0, 1, 2):
+            raise ValueError(f"axis must be 0, 1 or 2, got {axis}")
+        if not 0 <= index < self.grid.shape[axis]:
+            raise IndexError(f"index {index} outside 0..{self.grid.shape[axis] - 1} on axis {axis}")
+
+        sign = np.take(self.inside, index, axis=axis)
+        out = np.where(sign, -self.reach_mm, self.reach_mm).astype(np.float32)
+
+        coordinates = np.unravel_index(self.band_index, self.grid.shape)
+        on_plane = coordinates[axis] == index
+        rows, columns = (c[on_plane] for a, c in enumerate(coordinates) if a != axis)
+        out[rows, columns] = self.band_mm[on_plane]
+        return out
+
+    def __getstate__(self) -> dict:
+        """Store the sign a bit per cell instead of a byte per cell.
+
+        ``inside`` is one boolean for every cell of the dense grid, and numpy spends a whole byte
+        on each. At 2.5 mm that is 74.5 MB of the 144 MB a stored field costs, for one bit of
+        information per cell. Packing it is two calls and takes the file to 79 MB.
+        """
+        state = self.__dict__.copy()
+        state["inside"] = np.packbits(self.inside.ravel())
+        state["inside_shape"] = self.inside.shape
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        shape = state.pop("inside_shape")
+        count = int(np.prod(shape))
+        state["inside"] = np.unpackbits(state["inside"], count=count).astype(bool).reshape(shape)
+        self.__dict__.update(state)
+
+    def at(self, flat: np.ndarray) -> np.ndarray:
+        """Signed distance at the given flat cell indices.
+
+        The band is sorted, so a lookup is a binary search rather than a dense array: reconstituting
+        the whole grid as floats would cost 298 MB on the part in ``assets/`` at 2.5 mm, to answer
+        questions that only ever touch the surface.
+
+        Off the band the answer is the reach, signed. That is not an approximation - it is what the
+        field knows about a distant cell, which is which side of the surface it is on.
+        """
+        flat = np.asarray(flat)
+        position = np.clip(np.searchsorted(self.band_index, flat), 0, self.band_index.size - 1)
+        on_band = self.band_index[position] == flat
+        far = np.where(self.inside.ravel()[flat], -self.reach_mm, self.reach_mm)
+        return np.where(on_band, self.band_mm[position], far).astype(np.float32)
+
     def sample(self, points: np.ndarray) -> np.ndarray:
         """Signed distance at arbitrary points, by nearest cell.
 
@@ -125,21 +239,20 @@ class Field:
             (np.asarray(points, dtype=float) - np.asarray(grid.origin)) / grid.spacing_mm
         ).astype(np.int64)
         index = np.clip(index, 0, np.asarray(grid.shape) - 1)
-        flat = np.ravel_multi_index((index[:, 0], index[:, 1], index[:, 2]), grid.shape)
-
-        far = np.where(self.inside.ravel()[flat], -self.reach_mm, self.reach_mm)
-        position = np.searchsorted(self.band_index, flat)
-        position = np.clip(position, 0, self.band_index.size - 1)
-        on_band = self.band_index[position] == flat
-        return np.where(on_band, self.band_mm[position], far)
+        return self.at(np.ravel_multi_index((index[:, 0], index[:, 1], index[:, 2]), grid.shape))
 
 
 def build_field(
     tess: Tessellation,
     spacing_mm: float | None = None,
     source_digest: str = "",
+    headroom_mm: float | None = None,
+    grid: Grid | None = None,
 ) -> Field:
     """Sample a watertight tessellation into a narrow-band signed distance field.
+
+    ``grid`` samples onto a lattice that already exists instead of one fitted to this surface. Two
+    versions of a part can only be combined cell by cell if they were sampled at the same points.
 
     Three passes, in this order, because each needs the one before it.
 
@@ -151,18 +264,20 @@ def build_field(
     **Sign**, by connectivity away from the surface and by ray parity within half a voxel of it -
     each method used only where it is sound. See :func:`_classify`.
     """
-    if spacing_mm is None:
-        lo, hi = tess.vertices.min(axis=0), tess.vertices.max(axis=0)
-        spacing_mm = scale_spacing(float(np.linalg.norm(hi - lo)))
-
-    grid = _grid_for(tess, spacing_mm)
-    reach = BAND_VOXELS * spacing_mm
+    if grid is None:
+        spacing_mm, headroom_mm = _resolved(tess, spacing_mm, headroom_mm)
+        grid = _grid_for(tess, spacing_mm, headroom_mm)
+    elif headroom_mm is None:
+        headroom_mm = 0.0
+    reach = BAND_VOXELS * grid.spacing_mm
 
     distance = _unsigned_distance(tess, grid, reach)
     inside = _classify(tess, grid, distance)
 
     band_mask = distance <= reach
-    band_index = np.flatnonzero(band_mask.ravel()).astype(np.int64)
+    # int32 halves what the band costs to hold and to store, and a grid large enough to overflow it
+    # would need two billion cells - four times the dense count of the largest case measured.
+    band_index = np.flatnonzero(band_mask.ravel()).astype(np.int32)
     signed = distance.ravel()[band_index]
     signed[inside.ravel()[band_index]] *= -1.0
 
@@ -172,17 +287,90 @@ def build_field(
         band_mm=signed.astype(np.float32),
         inside=inside,
         reach_mm=reach,
+        headroom_mm=float(headroom_mm),
         source_digest=source_digest,
     )
 
 
-def _grid_for(tess: Tessellation, spacing_mm: float) -> Grid:
-    """A lattice with room for the band and two cells of margin outside it.
+def field_for(
+    root: Path,
+    tess: Tessellation,
+    source_digest: str,
+    spacing_mm: float | None = None,
+    reuse: bool = True,
+    headroom_mm: float | None = None,
+) -> tuple[Field, bool]:
+    """The field for one geometry, built once and kept. Returns it and whether it was already there.
 
-    The margin is not slack. A design adds material, so the field has to have somewhere to put it,
-    and the band needs open space on the far side of every surface to reach into.
+    Three minutes is worth paying once and not worth paying on every restart. The key is the CAD's
+    own digest and the voxel size, so a different file or a different resolution is a different
+    field rather than a stale one.
     """
-    pad = (BAND_VOXELS + 2) * spacing_mm
+    spacing_mm, headroom_mm = _resolved(tess, spacing_mm, headroom_mm)
+    key = field_key(tess, source_digest, spacing_mm, headroom_mm)
+    item = cache.entry(root, "field", key)
+    found, hit = cache.memoise(
+        item,
+        lambda: build_field(
+            tess,
+            spacing_mm=spacing_mm,
+            source_digest=source_digest,
+            headroom_mm=headroom_mm,
+        ),
+        reuse=reuse,
+    )
+    found.key = key
+    return found, hit
+
+
+def field_key(
+    tess: Tessellation,
+    source_digest: str,
+    spacing_mm: float | None = None,
+    headroom_mm: float | None = None,
+) -> str:
+    """What a field is stored under. The one place that says so.
+
+    Asking whether a field is already built has to compute exactly the key building it would
+    store under; a second copy of this rule that left the headroom out made every built field
+    read as unbuilt.
+    """
+    spacing_mm, headroom_mm = _resolved(tess, spacing_mm, headroom_mm)
+    return cache.key_for(source_digest, f"{spacing_mm:.6f}", f"{headroom_mm:.6f}", code=CODE)
+
+
+def _resolved(
+    tess: Tessellation, spacing_mm: float | None, headroom_mm: float | None
+) -> tuple[float, float]:
+    """The spacing and headroom a request means, with the part's own defaults filled in."""
+    lo, hi = tess.vertices.min(axis=0), tess.vertices.max(axis=0)
+    diagonal = float(np.linalg.norm(hi - lo))
+    if spacing_mm is None:
+        spacing_mm = scale_spacing(diagonal)
+    if headroom_mm is None:
+        headroom_mm = scale_headroom(diagonal, spacing_mm)
+    return spacing_mm, headroom_mm
+
+
+def _grid_for(tess: Tessellation, spacing_mm: float, headroom_mm: float) -> Grid:
+    """A lattice with room for the band, and for whatever a design is going to add.
+
+    The margin is not slack. A design adds material and the grid is fixed, so a rib taller than the
+    space above the part gets quietly cut off by the edge of the lattice - which looks like a dial
+    that stops working halfway along rather than like a grid that is too small.
+
+    The extra half voxel is what keeps samples **off** the surface. Machined faces sit at round
+    coordinates, so a lattice starting a whole number of voxels below the bounding box puts sample
+    points exactly on them - where the distance is zero, the sign is a coin toss, and a flat face
+    comes back a voxel out of place. Half a voxel of offset costs nothing and removes the case.
+    """
+    # Rounded up to a whole voxel and then offset by half of one, so the padding is a half-integer
+    # number of voxels whatever was asked for. Adding a fixed half to an arbitrary millimetre
+    # figure does not work: headroom of 87.5 mm on a 5 mm voxel lands back on a whole number, and
+    # then sample points sit exactly on axis-aligned faces again - where the distance is zero, the
+    # sign is a coin toss, and the encoding of "on the surface but solid" is negative zero.
+    wanted = max(headroom_mm, (BAND_VOXELS + 2) * spacing_mm)
+    pad = (math.ceil(wanted / spacing_mm) + 0.5) * spacing_mm
     lo = tess.vertices.min(axis=0) - pad
     hi = tess.vertices.max(axis=0) + pad
     shape = tuple(int(math.ceil((hi[axis] - lo[axis]) / spacing_mm)) + 1 for axis in range(3))

@@ -108,6 +108,21 @@ class FaceRecord:
     including the tori, cones, spheres and b-splines that have no analytic normal at all.
     """
 
+    facing: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    """The way the face points overall: its area-weighted mean triangle normal, unit length.
+
+    Measured from the tessellation, so it exists for every surface type. It is the direction a rib
+    placed on this face would rise in, and the direction selection growing measures against.
+    """
+
+    flatness: float = 0.0
+    """How much of a single direction this face has. One on a plane, zero on a full cylinder.
+
+    The length of the mean normal before it was normalised. A face that wraps around cancels itself
+    out, and :attr:`facing` becomes meaningless - this is what says so, rather than a caller having
+    to know which surface types curve.
+    """
+
     @property
     def area(self) -> float:
         """The area to actually use. Falls back to the tessellation where OCC returns nonsense."""
@@ -166,22 +181,34 @@ class Atlas:
         max_dihedral_deg: float = 40.0,
         max_faces: int = 5000,
     ) -> set[int]:
-        """Flood a selection across edges while the surface stays smooth.
+        """Flood a selection outward while the surface keeps facing the way the seed faces.
 
-        This is what turns one click into a whole rib. A rib is six to ten faces plus its root
-        fillets, all meeting at shallow angles, and it ends at the sharp crease where it joins the
-        wall. Walking that crease is the natural boundary, so the angle threshold is the one
-        control the user needs.
+        This is what turns one click into the region a rib can stand on, and the angle is the one
+        control: **no face may point more than this far from the face you started on.**
 
-        The angle is the **measured dihedral at the shared edge**, from
-        :func:`_edge_dihedrals`, not the angle between face-average normals. An implementation
-        using average normals grows nothing, for two independent reasons. Every torus, cone,
-        sphere and b-spline has no analytic normal at all - on real CAD that is roughly half the
-        faces - so half the part is silently unwalkable. And a face-average normal is meaningless
-        for a curved face anyway: a full 360 degree cylinder averages to roughly zero, so even the
-        faces that have one cannot be compared.
+        Two gates, and the second is the one that matters. The first is the measured dihedral at
+        the shared edge, which stops the walk at a crease. The second compares each candidate's
+        :attr:`FaceRecord.facing` against the seed's.
+
+        The dihedral gate alone is not enough, and on real CAD it is not even close. A cast housing
+        is tangent-continuous nearly everywhere - on the part in ``assets/``, 60% of all face
+        boundaries bend by less than five degrees, because every corner is a fillet that flows into
+        both surfaces it joins. A per-edge test has no memory, so a walk turns through ninety
+        degrees in ten nine-degree steps while every single step passes a forty-degree gate, and
+        one click takes the whole shell. Measuring against the seed instead of against the previous
+        face is what gives the threshold something to hold on to.
+
+        Where the seed has no direction of its own - a full cylinder cancels itself out, and
+        :attr:`FaceRecord.flatness` says so - nothing passes the second gate and the selection
+        stays as it was. Refusing to spread is the honest answer there: a bore faces every way at
+        once, so "faces pointing the same way as this one" has no meaning to compute.
         """
         selected = {int(s) for s in seed}
+        aim = self._facing_of(selected)
+        if aim is None:
+            return selected
+
+        limit = math.cos(math.radians(max_dihedral_deg))
         frontier = list(selected)
 
         while frontier and len(selected) < max_faces:
@@ -191,10 +218,29 @@ class Atlas:
             for neighbour_id, angle in current.dihedral.items():
                 if neighbour_id in selected or angle > max_dihedral_deg:
                     continue
+                neighbour = self.faces.get(neighbour_id)
+                if neighbour is None or _dot(neighbour.facing, aim) < limit:
+                    continue
                 selected.add(neighbour_id)
                 frontier.append(neighbour_id)
 
         return selected
+
+    def _facing_of(self, seed: set[int]) -> tuple[float, float, float] | None:
+        """The direction a seed selection points, area-weighted. ``None`` if it has none."""
+        total = [0.0, 0.0, 0.0]
+        for face_id in seed:
+            face = self.faces.get(face_id)
+            if face is None:
+                continue
+            weight = face.area * face.flatness
+            for axis in range(3):
+                total[axis] += face.facing[axis] * weight
+
+        length = math.sqrt(sum(v * v for v in total))
+        if length < 1e-9:
+            return None
+        return (total[0] / length, total[1] / length, total[2] / length)
 
     def similar(
         self,
@@ -248,6 +294,7 @@ def build(shape: TopoDS_Shape, tess: Tessellation, geometry_hash: str) -> Atlas:
     exterior = _exterior_faces(tess, diagonal)
 
     dihedrals = _edge_dihedrals(tess)
+    facing, flatness = _face_directions(tess, len(faces))
 
     atlas = Atlas(geometry_hash=geometry_hash, diagonal_mm=diagonal)
     for face_id, face in enumerate(faces):
@@ -256,9 +303,47 @@ def build(shape: TopoDS_Shape, tess: Tessellation, geometry_hash: str) -> Atlas:
         record.neighbours = tuple(sorted(adjacency.get(face_id, set())))
         record.dihedral = dihedrals.get(face_id, {})
         record.exterior = face_id in exterior
+        record.facing = tuple(float(v) for v in facing[face_id])  # type: ignore[assignment]
+        record.flatness = float(flatness[face_id])
         atlas.faces[face_id] = record
 
     return atlas
+
+
+def _dot(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def _face_directions(tess: Tessellation, n_faces: int) -> tuple[np.ndarray, np.ndarray]:
+    """The way each face points, and how much of a single direction it has.
+
+    Area-weighted, so a large panel decides its own direction rather than a sliver at its edge, and
+    taken from the tessellation so that it exists for the tori, cones and b-splines that carry no
+    analytic normal. The weight is deliberately the unnormalised cross product: its length is twice
+    the triangle's area.
+
+    ``flatness`` is the length of the mean direction before normalising. It is one on a plane and
+    falls towards zero as a face wraps, so it is also the test for whether ``facing`` means
+    anything at all - a full cylinder cancels itself out and has no direction to report.
+    """
+    corners = tess.triangles
+    a = tess.vertices[corners[:, 0]]
+    b = tess.vertices[corners[:, 1]]
+    c = tess.vertices[corners[:, 2]]
+
+    weighted = np.cross(b - a, c - a)
+    areas = np.linalg.norm(weighted, axis=1)
+
+    total = np.zeros((n_faces, 3))
+    weight = np.zeros(n_faces)
+    np.add.at(total, tess.face_id, weighted)
+    np.add.at(weight, tess.face_id, areas)
+
+    length = np.linalg.norm(total, axis=1)
+    safe = length[:, None] > 1e-12
+    facing = np.divide(total, length[:, None], out=np.zeros_like(total), where=safe)
+    flatness = np.divide(length, weight, out=np.zeros(n_faces), where=weight > 1e-12)
+    return facing, flatness
 
 
 def _edge_dihedrals(tess: Tessellation) -> dict[int, dict[int, float]]:

@@ -16,7 +16,7 @@
  * needs to guess at a crease angle.
  */
 
-import type { Mesh } from "../api/client";
+import type { Mesh, VoxelCells } from "../api/client";
 
 export type ColourMode = "surface" | "frozen" | "exterior";
 
@@ -62,6 +62,9 @@ uniform sampler2D u_faceState;
 uniform int u_faceStateWidth;
 uniform vec3 u_eye;
 uniform int u_colourMode;
+uniform float u_alpha;
+uniform int u_tinted;
+uniform vec3 u_tint;
 
 out vec4 fragColour;
 
@@ -96,7 +99,13 @@ void main() {
   bool isExterior = state.a > 0.5;
 
   vec3 base = STEEL;
-  if (u_colourMode == 1) {
+  // A tinted pass ignores face state entirely. It is a second surface drawn over the first for
+  // comparison, so it has to read as one object rather than as a selection someone made.
+  if (u_tinted == 1) {
+    base = u_tint;
+    isSelected = false;
+    isHovered = false;
+  } else if (u_colourMode == 1) {
     // Frozen mode answers one question only - what can never move - so everything else stays
     // neutral rather than competing for attention.
     base = isFrozen ? MEASURED : STEEL;
@@ -118,7 +127,7 @@ void main() {
 
   vec3 colour = base * (0.34 + 0.66 * key + fill) + rim * mix(base, vec3(1.0), 0.5);
   colour = mix(colour, INK, 0.04);
-  fragColour = vec4(pow(colour, vec3(0.4545)), 1.0);
+  fragColour = vec4(pow(colour, vec3(0.4545)), u_alpha);
 }`;
 
 const PICK_VERTEX_SHADER = `#version 300 es
@@ -149,6 +158,93 @@ void main() {
   );
 }`;
 
+
+/**
+ * The field's cells, drawn one visible face at a time.
+ *
+ * The field shown as itself. A contour is a reconstruction - one vertex per cell, placed by a fit -
+ * and it can be wrong in ways the field is not; these are the cells exactly as stored, so
+ * blockiness on screen is the resolution rather than an artefact of drawing it.
+ *
+ * **Faces, not cubes.** A cell has six and you can see at most three, so a whole cube each is six
+ * times the work for the same picture - forty-eight million vertices a frame on a 2.5 mm field of
+ * the part in assets/, against ten point eight for its exposed faces.
+ *
+ * Each face arrives as a single integer holding the cell's index and which way it points, and the
+ * grid it indexes into travels once as a uniform. Four bytes a face against twelve for a position.
+ */
+const VOXEL_VERTEX_SHADER = `#version 300 es
+precision highp float;
+
+layout(location = 0) in vec2 a_corner;
+layout(location = 1) in uint a_face;
+
+uniform mat4 u_viewProjection;
+uniform ivec3 u_shape;
+uniform vec3 u_origin;
+uniform float u_size;
+
+out vec3 v_normal;
+out vec3 v_worldPosition;
+
+void main() {
+  // Cell index and face direction, packed into one integer by fastcae.generate.cells. Both halves
+  // are decoded the same way there; changing one without the other silently scatters the cells.
+  uint cell = a_face >> 3u;
+  uint direction = a_face & 7u;
+
+  int nz = u_shape.z;
+  int ny = u_shape.y;
+  int k = int(cell % uint(nz));
+  int j = int((cell / uint(nz)) % uint(ny));
+  int i = int(cell / uint(nz * ny));
+  vec3 centre = u_origin + vec3(i, j, k) * u_size;
+
+  int axis = int(direction >> 1u);
+  float side = (direction & 1u) == 0u ? 1.0 : -1.0;
+  vec3 normal = vec3(axis == 0, axis == 1, axis == 2) * side;
+
+  // Any perpendicular will do for the first axis of the quad; the second follows from the cross
+  // product, which also makes the winding come out counter-clockwise seen from outside.
+  vec3 across = vec3(axis == 1, axis == 2, axis == 0);
+  vec3 up = cross(normal, across);
+
+  vec3 world = centre + normal * (0.5 * u_size) + (across * a_corner.x + up * a_corner.y) * u_size;
+  v_worldPosition = world;
+  v_normal = normal;
+  gl_Position = u_viewProjection * vec4(world, 1.0);
+}`;
+
+const VOXEL_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+
+in vec3 v_normal;
+in vec3 v_worldPosition;
+
+uniform vec3 u_eye;
+uniform vec3 u_tint;
+uniform float u_alpha;
+
+out vec4 fragColour;
+
+void main() {
+  vec3 normal = normalize(v_normal);
+  vec3 viewDirection = normalize(u_eye - v_worldPosition);
+  if (dot(normal, viewDirection) < 0.0) normal = -normal;
+
+  vec3 keyDirection = normalize(vec3(0.45, 0.35, 0.82));
+  float key = max(dot(normal, keyDirection), 0.0);
+  float fill = max(dot(normal, vec3(0.0, 0.0, -1.0)), 0.0) * 0.22;
+  vec3 colour = u_tint * (0.34 + 0.66 * key + fill);
+  fragColour = vec4(pow(colour, vec3(0.4545)), u_alpha);
+}`;
+
+/** Two triangles over a unit square, centred on the origin. Every cell face is this, moved. */
+const QUAD = new Float32Array([
+  -0.5, -0.5, 0.5, -0.5, 0.5, 0.5,
+  -0.5, -0.5, 0.5, 0.5, -0.5, 0.5,
+]);
+
 export class Renderer {
   private gl: WebGL2RenderingContext;
   private program: WebGLProgram;
@@ -162,10 +258,47 @@ export class Renderer {
   private pickTexture: WebGLTexture;
   private pickDepth: WebGLRenderbuffer;
   private pickSize = { width: 0, height: 0 };
-  private vertexCount: number;
+  private indexCount = 0;
+  private overlayIndexCount = 0;
   private faceCount: number;
 
+  /** A second surface drawn over the first, for comparing one against the other. */
+  private overlayVao: WebGLVertexArrayObject | null = null;
+  private overlayBuffers: WebGLBuffer[] = [];
+  private overlayVertexCount = 0;
+
+  /** Everything the GL context is holding for us, so it can all be handed back. */
+  private buffers: WebGLBuffer[] = [];
+
+  /** The field's own cells, drawn as instanced cubes. */
+  private voxelProgram: WebGLProgram | null = null;
+  private voxelVao: WebGLVertexArrayObject | null = null;
+  private voxelBuffers: WebGLBuffer[] = [];
+  private voxelCount = 0;
+  private voxelSize = 1;
+  private voxelShape: [number, number, number] = [1, 1, 1];
+  private voxelOrigin: [number, number, number] = [0, 0, 0];
+
+  /** Colour and opacity of the voxel layer. */
+  voxelTint: [number, number, number] = [0.059, 0.239, 0.569];
+  voxelAlpha = 1.0;
+
   colourMode: ColourMode = "surface";
+
+  /**
+   * Which layers are drawn.
+   *
+   * Visibility only - the buffers stay on the GPU either way. Uploading a surface takes as long as
+   * downloading it, and a contoured field is eighty megabytes, so tearing it down to hide it and
+   * building it again to show it makes a checkbox cost what a fetch costs. In both directions.
+   */
+  showSurface = true;
+  showOverlay = true;
+  showVoxels = true;
+
+  /** Colour and opacity of the overlay pass. Ochre against the steel of the main surface. */
+  overlayTint: [number, number, number] = [0.541, 0.416, 0.122];
+  overlayAlpha = 0.42;
 
   /** The model extent the camera was framed to. Zoom limits derive from it. */
   private extent = 1000;
@@ -189,7 +322,6 @@ export class Renderer {
     const gl = canvas.getContext("webgl2", { antialias: true, depth: true });
     if (!gl) throw new Error("WebGL2 is not available in this browser");
     this.gl = gl;
-    this.vertexCount = mesh.vertexCount;
     this.faceCount = faceCount;
 
     this.program = linkProgram(gl, VERTEX_SHADER, FRAGMENT_SHADER);
@@ -198,18 +330,25 @@ export class Renderer {
     const positionBuffer = createBuffer(gl, mesh.positions);
     const normalBuffer = createBuffer(gl, mesh.normals);
     const faceIdBuffer = createBuffer(gl, mesh.faceIds);
+    const indexBuffer = createIndexBuffer(gl, mesh.indices);
+    this.buffers.push(positionBuffer, normalBuffer, faceIdBuffer, indexBuffer);
+    this.indexCount = mesh.indexCount;
 
     this.vao = gl.createVertexArray()!;
     gl.bindVertexArray(this.vao);
     bindFloatAttribute(gl, positionBuffer, 0, 3);
-    bindFloatAttribute(gl, normalBuffer, 1, 3);
+    bindNormalAttribute(gl, normalBuffer, 1);
     bindIntAttribute(gl, faceIdBuffer, 2);
+    // The element buffer is part of the vertex array's state, so binding it here is what makes
+    // drawElements find it later.
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
     gl.bindVertexArray(null);
 
     this.pickVao = gl.createVertexArray()!;
     gl.bindVertexArray(this.pickVao);
     bindFloatAttribute(gl, positionBuffer, 0, 3);
     bindIntAttribute(gl, faceIdBuffer, 2);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
     gl.bindVertexArray(null);
 
     // One texel per face, wrapped at 512 so the texture stays square-ish for any part size.
@@ -293,9 +432,166 @@ export class Renderer {
     gl.bindTexture(gl.TEXTURE_2D, this.faceStateTexture);
     gl.uniform1i(gl.getUniformLocation(this.program, "u_faceState"), 0);
 
-    gl.bindVertexArray(this.vao);
-    gl.drawArrays(gl.TRIANGLES, 0, this.vertexCount);
+    const alpha = gl.getUniformLocation(this.program, "u_alpha");
+    const tinted = gl.getUniformLocation(this.program, "u_tinted");
+
+    gl.uniform1f(alpha, 1.0);
+    gl.uniform1i(tinted, 0);
+    if (this.showSurface) {
+      gl.bindVertexArray(this.vao);
+      gl.drawElements(gl.TRIANGLES, this.indexCount, gl.UNSIGNED_INT, 0);
+    }
+
+    if (this.showVoxels && this.voxelProgram && this.voxelVao && this.voxelCount > 0) {
+      gl.useProgram(this.voxelProgram);
+      const at = (name: string) => gl.getUniformLocation(this.voxelProgram!, name);
+      gl.uniformMatrix4fv(at("u_viewProjection"), false, viewProjection);
+      gl.uniform3fv(at("u_eye"), eye);
+      gl.uniform1f(at("u_size"), this.voxelSize);
+      gl.uniform3iv(at("u_shape"), this.voxelShape);
+      gl.uniform3fv(at("u_origin"), this.voxelOrigin);
+      gl.uniform3fv(at("u_tint"), this.voxelTint);
+      gl.uniform1f(at("u_alpha"), this.voxelAlpha);
+      gl.bindVertexArray(this.voxelVao);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.voxelCount);
+      gl.useProgram(this.program);
+    }
+
+    // The comparison pass. Blended and depth-tested but not depth-writing, so the transparent
+    // surface never hides a part of itself that happens to be drawn later - which on a casting
+    // with a hundred separate pockets would look like holes in the ghost rather than depth.
+    if (this.showOverlay && this.overlayVao && this.overlayVertexCount > 0) {
+      // Depth writing goes off only while the surface is see-through, and that is the whole
+      // reason: a translucent shell that writes depth hides parts of itself, which on a casting
+      // with a hundred pockets reads as holes rather than as depth. An **opaque** surface drawn
+      // the same way has the opposite problem - far triangles drawn after near ones paint straight
+      // over them - so it looks transparent when it is not.
+      const seeThrough = this.overlayAlpha < 0.999;
+      if (seeThrough) {
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.depthMask(false);
+        // Pulled a hair towards the camera. The two surfaces are the same surface - a contour of a
+        // field built from that very geometry - so they sit within a fraction of a millimetre of
+        // each other, which is below what a depth buffer can separate. Without the bias the depth
+        // test passes and fails in patches and the overlay comes back stippled, which reads as a
+        // strange material rather than as the numerical noise it is.
+        gl.enable(gl.POLYGON_OFFSET_FILL);
+        gl.polygonOffset(-1.0, -1.0);
+      }
+      gl.uniform1f(alpha, this.overlayAlpha);
+      gl.uniform1i(tinted, 1);
+      gl.uniform3fv(gl.getUniformLocation(this.program, "u_tint"), this.overlayTint);
+      gl.bindVertexArray(this.overlayVao);
+      gl.drawElements(gl.TRIANGLES, this.overlayIndexCount, gl.UNSIGNED_INT, 0);
+      if (seeThrough) {
+        gl.depthMask(true);
+        gl.disable(gl.BLEND);
+        gl.disable(gl.POLYGON_OFFSET_FILL);
+        gl.polygonOffset(0.0, 0.0);
+      }
+    }
     gl.bindVertexArray(null);
+  }
+
+  /**
+   * Show the field's cells, or take them away.
+   *
+   * One instanced quad per visible cell face. ``faces`` holds the cell's index and the direction
+   * packed into one integer, decoded in the vertex shader against ``shape`` and ``origin``.
+   */
+  setVoxels(cells: VoxelCells | null): void {
+    const gl = this.gl;
+    if (this.voxelVao) {
+      gl.deleteVertexArray(this.voxelVao);
+      for (const buffer of this.voxelBuffers) gl.deleteBuffer(buffer);
+      this.voxelVao = null;
+      this.voxelBuffers = [];
+      this.voxelCount = 0;
+    }
+    if (!cells || cells.faces.length === 0) return;
+
+    if (!this.voxelProgram) {
+      this.voxelProgram = linkProgram(gl, VOXEL_VERTEX_SHADER, VOXEL_FRAGMENT_SHADER);
+    }
+    const quadBuffer = createBuffer(gl, QUAD);
+    const faceBuffer = createBuffer(gl, cells.faces);
+    this.voxelBuffers = [quadBuffer, faceBuffer];
+
+    this.voxelVao = gl.createVertexArray()!;
+    gl.bindVertexArray(this.voxelVao);
+    bindFloatAttribute(gl, quadBuffer, 0, 2);
+    bindIntAttribute(gl, faceBuffer, 1);
+    // One face per quad rather than per vertex. Without the divisor the same square is drawn a
+    // million times in the same place.
+    gl.vertexAttribDivisor(1, 1);
+    gl.bindVertexArray(null);
+
+    this.voxelCount = cells.faces.length;
+    this.voxelSize = cells.size;
+    this.voxelShape = cells.shape;
+    this.voxelOrigin = cells.origin;
+  }
+
+  /**
+   * Put a second surface over the first, or take it away.
+   *
+   * Picking is unaffected: it runs against the main surface only, so whichever mesh carries real
+   * CAD face ids should be the one passed to the constructor.
+   */
+  setOverlay(mesh: Mesh | null): void {
+    const gl = this.gl;
+    if (this.overlayVao) {
+      gl.deleteVertexArray(this.overlayVao);
+      // The buffers too. Deleting only the array object leaks the vertices it referenced, which on
+      // a contoured field is tens of megabytes per switch.
+      for (const buffer of this.overlayBuffers) gl.deleteBuffer(buffer);
+      this.overlayBuffers = [];
+      this.overlayVao = null;
+      this.overlayVertexCount = 0;
+      this.overlayIndexCount = 0;
+    }
+    if (!mesh) return;
+
+    const position = createBuffer(gl, mesh.positions);
+    const normal = createBuffer(gl, mesh.normals);
+    const faceId = createBuffer(gl, mesh.faceIds);
+    const index = createIndexBuffer(gl, mesh.indices);
+    this.overlayBuffers = [position, normal, faceId, index];
+
+    this.overlayVao = gl.createVertexArray()!;
+    gl.bindVertexArray(this.overlayVao);
+    bindFloatAttribute(gl, position, 0, 3);
+    bindNormalAttribute(gl, normal, 1);
+    bindIntAttribute(gl, faceId, 2);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, index);
+    gl.bindVertexArray(null);
+    this.overlayVertexCount = mesh.vertexCount;
+    this.overlayIndexCount = mesh.indexCount;
+  }
+
+  /**
+   * Hand everything back to the GL context.
+   *
+   * Not optional. A renderer is replaced whenever the mesh it was built for changes, and a browser
+   * will not collect GPU buffers on its own - so without this, switching between two views of a
+   * part leaks both meshes every time, and a contoured field is hundreds of megabytes.
+   */
+  dispose(): void {
+    const gl = this.gl;
+    this.setOverlay(null);
+    this.setVoxels(null);
+    if (this.voxelProgram) gl.deleteProgram(this.voxelProgram);
+    for (const buffer of this.buffers) gl.deleteBuffer(buffer);
+    this.buffers = [];
+    gl.deleteVertexArray(this.vao);
+    gl.deleteVertexArray(this.pickVao);
+    gl.deleteTexture(this.faceStateTexture);
+    gl.deleteTexture(this.pickTexture);
+    gl.deleteRenderbuffer(this.pickDepth);
+    gl.deleteFramebuffer(this.pickFramebuffer);
+    gl.deleteProgram(this.program);
+    gl.deleteProgram(this.pickProgram);
   }
 
   /**
@@ -321,7 +617,7 @@ export class Renderer {
     );
     gl.uniformMatrix4fv(gl.getUniformLocation(this.pickProgram, "u_model"), false, IDENTITY);
     gl.bindVertexArray(this.pickVao);
-    gl.drawArrays(gl.TRIANGLES, 0, this.vertexCount);
+    gl.drawElements(gl.TRIANGLES, this.indexCount, gl.UNSIGNED_INT, 0);
     gl.bindVertexArray(null);
 
     const pixel = new Uint8Array(4);
@@ -467,11 +763,25 @@ function linkProgram(gl: WebGL2RenderingContext, vertexSource: string, fragmentS
   return program;
 }
 
-function createBuffer(gl: WebGL2RenderingContext, data: Float32Array | Uint32Array) {
+function createBuffer(gl: WebGL2RenderingContext, data: Float32Array | Uint32Array | Int8Array) {
   const buffer = gl.createBuffer()!;
   gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
   gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
   return buffer;
+}
+
+function createIndexBuffer(gl: WebGL2RenderingContext, data: Uint32Array) {
+  const buffer = gl.createBuffer()!;
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffer);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, data, gl.STATIC_DRAW);
+  return buffer;
+}
+
+/** Three signed bytes of a unit vector, read back as floats. Half a degree, a third of the bytes. */
+function bindNormalAttribute(gl: WebGL2RenderingContext, buffer: WebGLBuffer, location: number) {
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.enableVertexAttribArray(location);
+  gl.vertexAttribPointer(location, 3, gl.BYTE, true, 4, 0);
 }
 
 function bindFloatAttribute(

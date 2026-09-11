@@ -24,7 +24,7 @@ export function Inspector(props: InspectorProps) {
   const { face, selection } = props;
 
   return (
-    <aside className="inspector">
+    <div className="selection-panel">
       <section className="section">
         <header>
           Selection {selection ? <span className="count">{selection.count} faces</span> : null}
@@ -172,6 +172,6 @@ export function Inspector(props: InspectorProps) {
           ) : null}
         </>
       ) : null}
-    </aside>
+    </div>
   );
 }

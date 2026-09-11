@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from . import cache
 from . import drawing as drawing_reader
 from .drawing import CalloutKind, DrawingRead
 from .features import FeatureKind, FeatureSet
@@ -33,12 +34,11 @@ from .geometry import (
     check,
     declared_unit,
     exact_properties,
-    load_step,
     tessellate,
 )
 from .geometry.atlas import Atlas
 from .geometry.atlas import build as build_atlas
-from .geometry.brep import INTERNAL_UNIT
+from .geometry.brep import INTERNAL_UNIT, load_cad
 from .project import Artifact, ArtifactKind, Project
 from .provenance import Conflict, Evidence, Fact, ProvenanceLog, SourceKind
 
@@ -64,6 +64,19 @@ MAX_MATCH_TOL_MM = 0.5
 # features - so separation from the next-best candidate is the only evidence that a match
 # identifies one feature rather than picking arbitrarily among several.
 DISCRIMINATION_MARGIN = 0.5
+
+# The modules a stored extraction depends on. Naming them keeps a change to the interface, a route
+# or the field from throwing away a result none of them could have affected.
+CODE = (
+    "extract.py",
+    "project.py",
+    "drawing.py",
+    "features.py",
+    "provenance.py",
+    "geometry/brep.py",
+    "geometry/health.py",
+    "geometry/atlas.py",
+)
 
 
 class StepStatus(StrEnum):
@@ -110,12 +123,22 @@ class Extraction:
     def first(self, kind: ArtifactKind) -> Artifact | None:
         return next((a for a in self.artifacts if a.kind is kind), None)
 
+    def baseline(self) -> Artifact | None:
+        """The CAD this extraction reads: the one the project names as baseline, if it was offered,
+        otherwise the first CAD offered."""
+        named = self.project.roles().get("baseline")
+        cad = [a for a in self.artifacts if a.kind is ArtifactKind.CAD]
+        return next((a for a in cad if a.name == named), cad[0] if cad else None)
+
     # Products, present only if the step that makes them ran.
     shape: Any | None = None
     """The loaded B-rep. Held so later steps can measure it without re-reading the file."""
 
     cad_digest: str = ""
     """Content hash of the CAD that was read. Everything measured from it is bound to this."""
+
+    from_cache: bool = False
+    """Whether this came back from disk rather than being computed. Reported, never acted on."""
 
     exact: ExactProperties | None = None
     tess: Tessellation | None = None
@@ -164,18 +187,42 @@ class Extraction:
         return "\n".join(lines)
 
 
-def run(project: Project, artifacts: list[Artifact] | None = None) -> Extraction:
+def run(
+    project: Project,
+    artifacts: list[Artifact] | None = None,
+    reuse: bool = True,
+) -> Extraction:
     """Extract what a project's artifacts state. Never raises for a missing artifact, only a
     broken one.
 
     ``artifacts`` overrides what the folder contains, so a caller can point at files elsewhere or
     substitute one of them. Discovery is the default rather than the only option: a person editing
     a path in the interface is choosing what to extract, and that choice has to reach here.
+
+    ``reuse`` returns a cached result when the same files have already been read by the same code.
+    Set it False to read the files again, which is what a *re-extract* means.
     """
-    result = Extraction(project=project, artifacts=artifacts or project.artifacts())
+    chosen = artifacts or project.artifacts()
+    # The roles decide which CAD is read, so they are part of what the result depends on.
+    roles = ",".join(f"{role}={name}" for role, name in sorted(project.roles().items()))
+    key = cache.key_for(*_fingerprint(chosen), f"roles:{roles}", code=CODE)
+    item = cache.entry(project.root, "extract", key)
+
+    result, hit = cache.memoise(item, lambda: _run(project, chosen), reuse=reuse)
+    result.from_cache = hit
+    return result
+
+
+def _fingerprint(artifacts: list[Artifact]) -> list[str]:
+    """What the result depends on: which files, and exactly what is in them."""
+    return [f"{a.path}:{a.kind}:{a.digest()}" for a in artifacts]
+
+
+def _run(project: Project, artifacts: list[Artifact]) -> Extraction:
+    result = Extraction(project=project, artifacts=artifacts)
 
     discovered = _step(result, "discover", "Discover artifacts", _discover)
-    cad = result.first(ArtifactKind.CAD)
+    cad = result.baseline()
     dwg = result.first(ArtifactKind.DRAWING)
 
     if discovered.status is StepStatus.FAILED:
@@ -230,6 +277,10 @@ def run(project: Project, artifacts: list[Artifact] | None = None) -> Extraction
         available=result.features is not None and result.drawing is not None,
     )
 
+    # The B-rep does not survive being stored, and nothing after this point asks for it: health and
+    # the atlas are the only two steps that read it, and both have run. Dropping it here rather
+    # than at the cache boundary keeps a restored result identical to a fresh one.
+    result.shape = None
     return result
 
 
@@ -299,9 +350,20 @@ def _discover(result: Extraction) -> str:
             for a in artifacts
         ],
         "by_kind": {k: len(v) for k, v in by_kind.items()},
+        "roles": result.project.roles(),
     }
-    if not any(a.kind is ArtifactKind.CAD for a in artifacts):
+    cad = [a.name for a in artifacts if a.kind is ArtifactKind.CAD]
+    if not cad:
         step.warnings.append("no CAD in this project - nothing downstream can run")
+    named = result.project.roles().get("baseline")
+    if named is not None and named not in cad:
+        step.warnings.append(f"the baseline is named as {named}, which is not among the files read")
+    if len(cad) > 1 and named not in cad:
+        chosen = result.baseline()
+        step.warnings.append(
+            f"{len(cad)} CAD files and none named as baseline; reading "
+            f"{chosen.name if chosen else cad[0]} because its name sorts first"
+        )
     if not any(a.kind is ArtifactKind.DRAWING for a in artifacts):
         step.warnings.append(
             "no drawing - sizes will be as modelled, with nothing stating which are controlled"
@@ -315,14 +377,16 @@ def _discover(result: Extraction) -> str:
 
 def _load_cad(result: Extraction, artifact: Artifact | None) -> str:
     assert artifact is not None
-    shape = load_step(artifact.path)
+    shape, notes = load_cad(artifact.path)
     result.exact = exact_properties(shape)
     result.shape = shape
     result.cad_digest = artifact.digest()
 
-    unit = declared_unit(artifact.path)
+    unit = declared_unit(artifact.path) if artifact.path.suffix.lower() != ".brep" else "unstated"
     step = result.steps[-1]
+    step.warnings.extend(notes)
     step.produced = {
+        "file": artifact.name,
         "digest": result.cad_digest,
         "declared_unit": unit,
         "read_as": INTERNAL_UNIT.lower(),
@@ -627,7 +691,7 @@ def _drawing_evidence(result: Extraction, page: int, raw: str, detail: str) -> E
 
 
 def _cad_evidence(result: Extraction, feature_id: str, detail: str) -> Evidence:
-    artifact = result.first(ArtifactKind.CAD)
+    artifact = result.baseline()
     name = artifact.name if artifact else "the CAD"
     return Evidence(
         kind=SourceKind.CAD,

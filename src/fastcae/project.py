@@ -1,8 +1,13 @@
-"""A project: a folder of artifacts, and nothing else.
+"""A project: a folder of artifacts, and the decisions a person has made about them.
 
 The whole configuration surface of the platform. A project is a directory; its **name is the
 directory's name**; its artifacts are the files inside it, classified by extension. There is no
-manifest, no schema to fill in, no per-part code path.
+schema to fill in and no per-part code path.
+
+**Decisions live in one file.** Which of two CAD files a design grows from is a *role*, and a role
+cannot be read out of geometry. ``project.json`` holds those decisions, and only those: a person
+makes them, the system checks them before writing, and a project without the file behaves exactly
+as if nobody had decided anything.
 
 That is the point. Dropping a `DEEPJEB_Bracket/` folder beside `GRC_Gearbox_Housing/` makes a
 second project, and if it contains a STEP file and no drawing then the system has a STEP file and
@@ -16,11 +21,21 @@ hand-written fact is indistinguishable, three stages later, from one that was me
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
 
 ASSETS_ROOT = Path("assets")
+
+# The file a project's decisions are written to. Not an artifact: it says things *about* the
+# artifacts, and listing it among them would offer it up for extraction as data.
+DATA_FILE_NAME = "project.json"
+
+# The roles a CAD file can hold. The baseline is what every design grows from; the reference is
+# another version of the same part, kept to compare against.
+ROLES = ("baseline", "reference")
 
 
 class ArtifactKind(StrEnum):
@@ -126,7 +141,7 @@ class Project:
                 size_bytes=path.stat().st_size,
             )
             for path in sorted(self.root.iterdir())
-            if path.is_file() and not path.name.startswith(".")
+            if path.is_file() and not path.name.startswith(".") and path.name != DATA_FILE_NAME
         ]
         order = list(ArtifactKind)
         return sorted(found, key=lambda a: (order.index(a.kind), a.path.name))
@@ -143,6 +158,56 @@ class Project:
         """
         of_kind = self.of_kind(kind)
         return of_kind[0] if of_kind else None
+
+    # --- decisions ---------------------------------------------------------------------------
+
+    def data(self) -> dict[str, Any]:
+        """Everything written to ``project.json``, or nothing if there is no such file."""
+        path = self.root / DATA_FILE_NAME
+        if not path.is_file():
+            return {}
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def write_data(self, section: str, value: Any) -> None:
+        """Replace one section of ``project.json``, keeping every other section as it was."""
+        data = self.data()
+        data[section] = value
+        (self.root / DATA_FILE_NAME).write_text(
+            json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+
+    def roles(self) -> dict[str, str]:
+        """Which file holds which role, by name. Empty when nobody has said."""
+        return dict(self.data().get("roles", {}))
+
+    def set_roles(self, **roles: str) -> None:
+        """Record which CAD file holds each role.
+
+        Checked before anything is written. A role naming a file that is not there, or one that is
+        not CAD, would fall back to whichever file happens to sort first - the silent choice a
+        role exists to replace.
+        """
+        cad = {a.name for a in self.of_kind(ArtifactKind.CAD)}
+        for role, name in roles.items():
+            if role not in ROLES:
+                raise ValueError(f"{role!r} is not a role; roles are {', '.join(ROLES)}")
+            if name not in cad:
+                raise ValueError(f"{name!r} is not a CAD file in {self.root.name}")
+        self.write_data("roles", dict(roles))
+
+    def baseline(self) -> Artifact | None:
+        """The CAD every design grows from: the one named as baseline, else the first CAD."""
+        return self._holding("baseline") or self.first(ArtifactKind.CAD)
+
+    def reference(self) -> Artifact | None:
+        """The CAD kept to compare against, if one is named. Never guessed."""
+        return self._holding("reference")
+
+    def _holding(self, role: str) -> Artifact | None:
+        name = self.roles().get(role)
+        if name is None:
+            return None
+        return next((a for a in self.of_kind(ArtifactKind.CAD) if a.name == name), None)
 
 
 def classify(path: Path) -> Artifact:

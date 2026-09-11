@@ -26,6 +26,38 @@ export const PRODUCT = {
 } as const;
 
 /**
+ * The three ways to look at what is open.
+ *
+ * `field` is the distance field a design is edited in, drawn against the surface it was built
+ * from - the only way to see what the representation kept and what it cost.
+ */
+export type View = "drawing" | "geometry" | "field" | "generate";
+
+/** The tabs on the stage, in the order the work happens. */
+export const VIEWS: { id: View; label: string; summary: string }[] = [
+  {
+    id: "drawing",
+    label: "Drawing",
+    summary: "What the drawing states, callout by callout, beside the text it was read from.",
+  },
+  {
+    id: "geometry",
+    label: "Geometry",
+    summary: "The CAD as read: faces, axes and the features detected on them.",
+  },
+  {
+    id: "field",
+    label: "Field",
+    summary: "The distance field a design is edited in, and what it reproduces.",
+  },
+  {
+    id: "generate",
+    label: "Generate",
+    summary: "Levers on the geometry, and the variants they produce.",
+  },
+];
+
+/**
  * The stages of the product, shown in full whether or not each one is built yet.
  *
  * Deliberately visible before they work. A shell that hides its unbuilt stages describes a tool;

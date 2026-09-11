@@ -7,6 +7,7 @@ from .brep import (
     declared_unit,
     exact_properties,
     faces_of,
+    load_cad,
     load_step,
     tessellate,
 )
@@ -21,6 +22,7 @@ __all__ = [
     "declared_unit",
     "exact_properties",
     "faces_of",
+    "load_cad",
     "load_step",
     "tessellate",
 ]

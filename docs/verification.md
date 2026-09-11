@@ -1,7 +1,8 @@
 # Verification
 
-**Not built.** Every other file in `docs/` describes what runs today. This one describes what is
-meant to, so that it can be built without being re-invented.
+**Not built.** This describes what is meant to run, so that it can be built without being
+re-invented. [tasks.md](tasks.md) is the mechanism it uses; [status.md](status.md) says what
+actually runs.
 
 ---
 

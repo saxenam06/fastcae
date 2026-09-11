@@ -124,7 +124,7 @@ and knows what it could not settle. So the Extract stage opens on the queue, not
 |  [ ] Label the Ø14 holes on the model     unblocks 4 callouts|
 |      tried: no pattern detected at that size                 |
 |                                                              |
-|  What was read >                                             |
+|  Drawing  ·  Geometry  ·  Field >                            |
 +-------------------------------------------------------------+
 ```
 

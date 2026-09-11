@@ -12,8 +12,10 @@ that part.
 from __future__ import annotations
 
 import struct
+import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from pathlib import Path
 
 import numpy as np
@@ -21,12 +23,27 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from .. import cache
 from ..extract import Extraction
 from ..extract import run as run_extract
+from ..generate import Field as DistanceField
+from ..generate import corrections, field_for
+from ..generate import designs as design_space
+from ..generate.cells import exposed_faces
+from ..generate.corrections import reference_field_for
+from ..generate.design import Design, Parameter, apply, host_from, rib_on
+from ..generate.field import field_key as key_of_field
+from ..generate.formations import FORMATIONS
+from ..generate.primitives import Slab
+from ..generate.shading import corner_normals
+from ..generate.surface import CODE as SURFACE_CODE
+from ..generate.surface import Surface, contour, surface_for
+from ..generate.zones import major_axes, propose
 from ..project import ASSETS_ROOT, ArtifactKind, Project, classify, discover, open_project
 from ..provenance import Evidence, Fact
+from . import mesh as mesh_format
 
-MESH_MAGIC = b"FCMESH02"
+VOXEL_MAGIC = b"FCVOXL02"
 
 
 @dataclass
@@ -36,6 +53,22 @@ class State:
     project: Project | None = None
     extraction: Extraction | None = None
     mesh_blob: bytes | None = None
+    field: DistanceField | None = None
+    surface: Surface | None = None
+    surface_blob: bytes | None = None
+
+    # Generate. Parameters are somebody's choices and live only for the session: until there is a
+    # place to confirm and keep them, writing them down would be inventing provenance.
+    parameters: list[Parameter] = dataclass_field(default_factory=list)
+    next_parameter: int = 0
+    design: DistanceField | None = None
+    design_surface: Surface | None = None
+    design_blob: bytes | None = None
+
+    # Formations. The design space is opened once and every design is made in it.
+    space: design_space.DesignSpace | None = None
+    made: design_space.Design | None = None
+    made_blob: bytes | None = None
 
     @property
     def stage(self) -> str:
@@ -84,6 +117,56 @@ class ExtractRequest(BaseModel):
     Sent when someone has edited a path in the interface. Absent means "use the folder".
     """
 
+    reuse: bool = True
+    """Whether a result already read from these files may be returned instead of reading again.
+
+    False is what *re-extract* means. Not a cache repair - the cache is keyed on the content of the
+    files and on the code that read them, so it cannot go stale on its own - but a way to say "read
+    it again" when the reason sits outside both.
+    """
+
+
+class FieldRequest(BaseModel):
+    spacing_mm: float | None = Field(default=None, gt=0.0)
+    """Voxel size. Absent means the one derived from the model's own diagonal."""
+
+    headroom_mm: float | None = Field(default=None, gt=0.0)
+    """How far past the part the grid reaches, and so how tall a rib may be.
+
+    The grid is fixed, so this is a hard ceiling on every design built on the field - and it is
+    paid for in cells, which is why it is asked for rather than assumed generous.
+    """
+
+    reuse: bool = True
+
+
+class RolesRequest(BaseModel):
+    """Which CAD file designs grow from, and which is kept to compare against."""
+
+    baseline: str = Field(min_length=1)
+    reference: str | None = None
+
+
+class CorrectionRequest(BaseModel):
+    approved: bool
+
+
+class SpaceRequest(BaseModel):
+    """Which grid designs are made on. The delivered spacing: smallest root fillet over four."""
+
+    spacing_mm: float = Field(default=2.5, gt=0.0)
+
+
+class ApprovalRequest(BaseModel):
+    approved: bool
+    clearance_mm: float | None = Field(default=None, ge=0.0)
+
+
+class DesignSettings(BaseModel):
+    """For each zone, a formation and its lever values."""
+
+    zones: dict[str, dict]
+
 
 # --- session -----------------------------------------------------------------------------------
 
@@ -96,6 +179,8 @@ def get_state() -> dict:
         "stage": _state.stage,
         "project": None if _state.project is None else _project_row(_state.project),
         "extracted": done is not None,
+        "from_cache": None if done is None else done.from_cache,
+        "seconds": None if done is None else round(done.seconds, 2),
         "steps": [] if done is None else [_step_row(s) for s in done.steps],
     }
 
@@ -141,9 +226,255 @@ def post_extract(request: ExtractRequest) -> dict:
         artifacts = [classify(Path(p)) for p in request.paths]
 
     _state.project = project
-    _state.extraction = run_extract(project, artifacts=artifacts)
+    _state.extraction = run_extract(project, artifacts=artifacts, reuse=request.reuse)
     _state.mesh_blob = None
+    _state.field = None
+    _forget_parameters()
+    _forget_space()
     return get_state()
+
+
+@app.post("/api/field")
+def post_field(request: FieldRequest) -> dict:
+    """Build the distance field for what is open, or return the one already built.
+
+    Separate from extraction because it belongs to Generate rather than to reading the files, and
+    because it is the expensive one: minutes on a large part at a fine voxel, against seconds for
+    everything else. Both are kept, so neither is paid twice for the same inputs.
+    """
+    result = extracted()
+    if result.tess is None or _state.project is None:
+        raise HTTPException(409, "no geometry was read")
+
+    field, hit = field_for(
+        _state.project.root,
+        result.tess,
+        result.cad_digest,
+        spacing_mm=request.spacing_mm,
+        reuse=request.reuse,
+        headroom_mm=request.headroom_mm,
+    )
+    try:
+        field, applied = corrections.corrected(_state.project, field)
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+    _state.field = field
+    _state.surface = None
+    _state.surface_blob = None
+    _forget_parameters()
+    row = _field_row(field, hit)
+    row["corrections"] = [
+        {
+            "kind": a["kind"],
+            "reference": a["reference"],
+            "removed_cm3": round(a["removed_mm3"] / 1e3, 1),
+        }
+        for a in applied
+    ]
+    return row
+
+
+@app.put("/api/project/roles")
+def put_roles(request: RolesRequest) -> dict:
+    """Name the baseline, and optionally the reference, then read the project again.
+
+    The baseline decides what is read, so everything read before this is about a different file.
+    """
+    if _state.project is None:
+        raise HTTPException(409, "no project is open")
+    roles = {"baseline": request.baseline}
+    if request.reference is not None:
+        roles["reference"] = request.reference
+    try:
+        _state.project.set_roles(**roles)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+    return post_extract(ExtractRequest(project=str(_state.project.root)))
+
+
+@app.get("/api/corrections")
+def get_corrections() -> list[dict]:
+    """Every correction there is, whether it could apply here, and whether it is approved."""
+    if _state.project is None:
+        raise HTTPException(409, "no project is open")
+    approved = corrections.approved(_state.project)
+    return [
+        {
+            "kind": kind,
+            "approved": kind in approved,
+            "available": _state.project.reference() is not None,
+        }
+        for kind in corrections.KINDS
+    ]
+
+
+@app.post("/api/corrections/{kind}")
+def post_correction(kind: str, request: CorrectionRequest) -> list[dict]:
+    """Approve a correction, or take the approval back. The field is rebuilt on the next ask."""
+    if _state.project is None:
+        raise HTTPException(409, "no project is open")
+    try:
+        if request.approved:
+            corrections.approve(_state.project, kind)
+        else:
+            corrections.withdraw(_state.project, kind)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+    _state.field = None
+    _state.surface = None
+    _state.surface_blob = None
+    _forget_parameters()
+    _forget_space()
+    return get_corrections()
+
+
+# Voxel sizes the interface offers. Round numbers rather than one derived from the part, because
+# a size nobody can name is a size nothing is ever cached for - and the derived 2.37 mm on the part
+# in assets/ was five minutes of work behind a button that looked like the others.
+OFFERED_SPACINGS_MM = (20.0, 10.0, 5.0, 2.5)
+
+
+@app.get("/api/field/options")
+def get_field_options() -> list[dict]:
+    """The voxel sizes on offer, and which of them are already built.
+
+    A button that costs five minutes and a button that costs nothing should not look alike.
+    """
+    result = extracted()
+    if result.tess is None or _state.project is None:
+        raise HTTPException(409, "no geometry was read")
+
+    root = _state.project.root
+    out = []
+    for spacing in OFFERED_SPACINGS_MM:
+        field_key = key_of_field(result.tess, result.cad_digest, spacing_mm=spacing)
+        surface_key = cache.key_for(field_key, code=SURFACE_CODE)
+        out.append(
+            {
+                "spacing_mm": spacing,
+                "field_ready": cache.entry(root, "field", field_key).exists,
+                "surface_ready": cache.entry(root, "surface", surface_key).exists,
+            }
+        )
+    return out
+
+
+@app.get("/api/field")
+def get_field() -> dict:
+    """What the field holds, or 409 if none has been built. Never builds one."""
+    if _state.field is None:
+        raise HTTPException(409, "no field has been built")
+    return _field_row(_state.field, True)
+
+
+@app.get("/api/field/surface")
+def get_field_surface() -> dict:
+    """Contour the field, and say what came out.
+
+    Reported beside the same measurements taken on the B-rep surface, because the only useful
+    question about a reconstruction is how it differs from the thing it reconstructs.
+    """
+    result = extracted()
+    if _state.field is None:
+        raise HTTPException(409, "no field has been built")
+    if _state.surface is None:
+        _state.surface, _ = surface_for(
+            _state.project.root if _state.project else Path("."),
+            _state.field,
+            _state.field.key,
+            face_ids_from=result.tess,
+        )
+        _state.surface_blob = None
+
+    surface = _state.surface
+    boundary, non_manifold, winding = surface.faults
+    exact = result.exact
+    volume = surface.volume_mm3
+    return {
+        "spacing_mm": surface.spacing_mm,
+        "vertices": surface.n_vertices,
+        "triangles": surface.n_triangles,
+        "volume_cm3": round(volume / 1e3, 1),
+        "area_m2": round(surface.area_mm2 / 1e6, 4),
+        "watertight": surface.watertight,
+        "boundary_edges": boundary,
+        "non_manifold_edges": non_manifold,
+        "inconsistent_edges": winding,
+        "brep_volume_cm3": None if exact is None else round(exact.volume_cm3, 1),
+        "volume_error_pct": (
+            None
+            if exact is None
+            else round(abs(volume / 1e3 - exact.volume_cm3) / exact.volume_cm3 * 100, 3)
+        ),
+        "brep_triangles": None if result.tess is None else result.tess.n_triangles,
+        "shell_cells": int(_state.field.shell().size),
+        "exposed_faces": int(exposed_faces(_state.field.inside).size),
+        "solid_cells": _state.field.n_inside,
+        "band_cells": _state.field.n_band,
+    }
+
+
+@app.get("/api/field/voxels")
+def get_field_voxels() -> Response:
+    """The field's own cells, as one integer per visible face.
+
+    The field drawn as itself rather than as a reconstruction of itself. A contour is a fit - one
+    vertex per cell placed by least squares - and it can be wrong where the field is not. These are
+    the cells as stored.
+
+    Only the faces that show, and one integer each: a cell has six faces and you see at most three,
+    so drawing whole cubes is six times the work for the same picture - forty-eight million vertices
+    a frame at 2.5 mm against ten point eight.
+    """
+    if _state.field is None:
+        raise HTTPException(409, "no field has been built")
+
+    grid = _state.field.grid
+    faces = exposed_faces(_state.field.inside)
+    return Response(
+        content=(
+            VOXEL_MAGIC
+            + struct.pack(
+                "<Ifiii fff",
+                faces.size,
+                grid.spacing_mm,
+                grid.shape[0],
+                grid.shape[1],
+                grid.shape[2],
+                *grid.origin,
+            )
+            + faces.astype("<u4").tobytes()
+        ),
+        media_type="application/octet-stream",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@app.get("/api/field/mesh")
+def get_field_mesh() -> Response:
+    """The contoured surface, in the same format the B-rep tessellation is served in.
+
+    Identical format on purpose: the interface draws both at once to compare them, and a second
+    format would mean a second path through the renderer that could differ for its own reasons.
+    """
+    if _state.surface is None:
+        get_field_surface()
+    assert _state.surface is not None
+    if _state.surface_blob is None:
+        surface = _state.surface
+        # Shaded as one surface rather than by the CAD face ids it borrowed for picking. Those ids
+        # fragment a contour into thousands of patches, and a smooth casting comes back crazed.
+        _state.surface_blob = _encode_mesh(
+            surface, normals=corner_normals(surface.vertices, surface.triangles)
+        )
+    return Response(
+        content=_state.surface_blob,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Length": str(len(_state.surface_blob)),
+            "Cache-Control": "no-cache",
+        },
+    )
 
 
 @app.post("/api/reset")
@@ -152,6 +483,11 @@ def post_reset() -> dict:
     _state.project = None
     _state.extraction = None
     _state.mesh_blob = None
+    _state.field = None
+    _state.surface = None
+    _state.surface_blob = None
+    _forget_parameters()
+    _forget_space()
     return get_state()
 
 
@@ -388,7 +724,513 @@ def get_select_feature(feature_id: str) -> dict:
     return _selection(result, set(feature.face_ids), feature.describe())
 
 
+# --- generate ----------------------------------------------------------------------------------
+
+
+class RibRequest(BaseModel):
+    """Author a rib from a face selection. The least a person has to say."""
+
+    face_ids: list[int] = Field(min_length=1)
+    name: str = Field(default="rib", min_length=1, max_length=60)
+    thickness_mm: float = Field(gt=0.0)
+    high_mm: float = Field(gt=0.0)
+    span: float = Field(default=0.9, gt=0.0, le=1.0)
+
+
+class DesignRequest(BaseModel):
+    values_mm: list[float]
+    blend_mm: float = Field(default=0.0, ge=0.0)
+
+
+def _base_field() -> DistanceField:
+    if _state.field is None:
+        raise HTTPException(409, "no field has been built to put a parameter on")
+    return _state.field
+
+
+def _design_field() -> DistanceField:
+    """The design if one has been evaluated, otherwise the part as it came."""
+    return _state.design if _state.design is not None else _base_field()
+
+
+@app.post("/api/parameters")
+def post_parameter(request: RibRequest) -> dict:
+    """Put a rib on a selection of faces.
+
+    The placement is decided once, here: which faces it stands on, which way it runs and how thick
+    it is. After that the **height is the dial**, because that is what a campaign sweeps and the
+    rest is a decision about what the rib is rather than how much of it there is.
+    """
+    result = extracted()
+    base = _base_field()
+    if result.tess is None:
+        raise HTTPException(409, "no geometry was read")
+
+    try:
+        vertices, normal = host_from(
+            result.tess.vertices, result.tess.triangles, result.tess.face_id, set(request.face_ids)
+        )
+        slab = rib_on(base, vertices, normal, request.thickness_mm, span=request.span)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+
+    # Capped by what the grid can hold rather than left to fail at the far end of a slider: a
+    # slider whose top end raises an error is a slider that lies about its own range.
+    ceiling = _headroom_for(base, slab)
+    if ceiling <= base.grid.spacing_mm:
+        raise HTTPException(400, "there is no room above that face for a rib")
+
+    parameter = Parameter(
+        id=f"rib:{_state.next_parameter}",
+        name=request.name,
+        slab=slab,
+        low_mm=0.0,
+        high_mm=min(request.high_mm, ceiling),
+        default_mm=0.0,
+        host_face_ids=tuple(sorted(set(request.face_ids))),
+    )
+    _state.parameters.append(parameter)
+    _state.next_parameter += 1
+    _forget_design()
+    return _parameter_row(parameter, ceiling)
+
+
+@app.get("/api/parameters")
+def get_parameters() -> list[dict]:
+    base = _base_field()
+    return [_parameter_row(p, _headroom_for(base, p.slab)) for p in _state.parameters]
+
+
+@app.delete("/api/parameters/{parameter_id}")
+def delete_parameter(parameter_id: str) -> list[dict]:
+    remaining = [p for p in _state.parameters if p.id != parameter_id]
+    if len(remaining) == len(_state.parameters):
+        raise HTTPException(404, f"no parameter {parameter_id!r}")
+    _state.parameters = remaining
+    _forget_design()
+    return get_parameters()
+
+
+@app.post("/api/design")
+def post_design(request: DesignRequest) -> dict:
+    """Evaluate one point in the design space.
+
+    A design is a digest and these numbers. The field is regenerated from them rather than stored,
+    so the same numbers give the same part on any machine and on any day - which is the property a
+    campaign's data rests on.
+    """
+    base = _base_field()
+    if len(request.values_mm) != len(_state.parameters):
+        raise HTTPException(
+            400, f"{len(_state.parameters)} parameters but {len(request.values_mm)} values"
+        )
+
+    started = time.perf_counter()
+    try:
+        field = apply(base, _state.parameters, request.values_mm, blend_mm=request.blend_mm)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+    seconds = time.perf_counter() - started
+
+    _state.design = field
+    _state.design_surface = None
+    _state.design_blob = None
+
+    design = Design(base_digest=base.source_digest, values=tuple(request.values_mm))
+    added = field.volume_mm3() - base.volume_mm3()
+    return {
+        "key": design.key(),
+        "values_mm": list(request.values_mm),
+        # What was asked for and what the band could carry. A fillet wider than the band would be
+        # blending against a clamped distance rather than a real one, so it is capped - and the
+        # ceiling is reported, because a slider that stops working partway along without saying so
+        # is indistinguishable from a slider that does nothing.
+        "blend_mm": min(request.blend_mm, base.reach_mm),
+        "blend_ceiling_mm": round(base.reach_mm, 2),
+        "volume_cm3": round(field.volume_mm3() / 1e3, 1),
+        "added_cm3": round(added / 1e3, 1),
+        "base_volume_cm3": round(base.volume_mm3() / 1e3, 1),
+        "seconds": round(seconds, 3),
+    }
+
+
+@app.get("/api/design/voxels")
+def get_design_voxels(only: str = "added") -> Response:
+    """The design's cells, in the format the base field's arrive in.
+
+    ``added`` by default: the cells this design has that the bare part does not. That is what a
+    person authoring a parameter is looking at - a rib standing on a part they can still see and
+    still click - where the whole design drawn as cells would bury the geometry under a blocky copy
+    of itself and leave nothing to pick.
+    """
+    field = _design_field()
+    grid = field.grid
+    if only == "added":
+        # Nothing placed yet means nothing added. Falling back to the whole part here would bury
+        # the geometry under a blocky copy of itself before a person had asked for anything.
+        base = _base_field()
+        solid = field.inside & ~base.inside if _state.design is not None else _empty(base)
+    elif only == "all":
+        solid = field.inside
+    else:
+        raise HTTPException(400, f"{only!r} is not 'added' or 'all'")
+    faces = exposed_faces(solid)
+    return Response(
+        content=(
+            VOXEL_MAGIC
+            + struct.pack(
+                "<Ifiii fff",
+                faces.size,
+                grid.spacing_mm,
+                grid.shape[0],
+                grid.shape[1],
+                grid.shape[2],
+                *grid.origin,
+            )
+            + faces.astype("<u4").tobytes()
+        ),
+        media_type="application/octet-stream",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@app.get("/api/design/surface")
+def get_design_surface() -> dict:
+    """Contour the design.
+
+    Not cached, unlike the base field's: a design is one point of many and is rarely asked for
+    twice, so keeping every one would fill a disk with results nothing will look at again.
+    """
+    result = extracted()
+    if _state.design_surface is None:
+        _state.design_surface = contour(_design_field(), face_ids_from=result.tess)
+        _state.design_blob = None
+
+    surface = _state.design_surface
+    boundary, non_manifold, winding = surface.faults
+    return {
+        "spacing_mm": surface.spacing_mm,
+        "vertices": surface.n_vertices,
+        "triangles": surface.n_triangles,
+        "volume_cm3": round(surface.volume_mm3 / 1e3, 1),
+        "watertight": surface.watertight,
+        "boundary_edges": boundary,
+        "non_manifold_edges": non_manifold,
+        "inconsistent_edges": winding,
+    }
+
+
+@app.get("/api/design/mesh")
+def get_design_mesh() -> Response:
+    if _state.design_surface is None:
+        get_design_surface()
+    assert _state.design_surface is not None
+    if _state.design_blob is None:
+        surface = _state.design_surface
+        _state.design_blob = _encode_mesh(
+            surface, normals=corner_normals(surface.vertices, surface.triangles)
+        )
+    return Response(
+        content=_state.design_blob,
+        media_type="application/octet-stream",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+# --- formations ---------------------------------------------------------------------------------
+
+
+def _project() -> Project:
+    if _state.project is None:
+        raise HTTPException(409, "no project is open")
+    return _state.project
+
+
+def _forget_space() -> None:
+    _state.space = None
+    _state.made = None
+    _state.made_blob = None
+
+
+@app.get("/api/zones")
+def get_zones() -> dict:
+    """The zones proposed and approved, what is protected, and whether zones can be proposed."""
+    project = _project()
+    return {
+        "zones": [
+            {**z, "summary": _zone_summary(z)} for z in project.data().get("zones", [])
+        ],
+        "protected": design_space.protection(project),
+        "corrections": get_corrections(),
+        "can_propose": project.reference() is not None,
+    }
+
+
+@app.post("/api/zones/propose")
+def post_propose_zones(request: SpaceRequest) -> dict:
+    """Propose zones from the material the reference has and the baseline does not.
+
+    Needs the baseline's field and the reference sampled on the same grid - minutes the first
+    time, kept after.
+    """
+    result = extracted()
+    project = _project()
+    reference = project.reference()
+    if reference is None or result.tess is None or result.features is None:
+        raise HTTPException(409, "zones are proposed from a reference, and this project names none")
+    raw, _ = field_for(project.root, result.tess, result.cad_digest, spacing_mm=request.spacing_mm)
+    base, _ = corrections.corrected(project, raw)
+    ref, _ = reference_field_for(project.root, reference, raw.grid)
+    zones = propose(base, ref, major_axes(result.features.significant_axes()))
+    design_space.save_proposals(project, zones)
+    _forget_space()
+    return get_zones()
+
+
+@app.post("/api/zones/{zone_id}")
+def post_zone(zone_id: str, request: ApprovalRequest) -> dict:
+    try:
+        design_space.approve_zone(_project(), zone_id, request.approved)
+    except ValueError as error:
+        raise HTTPException(404, str(error)) from error
+    _forget_space()
+    return get_zones()
+
+
+@app.post("/api/protected")
+def post_protected(request: ApprovalRequest) -> dict:
+    design_space.approve_protection(_project(), request.approved, request.clearance_mm)
+    _forget_space()
+    return get_zones()
+
+
+@app.get("/api/formations")
+def get_formations() -> dict:
+    """Every formation and its levers, and the values every rib shares from the rules."""
+    rules = design_space.Rules(**_project().data().get("rules", {}))
+    return {
+        "formations": [
+            {
+                "name": f.name,
+                "label": f.label,
+                "levers": [
+                    {
+                        "name": lever.name,
+                        "label": lever.label,
+                        "low": lever.low,
+                        "high": lever.high,
+                        "step": lever.step,
+                        "unit": lever.unit,
+                        "integer": lever.integer,
+                    }
+                    for lever in f.levers
+                ],
+            }
+            for f in FORMATIONS.values()
+        ],
+        "fixed": {
+            "root_fillet_mm": rules.root_fillet_mm,
+            "edge_round_mm": rules.edge_round_mm,
+            "draft_deg": rules.draft_used_deg,
+        },
+        "rules": [
+            {"name": name, "basis": basis, "assumed": assumed}
+            for name, basis, assumed in rules.basis
+        ],
+    }
+
+
+@app.post("/api/designspace")
+def post_design_space(request: SpaceRequest) -> dict:
+    """Open the project for designing: the corrected baseline, its contour, a window per zone.
+
+    Minutes the first time on a large part, and kept on disk after.
+    """
+    result = extracted()
+    project = _project()
+    try:
+        _state.space = design_space.DesignSpace.open(project, result, spacing_mm=request.spacing_mm)
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+    _state.made = None
+    _state.made_blob = None
+    return _space_row(_state.space)
+
+
+@app.post("/api/designs")
+def post_designs(request: DesignSettings) -> dict:
+    """Make the design these settings describe, and say what it is and what the checks found."""
+    if _state.space is None:
+        raise HTTPException(409, "the design space is not open")
+    try:
+        made = _state.space.generate(request.zones)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+    _state.made = made
+    _state.made_blob = None
+    return _design_row(made)
+
+
+@app.get("/api/designs/current/mesh")
+def get_current_design_mesh() -> Response:
+    """The new surfaces of the current design - ribs and fillets - to draw over the part."""
+    if _state.made is None:
+        raise HTTPException(409, "no design has been made")
+    if _state.made_blob is None:
+        added = _state.made.added_surface()
+        _state.made_blob = _encode_mesh(
+            added, normals=corner_normals(added.vertices, added.triangles)
+        )
+    return Response(
+        content=_state.made_blob,
+        media_type="application/octet-stream",
+        headers={"Content-Length": str(len(_state.made_blob)), "Cache-Control": "no-cache"},
+    )
+
+
+def _zone_summary(zone: dict) -> str:
+    region = zone["region"]
+    span = (region["theta_to_deg"] - region["theta_from_deg"]) % 360.0 or 360.0
+    hosts = {
+        "below": "standing on a floor",
+        "above": "hanging from a ceiling",
+        "between": "spanning between walls",
+    }
+    return (
+        f"{region['theta_from_deg']:.0f}–{(region['theta_from_deg'] + span) % 360:.0f} deg, "
+        f"r {region['r_inner_mm']:.0f}–{region['r_outer_mm']:.0f} mm, "
+        f"{region['depth_mm']:.0f} mm deep, ribs {hosts.get(zone['host'], zone['host'])}"
+    )
+
+
+def _space_row(space: design_space.DesignSpace) -> dict:
+    return {
+        "zones": [{**z.to_dict(), "summary": _zone_summary(z.to_dict())} for z in space.zones],
+        "spacing_mm": space.base.grid.spacing_mm,
+        "base_volume_cm3": round(space.surface.volume_mm3 / 1e3, 1),
+        "base_faults": list(space.surface.faults),
+        "radius_mm": space.radius_mm,
+        "density": space.density,
+        "corrections": [
+            {"kind": a["kind"], "removed_cm3": round(a["removed_mm3"] / 1e3, 1)}
+            for a in space.corrections
+        ],
+    }
+
+
+def _design_row(made: design_space.Design) -> dict:
+    stats = made.stats
+    return {
+        "digest": made.digest,
+        "outcome": made.outcome,
+        "settings": made.settings,
+        "findings": [
+            {
+                "check": f.check,
+                "outcome": f.outcome,
+                "reason": f.reason,
+                "rule": f.rule,
+                "assumed": f.assumed,
+                "where": None if f.where is None else [round(v, 1) for v in f.where],
+                "value": None if f.value is None else round(f.value, 2),
+            }
+            for f in made.findings
+        ],
+        "stats": {
+            **{
+                k: (round(v, 3) if isinstance(v, float) else v)
+                for k, v in stats.items()
+                if k != "seconds"
+            },
+            "seconds": {k: round(v, 2) for k, v in stats["seconds"].items()},
+        },
+    }
+
+
+def _empty(field: DistanceField) -> np.ndarray:
+    return np.zeros(field.inside.shape, dtype=bool)
+
+
+def _forget_design() -> None:
+    _state.design = None
+    _state.design_surface = None
+    _state.design_blob = None
+
+
+def _forget_parameters() -> None:
+    """Levers belong to the part they were placed on.
+
+    A parameter names faces of one geometry, so carrying it into another project would put a rib on
+    whatever happened to share that face number. Numbering restarts too: an id that came back would
+    make one value vector mean two different things.
+    """
+    _state.parameters = []
+    _state.next_parameter = 0
+    _forget_design()
+
+
+def _headroom_for(base: DistanceField, slab: Slab) -> float:
+    """The tallest this rib can be before it runs off the edge of the grid.
+
+    Reported rather than discovered. The grid is fixed, so past its edge is not "smaller" but
+    "absent" - and a slider that silently stops working partway along is how that was found the
+    first time.
+
+    A rib grows only along ``up``, so its footprint is fixed and the only corners that move are the
+    four on top. The limit is whichever of them reaches a wall of the grid first.
+    """
+    origin = np.asarray(base.grid.origin)
+    far = origin + (np.asarray(base.grid.shape) - 1) * base.grid.spacing_mm
+    axes = slab.frame()
+    up = axes[2]
+
+    signs = np.array([[-1.0, -1.0], [-1.0, 1.0], [1.0, -1.0], [1.0, 1.0]])
+    footprint = np.asarray(slab.origin) + signs @ np.stack(
+        [axes[0] * slab.length_mm / 2.0, axes[1] * slab.thickness_mm / 2.0]
+    )
+
+    room = np.full(3, np.inf)
+    for axis in range(3):
+        if abs(up[axis]) < 1e-9:
+            continue
+        wall = far[axis] if up[axis] > 0 else origin[axis]
+        room[axis] = float(((wall - footprint[:, axis]) / up[axis]).min())
+    return float(max(room.min(), 0.0))
+
+
+def _parameter_row(parameter: Parameter, ceiling_mm: float) -> dict:
+    slab = parameter.slab
+    return {
+        "id": parameter.id,
+        "name": parameter.name,
+        "kind": "rib",
+        "low_mm": round(parameter.low_mm, 2),
+        "high_mm": round(parameter.high_mm, 2),
+        "default_mm": round(parameter.default_mm, 2),
+        "ceiling_mm": round(ceiling_mm, 2),
+        "length_mm": round(slab.length_mm, 1),
+        "thickness_mm": round(slab.thickness_mm, 1),
+        "origin_mm": [round(v, 1) for v in slab.origin],
+        "up": [round(float(v), 3) for v in slab.frame()[2]],
+        "host_face_ids": list(parameter.host_face_ids),
+    }
+
+
 # --- rows --------------------------------------------------------------------------------------
+
+
+def _field_row(field: DistanceField, from_cache: bool) -> dict:
+    return {
+        "spacing_mm": field.grid.spacing_mm,
+        "shape": list(field.grid.shape),
+        "cells": field.grid.n_cells,
+        "band_cells": field.n_band,
+        "solid_cells": field.n_inside,
+        "reach_mm": round(field.reach_mm, 3),
+        "headroom_mm": round(field.headroom_mm, 1),
+        "volume_cm3": round(field.volume_mm3() / 1e3, 1),
+        "from_cache": from_cache,
+    }
 
 
 def _project_row(project: Project) -> dict:
@@ -409,6 +1251,7 @@ def _project_row(project: Project) -> dict:
         ],
         "has_cad": any(a.kind is ArtifactKind.CAD for a in artifacts),
         "has_drawing": any(a.kind is ArtifactKind.DRAWING for a in artifacts),
+        "roles": project.roles(),
     }
 
 
@@ -478,31 +1321,7 @@ def _selection(result: Extraction, face_ids, reason: str) -> dict:
 # --- mesh --------------------------------------------------------------------------------------
 
 
-def _encode_mesh(tess) -> bytes:
-    """Positions, per-face-smoothed normals and face ids, little-endian.
-
-    Un-welded, because WebGL2 has no primitive id in the fragment shader, so the CAD face id has
-    to be a vertex attribute. That also lets normals be averaged per face rather than per vertex,
-    which keeps machined edges sharp instead of rounding every one of them off.
-    """
-    tris, verts, face_id = tess.triangles, tess.vertices, tess.face_id
-    corners = verts[tris.ravel()]
-
-    a, b, c = verts[tris[:, 0]], verts[tris[:, 1]], verts[tris[:, 2]]
-    tri_normals = np.cross(b - a, c - a)
-    keys = np.stack([tris.ravel(), np.repeat(face_id, 3)], axis=1)
-    _, group, counts = np.unique(keys, axis=0, return_inverse=True, return_counts=True)
-    accumulated = np.zeros((counts.size, 3), dtype=np.float64)
-    np.add.at(accumulated, group, np.repeat(tri_normals, 3, axis=0))
-    lengths = np.linalg.norm(accumulated, axis=1, keepdims=True)
-    normals = np.divide(
-        accumulated, lengths, out=np.zeros_like(accumulated), where=lengths > 1e-12
-    )[group]
-
-    return (
-        MESH_MAGIC
-        + struct.pack("<I", corners.shape[0])
-        + corners.astype("<f4").tobytes()
-        + normals.astype("<f4").tobytes()
-        + np.repeat(face_id.astype(np.uint32), 3).astype("<u4").tobytes()
-    )
+def _encode_mesh(tess, normals: np.ndarray | None = None) -> bytes:
+    """Pack a surface for the renderer. The format, and why it is that format, is in
+    :mod:`fastcae.api.mesh`."""
+    return mesh_format.encode(tess.vertices, tess.triangles, tess.face_id, normals)

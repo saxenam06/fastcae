@@ -6,10 +6,12 @@
  * nothing here needs to know which is which.
  */
 
-import type { Axis, Feature } from "../api/client";
-import { FeatureRow } from "./cards";
+import type { Axis, Feature, Step, Summary } from "../api/client";
+import { FeatureRow, Metric } from "./cards";
 
 interface ModelIndexProps {
+  summary: Summary;
+  steps: Step[];
   features: Feature[];
   kinds: { kind: string; count: number; controlled: number }[];
   axes: Axis[];
@@ -17,8 +19,6 @@ interface ModelIndexProps {
   kindFilter: string | null;
   onKindFilter: (kind: string | null) => void;
   onSelectFeature: (feature: Feature) => void;
-  view: "pipeline" | "geometry";
-  onView: (view: "pipeline" | "geometry") => void;
 }
 
 const FEATURE_LIMIT = 60;
@@ -31,16 +31,38 @@ export function ModelIndex(props: ModelIndexProps) {
     ? (props.kinds.find((k) => k.kind === props.kindFilter)?.count ?? shown.length)
     : props.kinds.reduce((n, k) => n + k.count, 0);
 
+  const steps = props.steps.filter(
+    (step) => step.needs.includes("cad") && !step.needs.includes("drawing"),
+  );
+
   return (
     <nav className="index">
       <section className="section">
-        <div className="viewswitch">
-          <button data-active={props.view === "pipeline"} onClick={() => props.onView("pipeline")}>
-            What was read
-          </button>
-          <button data-active={props.view === "geometry"} onClick={() => props.onView("geometry")}>
-            Geometry
-          </button>
+        <header>Read from the CAD</header>
+        <div className="metrics" style={{ padding: "8px 12px" }}>
+          <Metric label="faces" value={props.summary.faces} />
+          <Metric label="volume" value={props.summary.volume_cm3} unit="cm³" />
+          <Metric
+            label="watertight"
+            value={props.summary.watertight === null ? null : props.summary.watertight ? "yes" : "no"}
+            tone={props.summary.watertight ? "ok" : "bad"}
+          />
+          <Metric label="controlled" value={props.summary.controlled_faces} />
+        </div>
+        <div className="body">
+          {steps.map((step) => (
+            <div key={step.id} style={{ marginBottom: 8 }}>
+              <div className="axis-row">
+                <span className={`status status-${step.status}`}>{step.status}</span>
+                <span className="detail">{step.label}</span>
+              </div>
+              {step.warnings.map((warning, index) => (
+                <div key={index} className="warn">
+                  {warning}
+                </div>
+              ))}
+            </div>
+          ))}
         </div>
       </section>
 

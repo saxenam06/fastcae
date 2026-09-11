@@ -27,7 +27,7 @@ from pathlib import Path
 
 import numpy as np
 from OCP.Bnd import Bnd_Box
-from OCP.BRep import BRep_Tool
+from OCP.BRep import BRep_Builder, BRep_Tool
 from OCP.BRepBndLib import BRepBndLib
 from OCP.BRepGProp import BRepGProp
 from OCP.BRepMesh import BRepMesh_IncrementalMesh
@@ -36,10 +36,10 @@ from OCP.GProp import GProp_GProps
 from OCP.IFSelect import IFSelect_RetDone
 from OCP.Interface import Interface_Static
 from OCP.STEPControl import STEPControl_Reader
-from OCP.TopAbs import TopAbs_FACE, TopAbs_REVERSED, TopAbs_SOLID
+from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_REVERSED, TopAbs_SOLID
 from OCP.TopExp import TopExp_Explorer
 from OCP.TopLoc import TopLoc_Location
-from OCP.TopoDS import TopoDS, TopoDS_Face, TopoDS_Shape
+from OCP.TopoDS import TopoDS, TopoDS_Compound, TopoDS_Face, TopoDS_Shape
 from scipy.spatial import cKDTree
 
 # Welding tolerance in mm for joining per-face triangulations into one surface.
@@ -223,6 +223,58 @@ def load_step(path: Path) -> TopoDS_Shape:
     if shape.IsNull():
         raise ValueError(f"STEP produced a null shape: {path}")
     return shape
+
+
+def load_cad(path: Path) -> tuple[TopoDS_Shape, list[str]]:
+    """Read a CAD file by its extension. Returns the solid geometry, and notes on anything else.
+
+    A STEP file is read as it stands. A ``.brep`` is OCC's own dump of whatever a CAD session held,
+    which is not the same thing as a part: the baseline in ``assets/`` carries 29 loose edges beside
+    its one solid, left where features were deleted. Passing those on would count them as geometry
+    and hand the atlas edges with no face; dropping them silently would hide that the file is not
+    clean. So the solids are kept, and everything else is named in a note.
+    """
+    if path.suffix.lower() != ".brep":
+        return load_step(path), []
+
+    shape = TopoDS_Shape()
+    if not BRepTools.Read_s(shape, str(path), BRep_Builder()) or shape.IsNull():
+        raise OSError(f"BREP read failed: {path}")
+
+    solids = []
+    exp = TopExp_Explorer(shape, TopAbs_SOLID)
+    while exp.More():
+        solids.append(exp.Current())
+        exp.Next()
+    if not solids:
+        raise ValueError(f"the file holds no solid: {path}")
+
+    notes = []
+    loose_faces = _count_outside(shape, TopAbs_FACE, TopAbs_SOLID)
+    loose_edges = _count_outside(shape, TopAbs_EDGE, TopAbs_FACE)
+    if loose_faces:
+        notes.append(f"the file also holds {loose_faces} loose faces outside any solid; not read")
+    if loose_edges:
+        notes.append(f"the file also holds {loose_edges} loose edges outside any face; not read")
+
+    if len(solids) == 1:
+        return solids[0], notes
+    builder = BRep_Builder()
+    compound = TopoDS_Compound()
+    builder.MakeCompound(compound)
+    for solid in solids:
+        builder.Add(compound, solid)
+    return compound, notes
+
+
+def _count_outside(shape: TopoDS_Shape, kind: int, container: int) -> int:
+    """How many sub-shapes of ``kind`` are not part of any ``container``."""
+    n = 0
+    exp = TopExp_Explorer(shape, kind, container)
+    while exp.More():
+        n += 1
+        exp.Next()
+    return n
 
 
 def faces_of(shape: TopoDS_Shape) -> list[TopoDS_Face]:

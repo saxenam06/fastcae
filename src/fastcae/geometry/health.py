@@ -151,6 +151,16 @@ def check(
     return report
 
 
+def edge_faults(triangles: np.ndarray) -> tuple[int, int, int]:
+    """Holes, non-manifold junctions and winding faults in any triangle surface.
+
+    Public because the gate applies to more than the tessellation of a B-rep: a surface contoured
+    out of a distance field has to answer the same question, and answering it the same way is what
+    makes the two comparable.
+    """
+    return _edge_faults(_edge_table(triangles))
+
+
 def _edge_table(triangles: np.ndarray) -> np.ndarray:
     """Every directed edge of every triangle, as (n*3, 2)."""
     return np.concatenate(

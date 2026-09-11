@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GRC Rear Housing Rib Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#F3F5F7;
+  --surface:#FFFFFF;
+  --ink:#17202B;
+  --ink-2:#4A5767;
+  --ink-3:#687483;
+  --rule:#D6DCE3;
+  --rule-strong:#AEB8C4;
+  --chip-bg:#E8ECF1;
+  --accent:#2446B5;
+  --accent-soft:#E7ECFA;
+  --accent-ink:#1A3591;
+  --have:#1C7447;
+  --have-soft:#E1F1E7;
+  --warn:#8A5300;
+  --warn-soft:#FBEFD8;
+  --miss:#B42318;
+  --miss-soft:#FBE6E4;
+  --font-body:"Atkinson Hyperlegible","Segoe UI",system-ui,-apple-system,sans-serif;
+  --font-display:"Barlow Semi Condensed","Arial Narrow","Segoe UI",system-ui,sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,"Cascadia Mono",Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0E131A;
+    --surface:#151C25;
+    --ink:#E4E9EF;
+    --ink-2:#A6B2C0;
+    --ink-3:#8793A1;
+    --rule:#27313D;
+    --rule-strong:#3B4757;
+    --chip-bg:#1F2833;
+    --accent:#8FA6FF;
+    --accent-soft:#1B2542;
+    --accent-ink:#BDCBFF;
+    --have:#66CB98;
+    --have-soft:#13281D;
+    --warn:#E8B25A;
+    --warn-soft:#2D2311;
+    --miss:#F48A7F;
+    --miss-soft:#341917;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0E131A;
+  --surface:#151C25;
+  --ink:#E4E9EF;
+  --ink-2:#A6B2C0;
+  --ink-3:#8793A1;
+  --rule:#27313D;
+  --rule-strong:#3B4757;
+  --chip-bg:#1F2833;
+  --accent:#8FA6FF;
+  --accent-soft:#1B2542;
+  --accent-ink:#BDCBFF;
+  --have:#66CB98;
+  --have-soft:#13281D;
+  --warn:#E8B25A;
+  --warn-soft:#2D2311;
+  --miss:#F48A7F;
+  --miss-soft:#341917;
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;
+  background:var(--ground);
+  color:var(--ink);
+  font:400 1.0625rem/1.6 var(--font-body);
+  padding-inline:20px;
+  padding-block:40px 72px;
+}
+a{color:var(--accent)}
+a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wrap{max-width:1040px;margin-inline:auto;display:flex;flex-direction:column;gap:56px}
+main{display:flex;flex-direction:column;gap:56px}
+section{display:flex;flex-direction:column;gap:18px;padding-top:26px;border-top:1px solid var(--rule)}
+h1,h2,h3{font-family:var(--font-display);color:var(--ink);text-wrap:balance;margin:0}
+h1{font-weight:700;font-size:clamp(2.1rem,1.5rem + 2.2vw,3rem);line-height:1.02;letter-spacing:-.005em}
+h2{font-weight:600;font-size:1.7rem;line-height:1.15}
+h3{font-weight:600;font-size:1.25rem;line-height:1.2}
+p{margin:0}
+.prose{max-width:68ch;display:flex;flex-direction:column;gap:12px}
+.file{font-family:var(--font-mono);font-size:.86em;background:var(--chip-bg);padding:1px 5px;border-radius:3px;overflow-wrap:anywhere}
+.note{max-width:72ch;color:var(--ink-2);font-size:.98rem}
+.label{font:500 .7rem/1.2 var(--font-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+
+/* Title block */
+.tb{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);border:1.5px solid var(--ink);background:var(--surface)}
+.tb-name{padding:26px 28px;display:flex;flex-direction:column;gap:12px;border-right:1.5px solid var(--ink)}
+.eyebrow{font:500 .72rem/1 var(--font-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+.lede{font-size:1.12rem;color:var(--ink-2);max-width:56ch}
+.tb-cells{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--rule-strong);margin:0}
+.tb-cells > div{background:var(--surface);padding:12px 14px;display:flex;flex-direction:column;gap:4px}
+.tb-cells dt{font:500 .68rem/1.2 var(--font-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+.tb-cells dd{margin:0;font-weight:700;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.tb-cells dd.mono{font-family:var(--font-mono);font-weight:500;font-size:.9rem}
+
+/* nTop method */
+ol.method{list-style:none;margin:0;padding:0;counter-reset:m;display:flex;flex-direction:column;gap:14px;max-width:72ch}
+ol.method li{counter-increment:m;display:grid;grid-template-columns:2.2rem minmax(0,1fr);gap:12px;align-items:baseline}
+ol.method li::before{content:counter(m);font:700 1.5rem/1 var(--font-display);color:var(--accent)}
+
+/* Rules and risks */
+dl.pairs{margin:0;display:grid;grid-template-columns:minmax(0,16rem) minmax(0,1fr);border-top:1px solid var(--rule)}
+dl.pairs dt,dl.pairs dd{margin:0;padding:14px 0;border-bottom:1px solid var(--rule)}
+dl.pairs dt{font:600 1.12rem/1.3 var(--font-display);padding-right:24px}
+dl.pairs dd{max-width:68ch}
+dl.pairs dd .fix{display:block;margin-top:4px;color:var(--ink-2)}
+
+/* Figure */
+figure{margin:0;display:flex;flex-direction:column;gap:12px}
+.fig-scroll{overflow-x:auto;background:var(--surface);border:1px solid var(--rule);padding:14px 10px}
+.pipe{display:block;width:100%;min-width:900px;height:auto;color:var(--ink-3)}
+.pipe .d-box{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1.5}
+.pipe .d-dash{stroke:var(--ink-3);stroke-dasharray:6 4}
+.pipe .d-input{fill:var(--ground)}
+.pipe .d-key{fill:var(--accent-soft);stroke:var(--accent);stroke-width:2}
+.pipe .d-t1{font:700 13px var(--font-body);fill:var(--ink)}
+.pipe .d-t2{font:400 11.5px var(--font-body);fill:var(--ink-2)}
+.pipe .d-t3{font:500 10.5px var(--font-mono);fill:var(--ink-3)}
+.pipe .d-line{stroke:var(--ink-3);stroke-width:1.5;fill:none}
+.pipe .d-lab{font:500 10px var(--font-mono);fill:var(--ink-2)}
+figcaption{font-size:.95rem;color:var(--ink-2);max-width:78ch}
+
+/* Milestones */
+.ms-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
+.ms{padding:22px 24px;border:1px solid var(--rule-strong);background:var(--surface);display:flex;flex-direction:column;gap:14px}
+.ms.lead{background:var(--accent-soft);border-color:var(--accent)}
+.ms-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.ms-id{font:700 1.7rem/1 var(--font-display);color:var(--accent)}
+.ms ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.ms li{display:grid;grid-template-columns:12px minmax(0,1fr);gap:10px;align-items:baseline}
+.ms li::before{content:"";width:11px;height:11px;border:1.5px solid var(--ink-3);transform:translateY(1px)}
+.tag{font:500 .72rem var(--font-mono);color:var(--ink-3)}
+.done{margin-top:auto;padding-top:12px;border-top:1px solid var(--rule-strong);font-size:.97rem}
+.ms.lead .done{border-top-color:var(--accent)}
+
+/* Steps */
+ol.steps{list-style:none;margin:0;padding:0;counter-reset:s;border-top:1px solid var(--rule)}
+ol.steps > li{counter-increment:s;display:grid;grid-template-columns:3rem minmax(0,1fr) 10.5rem;gap:8px 18px;padding:20px 0;border-bottom:1px solid var(--rule)}
+ol.steps > li::before{content:counter(s);font:700 2rem/1 var(--font-display);color:var(--accent)}
+.step-body{display:flex;flex-direction:column;gap:8px;max-width:68ch}
+.step-body .done{margin-top:2px;padding-top:0;border-top:0;color:var(--ink-2)}
+.step-body ul{margin:0;padding-left:1.1em;display:flex;flex-direction:column;gap:4px}
+.who{display:flex;flex-wrap:wrap;gap:6px;align-content:start;justify-content:flex-end}
+
+/* Chips */
+.chip{display:inline-flex;align-items:center;font:500 .72rem/1 var(--font-mono);letter-spacing:.02em;padding:5px 9px;border-radius:999px;white-space:nowrap;border:1.5px solid transparent}
+.chip.script{background:var(--accent-soft);color:var(--accent-ink)}
+.chip.you{border:1.5px dashed var(--ink);color:var(--ink)}
+.chip.agent{border:1.5px dashed var(--ink-3);color:var(--ink-2)}
+.st{display:inline-block;font:500 .72rem/1 var(--font-mono);padding:5px 8px;border-radius:4px;white-space:nowrap}
+.st.have{background:var(--have-soft);color:var(--have)}
+.st.prop{background:var(--chip-bg);color:var(--ink-2)}
+.st.assumed{background:var(--warn-soft);color:var(--warn)}
+.st.miss{background:var(--miss-soft);color:var(--miss)}
+
+/* Tables */
+.table-scroll{overflow-x:auto;border:1px solid var(--rule);background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:720px;font-size:.97rem}
+th,td{text-align:left;vertical-align:top;padding:11px 14px;border-bottom:1px solid var(--rule)}
+thead th{font:500 .7rem/1.2 var(--font-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);border-bottom:1px solid var(--rule-strong)}
+tbody tr:last-child td{border-bottom:0}
+td .sub{display:block;color:var(--ink-2);font-size:.9rem}
+td.id{font-family:var(--font-mono);font-size:.88rem;color:var(--accent);white-space:nowrap}
+td.tool{font-family:var(--font-mono);font-size:.9rem;white-space:nowrap}
+
+/* Roles */
+.roles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px}
+.role{display:flex;flex-direction:column;gap:10px}
+.role-head{display:flex;align-items:center;gap:10px}
+.role ul{margin:0;padding-left:1.1em;display:flex;flex-direction:column;gap:6px}
+.pact{padding:16px 20px;border:1.5px solid var(--ink);background:var(--surface);font-weight:700;max-width:72ch}
+
+/* Later */
+.later{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px}
+.later ul{margin:0;padding-left:1.1em;display:flex;flex-direction:column;gap:6px}
+
+footer{font:400 .8rem/1.6 var(--font-mono);color:var(--ink-3);border-top:1px solid var(--rule);padding-top:18px;max-width:90ch}
+
+@media (max-width:760px){
+  .tb{grid-template-columns:1fr}
+  .tb-name{border-right:0;border-bottom:1.5px solid var(--ink);padding:22px 20px}
+  .ms-grid,.roles,.later{grid-template-columns:1fr}
+  ol.steps > li{grid-template-columns:2.4rem minmax(0,1fr)}
+  .who{grid-column:2;justify-content:flex-start}
+  dl.pairs{grid-template-columns:1fr}
+  dl.pairs dt{border-bottom:0;padding-bottom:2px}
+  dl.pairs dd{padding-top:0}
+}
+</style>
+
+</head>
+<body>
+<div class="wrap">
+
+<header class="tb">
+  <div class="tb-name">
+    <p class="eyebrow">Plan · rev A · 2026-09-11</p>
+    <h1>GRC Rear Housing Rib Plan</h1>
+    <p class="lede">How we make hundreds of rib designs for the gearbox rear housing the nTop way (ribs melted in, with rounded roots) and find out which ones are better.</p>
+  </div>
+  <dl class="tb-cells">
+    <div><dt>Part</dt><dd>GRC rear housing</dd></div>
+    <div><dt>Drawing</dt><dd>NREL 254492 rev J</dd></div>
+    <div><dt>Mass (drawing)</dt><dd>921.15 kg</dd></div>
+    <div><dt>Rated torque</dt><dd>325 kNm</dd></div>
+    <div><dt>Starting shape</dt><dd class="mono">housing_baseline.brep</dd></div>
+    <div><dt>Compute</dt><dd>RTX 5060 8 GB · 16 GB RAM</dd></div>
+  </dl>
+</header>
+
+<main>
+
+<section id="goal">
+  <h2>What this plan does</h2>
+  <div class="prose">
+    <p>You already removed the production ribs (<span class="file">housing_baseline.brep</span>) and built designs through the Onshape API. Those ribs came out as plain boxes, with no rounded corners where they meet the walls and bores.</p>
+    <p>This plan keeps your rib-free housing and changes how ribs are added. The ribs are melted into the housing, so every rib root rounds off by itself. A script checks every design. A fast check on the GPU ranks them all, and an accurate TET10 check in CalculiX confirms the best ones.</p>
+    <p>None of this needs nTop or Ansys. It runs on free tools on your laptop.</p>
+  </div>
+</section>
+
+<section id="method">
+  <h2>The nTop method we copy</h2>
+  <ol class="method">
+    <li><p>Draw a map of rib lines by projecting a pattern (squares, triangles, hexagons or spokes) onto a wall or around a round barrel.</p></li>
+    <li><p>Turn each line into a rib with a thickness, height, draft and direction. Each of these can change from place to place, for example taller ribs where the strain is high.</p></li>
+    <li><p>Join the ribs to the housing with a blend, which rounds the rib roots automatically.</p></li>
+    <li><p>Trim the rib tops to the height map.</p></li>
+    <li><p>Make hundreds of versions by giving each design its own small settings file.</p></li>
+  </ol>
+</section>
+
+<section id="rules">
+  <h2>Five rules</h2>
+  <dl class="pairs">
+    <dt>Ribs follow the mould</dt>
+    <dd>Ribs stand in the direction the mould opens, or the casting needs extra cores. "Changing orientation" means rotating the rib pattern on the wall, not tilting the ribs. Tilted ribs come only with a later 3D-printed sand-mould mode.</dd>
+    <dt>Building is not the same as correct</dt>
+    <dd>A blended shape always builds, but it can be quietly wrong. Nothing counts as a design until it passes the checks in step 5.</dd>
+    <dt>Videos are not designs</dt>
+    <dd>Sweeping one number inside one layout shows real designs. Morphing from one layout to another is for the video only. The in-between shapes can't be cast and are never counted.</dd>
+    <dt>Measure what a gearbox housing needs</dt>
+    <dd>Bore tilt, vibration frequencies kept away from the gear-mesh frequencies, noise (later), and weight. Peak stress is a safety check on the finalists, not the main score.</dd>
+    <dt>The agent suggests, a script checks</dt>
+    <dd>The AI agent proposes settings files and code. A script checks every number against the allowed ranges. The agent never invents loads, material values or limits.</dd>
+  </dl>
+</section>
+
+<section id="flow">
+  <h2>How one design moves through the pipeline</h2>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="pipe" viewBox="0 0 1180 370" role="img" aria-label="Pipeline. A settings file goes to Build shape, then Checks. Designs that pass go to the Fast check on GPU blocks, the top 10 to 20 go to the Accurate TET10 check in CalculiX, and the top 2 to 3 become finalists rebuilt as CAD. Rejected designs return to the AI agent with a reason. The first strength run feeds a rib height map back into Build shape.">
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+
+        <rect class="d-box d-dash d-input" x="198" y="30" width="180" height="66" rx="4"/>
+        <text class="d-t1" x="288" y="52" text-anchor="middle">Rib-free housing</text>
+        <text class="d-t3" x="288" y="69" text-anchor="middle">housing_baseline.brep</text>
+        <text class="d-t2" x="288" y="86" text-anchor="middle">protected areas, mould dir.</text>
+
+        <rect class="d-box d-dash d-input" x="618" y="30" width="340" height="66" rx="4"/>
+        <text class="d-t1" x="788" y="52" text-anchor="middle">Loads · mounts · material</text>
+        <text class="d-t2" x="788" y="69" text-anchor="middle">bearing forces, rubber-mount stiffness</text>
+        <text class="d-t2" x="788" y="86" text-anchor="middle">ductile iron, gear-mesh frequencies</text>
+
+        <line class="d-line" x1="258" y1="96" x2="258" y2="168" marker-end="url(#ah)"/>
+        <text class="d-lab" x="250" y="140" text-anchor="end">distance map</text>
+        <line class="d-line" x1="688" y1="96" x2="688" y2="168" marker-end="url(#ah)"/>
+        <text class="d-lab" x="696" y="152">set once</text>
+        <line class="d-line" x1="888" y1="96" x2="888" y2="168" marker-end="url(#ah)"/>
+        <text class="d-lab" x="896" y="152">per mesh</text>
+
+        <polyline class="d-line" points="648,170 648,128 328,128 328,168" marker-end="url(#ah)"/>
+        <text class="d-lab" x="488" y="120" text-anchor="middle">first run: strain → rib height map</text>
+
+        <rect class="d-box" x="20" y="170" width="136" height="70" rx="4"/>
+        <text class="d-t1" x="88" y="193" text-anchor="middle">Settings file</text>
+        <text class="d-t2" x="88" y="211" text-anchor="middle">one per design</text>
+        <text class="d-t3" x="88" y="228" text-anchor="middle">agent or you</text>
+
+        <rect class="d-box" x="220" y="170" width="136" height="70" rx="4"/>
+        <text class="d-t1" x="288" y="193" text-anchor="middle">Build shape</text>
+        <text class="d-t2" x="288" y="211" text-anchor="middle">ribs blended in</text>
+        <text class="d-t3" x="288" y="228" text-anchor="middle">script · GPU</text>
+
+        <rect class="d-box d-key" x="420" y="170" width="136" height="70" rx="4"/>
+        <text class="d-t1" x="488" y="193" text-anchor="middle">Checks</text>
+        <text class="d-t2" x="488" y="211" text-anchor="middle">catches bad shapes</text>
+        <text class="d-t3" x="488" y="228" text-anchor="middle">script</text>
+
+        <rect class="d-box" x="620" y="170" width="136" height="70" rx="4"/>
+        <text class="d-t1" x="688" y="193" text-anchor="middle">Fast check</text>
+        <text class="d-t2" x="688" y="211" text-anchor="middle">blocks, all designs</text>
+        <text class="d-t3" x="688" y="228" text-anchor="middle">script · GPU</text>
+
+        <rect class="d-box" x="820" y="170" width="136" height="70" rx="4"/>
+        <text class="d-t1" x="888" y="193" text-anchor="middle">Accurate check</text>
+        <text class="d-t2" x="888" y="211" text-anchor="middle">TET10 mesh</text>
+        <text class="d-t3" x="888" y="228" text-anchor="middle">script · CalculiX</text>
+
+        <rect class="d-box" x="1020" y="170" width="136" height="70" rx="4"/>
+        <text class="d-t1" x="1088" y="193" text-anchor="middle">Finalists</text>
+        <text class="d-t2" x="1088" y="211" text-anchor="middle">CAD + final check</text>
+        <text class="d-t3" x="1088" y="228" text-anchor="middle">you + script</text>
+
+        <line class="d-line" x1="156" y1="205" x2="218" y2="205" marker-end="url(#ah)"/>
+        <text class="d-lab" x="188" y="197" text-anchor="middle">numbers</text>
+        <line class="d-line" x1="356" y1="205" x2="418" y2="205" marker-end="url(#ah)"/>
+        <text class="d-lab" x="388" y="197" text-anchor="middle">shape</text>
+        <line class="d-line" x1="556" y1="205" x2="618" y2="205" marker-end="url(#ah)"/>
+        <text class="d-lab" x="588" y="197" text-anchor="middle">passes</text>
+        <line class="d-line" x1="756" y1="205" x2="818" y2="205" marker-end="url(#ah)"/>
+        <text class="d-lab" x="788" y="197" text-anchor="middle">top 10–20</text>
+        <line class="d-line" x1="956" y1="205" x2="1018" y2="205" marker-end="url(#ah)"/>
+        <text class="d-lab" x="988" y="197" text-anchor="middle">top 2–3</text>
+
+        <rect class="d-box d-dash" x="20" y="290" width="136" height="62" rx="4"/>
+        <text class="d-t1" x="88" y="311" text-anchor="middle">AI agent</text>
+        <text class="d-t2" x="88" y="328" text-anchor="middle">suggests designs</text>
+        <text class="d-t3" x="88" y="344" text-anchor="middle">never sets loads</text>
+
+        <line class="d-line" x1="88" y1="290" x2="88" y2="242" marker-end="url(#ah)"/>
+        <text class="d-lab" x="96" y="262">proposes;</text>
+        <text class="d-lab" x="96" y="276">script checks ranges</text>
+
+        <polyline class="d-line" points="488,240 488,321 158,321" marker-end="url(#ah)"/>
+        <text class="d-lab" x="323" y="313" text-anchor="middle">rejected + reason</text>
+      </svg>
+    </div>
+    <figcaption>Every design passes through the same gates. Scripts build and check it. The fast GPU check ranks every design that passes, and only the best get the slower TET10 check. The final 2–3 are rebuilt as CAD. Dashed boxes are you or the AI agent; solid boxes are scripts. The blue box is the step that catches shapes that build but are wrong.</figcaption>
+  </figure>
+</section>
+
+<section id="milestones">
+  <h2>First two milestones</h2>
+  <div class="ms-grid">
+    <div class="ms">
+      <div class="ms-head"><span class="ms-id">M0</span><h3>Prove the tools</h3></div>
+      <ul>
+        <li><span>Install the Python tools and confirm NVIDIA Warp runs on your RTX 5060.</span></li>
+        <li><span>Get CalculiX and gmsh running.</span></li>
+        <li><span>Tag the rib-free housing and approve the coloured picture (step 1).</span></li>
+        <li><span>Confirm the mould direction for each wall (step 2).</span></li>
+        <li><span>Map which ribs you removed, and check the claim that the ring gear gets no ribs.</span></li>
+        <li><span>Blend one rib into the housing and look at the rounded root.</span></li>
+        <li><span>Solve the original housing, the rib-free housing and 3 designs with both checks, and compare.</span></li>
+      </ul>
+      <p class="done"><span class="label">Done when</span> all seven are ticked, and the fast check ranks designs the same way as CalculiX, with bending within about 5–10%.</p>
+    </div>
+    <div class="ms lead">
+      <div class="ms-head"><span class="ms-id">M1</span><h3>First 64 designs</h3></div>
+      <ul>
+        <li><span>Area: the end wall of the parallel-stage section and its bearing seats.</span></li>
+        <li><span>2 rib patterns. <span class="tag">proposed: squares, triangles</span></span></li>
+        <li><span>4 numbers. <span class="tag">proposed: pattern angle on the wall, rib spacing, rib thickness, height scale</span></span></li>
+        <li><span>Rib height from a first strength run: the height map × height scale.</span></li>
+        <li><span>64 designs, each reporting weight, bore tilt and first vibration frequency, plus the margin to the gear-mesh frequencies.</span></li>
+        <li><span>Both checks on all 64. This also shows how well the fast check ranks.</span></li>
+        <li><span>A sweep video.</span></li>
+      </ul>
+      <p class="done"><span class="label">Done when</span> there are 64 result rows, a weight-vs-bore-tilt chart and the video.</p>
+    </div>
+  </div>
+</section>
+
+<section id="steps">
+  <h2>Steps</h2>
+  <ol class="steps">
+    <li>
+      <div class="step-body">
+        <h3>Tag the rib-free housing</h3>
+        <p>Open <span class="file">housing_baseline.brep</span>. A script finds every bore, bolt hole, machined face and mount face from its exact shape and the drawing datums (A, B, D, EV, EW, EX, EY), and colours them in a picture. It also compares the baseline with the original STEP to show where ribs were removed: the baseline has 1,741 surfaces, against 2,149 faces in the original.</p>
+        <p class="done"><span class="label">Done when</span> you approve the picture. It's saved as a file that every later step reads.</p>
+      </div>
+      <div class="who"><span class="chip script">script</span><span class="chip you">you</span></div>
+    </li>
+    <li>
+      <div class="step-body">
+        <h3>Set the mould direction for each wall</h3>
+        <p>Ribs must stand in the direction the mould opens. The script proposes a direction for each wall from the draft on the existing walls, and you confirm it.</p>
+        <p class="done"><span class="label">Done when</span> each wall has one confirmed direction.</p>
+      </div>
+      <div class="who"><span class="chip script">script</span><span class="chip you">you</span></div>
+    </li>
+    <li>
+      <div class="step-body">
+        <h3>Draw the rib map</h3>
+        <p>A pattern (squares, triangles, hexagons, spokes) is projected onto a wall or wrapped around a barrel. Each line becomes one rib with a thickness, height, draft and direction. The map also records which rib connects which bearing seat to which mount.</p>
+        <p class="done"><span class="label">Done when</span> the same settings file always gives the same rib map.</p>
+      </div>
+      <div class="who"><span class="chip script">script</span><span class="chip agent">agent</span></div>
+    </li>
+    <li>
+      <div class="step-body">
+        <h3>Build the shape</h3>
+        <p>The housing near the wall becomes a distance map, with a fine grid only there. The ribs are blended in so their roots round off, their tops are trimmed to the height map, and the protected areas are cut back exactly. Only the rib area becomes new triangles. It's joined to your exact housing, so everything else stays as your CAD.</p>
+        <p class="done"><span class="label">Done when</span> a settings file goes in and a closed STL with rounded rib roots comes out.</p>
+      </div>
+      <div class="who"><span class="chip script">script</span></div>
+    </li>
+    <li>
+      <div class="step-body">
+        <h3>Check the shape</h3>
+        <p>The shape always builds, but it can be quietly wrong. Every design is checked for:</p>
+        <ul>
+          <li>ribs too thin for the grid;</li>
+          <li>tiny leftover bits and slivers;</li>
+          <li>blends that accidentally bridge a rib to a nearby boss;</li>
+          <li>protected areas that changed;</li>
+          <li>ribs the mould can't release;</li>
+          <li>very thick spots where cast iron can shrink.</li>
+        </ul>
+        <p class="done"><span class="label">Done when</span> each design gets pass, warn or reject, with the reason.</p>
+      </div>
+      <div class="who"><span class="chip script">script</span></div>
+    </li>
+    <li>
+      <div class="step-body">
+        <h3>Set the loads and run the first strength check</h3>
+        <p>Bearing forces are worked out from the 325 kNm torque and the gear data (tooth counts, gear sizes, helix and pressure angles), and you sign them off. The mounts use your rubber-mount stiffness once you have it. A first run on the housing gives a strain map, and rib height follows it: taller where the strain is high.</p>
+        <p class="done"><span class="label">Done when</span> there's a signed-off loads file and a rib height map.</p>
+      </div>
+      <div class="who"><span class="chip script">script</span><span class="chip you">you</span></div>
+    </li>
+    <li>
+      <div class="step-body">
+        <h3>Fast check on all designs</h3>
+        <p>One fixed grid of small bricks covers the housing, and the loads are set once. Each design only changes which bricks are full. The GPU gives weight, bore tilt and the first vibration frequencies quickly. It's good for ranking designs, not for exact stress in a fillet.</p>
+        <p class="done"><span class="label">Done when</span> it ranks designs the same way as step 8 (checked in M0 and M1).</p>
+      </div>
+      <div class="who"><span class="chip script">script</span></div>
+    </li>
+    <li>
+      <div class="step-body">
+        <h3>Accurate check on the best designs</h3>
+        <p>The surface is cleaned and filled with 2nd-order tets (TET10) in gmsh, with the middle nodes placed on the true curved surface. CalculiX gives the bore tilt (static) and the vibration frequencies (modal), which are compared with the gear-mesh frequencies. It takes minutes per design: fine for 64, too slow for hundreds, so it runs only on the best ones.</p>
+        <p class="done"><span class="label">Done when</span> each design has a results row: weight, tilt at each bearing seat, first frequencies, and margin to the gear-mesh frequencies.</p>
+      </div>
+      <div class="who"><span class="chip script">script</span></div>
+    </li>
+    <li>
+      <div class="step-body">
+        <h3>Rebuild the finalists as CAD</h3>
+        <p>The best 2–3 are rebuilt in CadQuery or Onshape. Fillets on curved cast walls may fail again here, so fix those by hand. The CAD won't exactly match the blended shape, so the accurate check runs again on the real CAD before any decision.</p>
+        <p class="done"><span class="label">Done when</span> each finalist has CAD that passes its own check.</p>
+      </div>
+      <div class="who"><span class="chip you">you</span><span class="chip script">script</span></div>
+    </li>
+  </ol>
+  <p class="note">About the videos: sweeping one number inside one layout shows real designs. Morphing from one layout to another is only for the video. Those in-between shapes can't be cast and never count as designs.</p>
+</section>
+
+<section id="inputs">
+  <h2>Inputs</h2>
+  <p class="note">What the steps need, and whether we have it yet.</p>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th>Input</th><th>Status</th><th>Where it comes from</th><th>Who decides</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Rib-free housing<span class="sub">housing_baseline.brep</span></td><td><span class="st have">have</span></td><td>This folder</td><td>—</td></tr>
+        <tr><td>Original housing and drawing<span class="sub">assets/254492_0_closed_volume.step, 254492.pdf</span></td><td><span class="st have">have</span></td><td>assets/</td><td>—</td></tr>
+        <tr><td>Protected areas<span class="sub">bores, bolt holes, machined faces, mount faces</span></td><td><span class="st prop">script proposes</span></td><td>Exact shapes plus drawing datums</td><td>You approve</td></tr>
+        <tr><td>Where new ribs may go<span class="sub">which ribs you removed</span></td><td><span class="st prop">script proposes</span></td><td>Comparing the baseline with the original</td><td>You confirm</td></tr>
+        <tr><td>Mould opening direction, per wall</td><td><span class="st prop">script proposes</span></td><td>Draft on the existing walls</td><td>You confirm</td></tr>
+        <tr><td>Casting method</td><td><span class="st assumed">assumed</span></td><td>Traditional pattern with draft, for now</td><td>You</td></tr>
+        <tr><td>Rib limits<span class="sub">min/max thickness, height, draft, spacing; blend radius</span></td><td><span class="st miss">missing</span></td><td>Your casting rules</td><td>You</td></tr>
+        <tr><td>Gear data<span class="sub">tooth counts, gear sizes, helix and pressure angles, speeds</span></td><td><span class="st miss">missing</span></td><td>NREL GRC reports</td><td>Research, then you confirm</td></tr>
+        <tr><td>Force on each bearing seat</td><td><span class="st miss">missing</span></td><td>Script: 325 kNm plus gear data, or your gearbox model</td><td>You sign off</td></tr>
+        <tr><td>Rubber-mount (torque-arm) stiffness</td><td><span class="st miss">missing</span></td><td>NREL or the supplier</td><td>You</td></tr>
+        <tr><td>Material<span class="sub">ductile iron grade, stiffness, density</span></td><td><span class="st assumed">assumed</span></td><td>EN-GJS-400-18-LT is typical; not verified for the GRC</td><td>You confirm</td></tr>
+        <tr><td>Pass/fail limits<span class="sub">max bore tilt, frequency margin</span></td><td><span class="st miss">missing</span></td><td>Your design rules</td><td>You</td></tr>
+        <tr><td>Your Onshape scripts and rib numbers</td><td><span class="st miss">wanted</span></td><td>Copy into C:\Work\fastcad</td><td>You</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">Without the bearing forces and mount stiffness, bore tilt can't be trusted. Until they arrive, bearing forces are worked out from the torque and gear data, and the tilt is reported between the two seats of the same shaft, which depends less on the mounts.</p>
+</section>
+
+<section id="roles">
+  <h2>You, scripts and the AI agent</h2>
+  <div class="roles">
+    <div class="role">
+      <div class="role-head"><span class="chip you">you</span></div>
+      <ul>
+        <li>Approve the protected areas and mould directions</li>
+        <li>Set the rib limits and pass/fail limits</li>
+        <li>Sign off loads, mounts and material</li>
+        <li>Pick the patterns to try, and the finalists</li>
+        <li>Fix the finalists' fillets in CAD</li>
+      </ul>
+    </div>
+    <div class="role">
+      <div class="role-head"><span class="chip script">scripts</span></div>
+      <ul>
+        <li>Tag, build and check every design</li>
+        <li>Run the fast and accurate checks</li>
+        <li>Write settings files, STLs, pictures, results tables and videos</li>
+        <li>Refuse any settings file outside the allowed ranges</li>
+      </ul>
+    </div>
+    <div class="role">
+      <div class="role-head"><span class="chip agent">AI agent</span></div>
+      <ul>
+        <li>Suggest the next settings files to try, based on the results so far</li>
+        <li>Write new rib-pattern code when you describe one in words</li>
+        <li>Read results and pictures, flag odd designs, write summaries</li>
+        <li>Later: train a quick-predict model on rib maps and results</li>
+      </ul>
+    </div>
+  </div>
+  <p class="pact">The agent suggests; a script checks. The agent never invents numbers. Loads, material values and limits come only from signed-off input files.</p>
+</section>
+
+<section id="tools">
+  <h2>Tools</h2>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Job</th><th>Tool</th><th>Note</th></tr></thead>
+      <tbody>
+        <tr><td>Open the housing file and tag its faces</td><td class="tool">build123d</td><td>Built on OpenCascade; reads your .brep exactly</td></tr>
+        <tr><td>Distance maps, blending, fast GPU check</td><td class="tool">NVIDIA Warp</td><td>Test on the RTX 5060 first (M0)</td></tr>
+        <tr><td>Exact joins, re-cutting holes</td><td class="tool">manifold3d</td><td>Mesh joins that don't fail</td></tr>
+        <tr><td>TET10 meshes</td><td class="tool">gmsh</td><td>fTetWild as a fallback for messy surfaces</td></tr>
+        <tr><td>Accurate static and vibration checks</td><td class="tool">CalculiX</td><td>Standard free solver</td></tr>
+        <tr><td>Pictures and videos</td><td class="tool">PyVista</td><td>Renders frames, saves MP4</td></tr>
+        <tr><td>Choosing each set of designs</td><td class="tool">SciPy · Optuna</td><td>Spreads designs evenly, then searches for the best</td></tr>
+        <tr><td>Finalists' CAD</td><td class="tool">CadQuery · Onshape</td><td>Fillets may need fixing by hand</td></tr>
+        <tr><td>Backup geometry engine</td><td class="tool">PicoGK</td><td>C#; only if Warp falls short</td></tr>
+        <tr><td>Not using</td><td class="tool">OpenVCAD · MeshLib</td><td>Not free for company use</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="risks">
+  <h2>Risks and fixes</h2>
+  <dl class="pairs">
+    <dt>"The ring gear gets no ribs" may be wrong</dt>
+    <dd>Drawing 254492 is the rear housing and shows a ring-gear face, where a separate ring gear bolts on. The webs there look like part of this casting, and the claim may come from a different model (GB3).<span class="fix">Fix: check it in M0 before ruling that area out.</span></dd>
+    <dt>Finalist CAD brings back the fillet problem</dt>
+    <dd>Fillets on curved cast walls can fail in CadQuery or Onshape, just as they did in your Onshape runs.<span class="fix">Fix: fix the 2–3 finalists by hand, and re-run the accurate check on the real CAD, since it won't exactly match the blended shape.</span></dd>
+    <dt>CalculiX takes minutes per design</dt>
+    <dd>That's fine for 64 designs, but slow for hundreds.<span class="fix">Fix: the fast GPU check sorts out the bad designs first, and CalculiX runs on the good ones.</span></dd>
+    <dt>The fast check might rank designs wrongly</dt>
+    <dd>Blocks make stair-stepped surfaces.<span class="fix">Fix: compare it with CalculiX in M0, and run both checks on all 64 designs in M1.</span></dd>
+    <dt>Bearing forces and mount stiffness are missing</dt>
+    <dd>Research found only the total torque (325 kNm).<span class="fix">Fix: use interim loads from torque plus gear data, report tilt between paired seats, and swap in the real values when they arrive.</span></dd>
+    <dt>Blending can fill holes or touch machined faces</dt>
+    <dd>The melt adds material wherever a rib gets close to other surfaces.<span class="fix">Fix: protected areas are cut back exactly after every blend, and step 5 confirms they didn't change.</span></dd>
+    <dt>Names we can't judge</dt>
+    <dd>The suggestion mentions agentiCAE, Callout, GB3 and ZenryaxAI.<span class="fix">Not assessed here. Decide on those separately.</span></dd>
+  </dl>
+</section>
+
+<section id="decisions">
+  <h2>Decisions still open</h2>
+  <p class="note">Reply with the ID to change one. Otherwise the default below applies.</p>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>ID</th><th>Decision</th><th>Default</th></tr></thead>
+      <tbody>
+        <tr><td class="id">D1</td><td>Use Python for everything?</td><td>Yes. PicoGK (C#) only as a backup.</td></tr>
+        <tr><td class="id">D2</td><td>Solver for the accurate check</td><td>CalculiX, unless you use Ansys or Abaqus.</td></tr>
+        <tr><td class="id">D3</td><td>Casting method</td><td>Traditional pattern with draft first; a 3D-printed sand-mould mode later.</td></tr>
+        <tr><td class="id">D4</td><td>What changes</td><td>Ribs only. Housing walls stay as they are until a later phase.</td></tr>
+        <tr><td class="id">D5</td><td>M1 patterns and numbers</td><td>Squares and triangles; pattern angle, spacing, thickness, height scale.</td></tr>
+        <tr><td class="id">D6</td><td>Pass/fail limits (max bore tilt, frequency margin)</td><td>No default. Needed from you.</td></tr>
+        <tr><td class="id">D7</td><td>Noise</td><td>Added after the frequency check works.</td></tr>
+        <tr><td class="id">D8</td><td>Source of the bearing forces</td><td>Worked out from 325 kNm and the NREL gear data, unless you have a gearbox model.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="later">
+  <h2>Later, and not at all</h2>
+  <div class="later">
+    <div>
+      <h3>Later phases</h3>
+      <ul>
+        <li>Ribs along load paths, following the direction the force flows</li>
+        <li>Conformal ribs around barrels and on curved box walls</li>
+        <li>Noise: how much the housing surface shakes at the gear-mesh frequencies</li>
+        <li>Thinner housing walls where they carry little load</li>
+        <li>Computer-suggested rib layouts (topology optimization turned into ribs)</li>
+        <li>Automatic search for the best design</li>
+        <li>An AI quick-predict model trained on rib maps and results</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Not doing</h3>
+      <ul>
+        <li>Lattices and gyroids, which can't be cast in iron</li>
+        <li>3D-printing supports and overhang rules</li>
+        <li>Heat-exchanger structures</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>Facts used: drawing 254492 rev J (NREL); housing_baseline.brep (1,741 surfaces) and the original STEP (2,149 faces) in C:\Work\fastcad; 325 kNm rated torque from published GRC test data; laptop with an RTX 5060 (8 GB) and 16 GB RAM. Not verified: material grade, mount stiffness, bearing forces.</footer>
+
+</div>
+
+</body>
+</html>

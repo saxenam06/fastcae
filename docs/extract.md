@@ -14,7 +14,7 @@ reason; it is never silently absent.
 | Discover artifacts | — | files classified by extension |
 | Read CAD | CAD | solid count, faces, volume, area, bbox, content digest, declared unit |
 | Check geometry health | CAD | tessellation, watertightness, volume error |
-| Measure every face | CAD | the atlas: type, area, axis, radius, adjacency, dihedrals, visibility |
+| Measure every face | CAD | the atlas: type, area, axis, radius, adjacency, dihedrals, facing, visibility |
 | Detect features | CAD | axes, bores, bosses, hole patterns, planar groups, fillets |
 | Read drawing | Drawing | callouts, each citing a page and its literal text |
 | Cross-check | CAD + Drawing | candidate associations, ambiguities, unresolved pairings |

@@ -1,8 +1,12 @@
 # Generate
 
 **Being built.** The stage that produces design variants. This file describes the design it is
-being built to; [status.md](status.md) says how much of it runs. The field is built and measured;
-nothing above it is.
+being built to; [status.md](status.md) says how much of it runs.
+
+The representation is built and measured - the field, the contour, and three ways of looking at
+both against the CAD they came from. Ribs are placed in formations - spokes, webs and grids on a
+rib-free baseline, with true root fillets - and every design comes back checked; how, and what it
+measures on the part in `assets/`, is in [rib-layouts.md](rib-layouts.md).
 
 ---
 
@@ -36,9 +40,13 @@ with the design difference.
 **Topology is free.** Adding a rib, merging two bosses, opening a passage - all the same operation
 on a field. Nothing has to be re-parametrised, and no boolean can fail.
 
-**Fillets fall out of the blend.** A smooth minimum with radius `k` joins two solids with a fillet
-of radius `k`. That is the single global fillet control, and it is a property of the combine rather
-than a feature anybody has to construct.
+**Fillets fall out of the blend.** Joining two solids with a blend rounds the junction by itself;
+it is a property of the combine rather than a feature anybody has to construct. The blend built
+today is a smooth minimum with one global `k`, capped at the band's reach because past the band a
+cell knows only which side of the surface it is on. Rib formations use a round blend instead,
+applied only where a rib meets the part and true to its radius, with the baseline's distance
+extended past the band where ribs can reach - see
+[rib-layouts.md](rib-layouts.md#the-root-fillet).
 
 ### Resolution, and what it costs
 
@@ -70,17 +78,31 @@ across to exist in a field. At 2.5 mm a Ø21 hole is 8.4 voxels and is reproduce
 marginal; Ø4.2 is gone. Where a design has to preserve small holes exactly, the base B-rep is still
 there to carry them - but that is a later refinement, not this build.
 
-Two separate grids, and confusing them would be a mistake:
-
-- the **field grid** at 2.5 mm, which decides what geometry can exist;
-- the **placement grid** at 10 mm, which decides where a rib is allowed to sit. Coarse on purpose,
-  because a continuous position turns every campaign into a search over near-duplicates.
+Where a rib sits is not a grid of positions. It comes from its formation's levers, each with a step
+the values snap to - coarse on purpose, because a continuous value turns every campaign into a
+search over near-duplicates. See [rib-layouts.md](rib-layouts.md#formations).
 
 ### Building it, and why it is not rebuilt
 
-The base field is built **once per CAD file** and cached against its content digest. Unsigned
-distance is a triangle scan-conversion - each triangle writes exact point-to-triangle distances into
-the cells near it and each cell keeps the smallest. The sign is then settled in two moves:
+The base field is built **once per CAD file** and kept, keyed on the CAD's digest and the voxel
+size; the contour is kept against the field it came from. See the cache in
+[architecture.md](architecture.md).
+
+Measured on the part in `assets/`, a restart followed by opening the Field tab:
+
+| voxel | field | contour | cells | cold |
+|---|---|---|---|---|
+| 10 mm | 0.01 s | 0.01 s | 0.02 s | 62 s + 1 s |
+| 5 mm | 0.03 s | 0.02 s | 0.11 s | 144 s + 3 s |
+| 2.5 mm | 0.18 s | 0.07 s | 0.72 s | 287 s + 26 s |
+
+**Voxel sizes are round numbers, and the interface says which are built.** Offering one derived
+from the part put 2.37 mm behind a button that looked like the others, matched nothing already
+cached, and cost five minutes for the field and hours for the contour. A size nobody can name is a
+size nothing is ever cached for.
+
+Unsigned distance is a triangle scan-conversion: each triangle writes exact point-to-triangle
+distances into the cells near it and each cell keeps the smallest. The sign is then settled in two moves:
 connectivity groups the cells more than half a voxel from the surface into regions that must share
 an answer, and one ray per region says what that answer is. The cells straddling the surface get a
 ray each.
@@ -90,9 +112,19 @@ the edge of the grid can be the material inside a wall **or the air inside a sea
 nothing topological separates them.
 
 Per design, nothing about the base is recomputed. Parameters are analytic primitives evaluated only
-on the cells they can reach, and only that region is re-contoured. That is what makes apply-and-see
-interactive on a two-metre casting: the expensive part happens once and the cheap part is the only
-thing a dial moves.
+on the cells they can reach, which is a few tens of thousands of cells for a rib rather than
+millions. That is what makes apply-and-see affordable: the expensive part happens once, and a dial
+moves only the cheap part.
+
+**The baseline is contoured whole, once; a design re-contours only what it changes.** Measured,
+the whole part takes 26 s at 2.5 mm, and a design has to come back in about two. A patch joined to
+the rest by a mesh boolean would be the fragile step every such pipeline has - coplanar faces,
+slivers, floating-point ties - and a boolean that leaks fails the watertightness gate outright.
+That is not what happens here. On the same grid dual contouring is local: a cell whose samples did
+not change yields the same vertex bit for bit, so a re-contoured window's edge is the baseline's
+own vertices and the window drops in by index. Nothing is joined, and the tests hold a splice to
+exactly the bytes a whole-field contour gives - see
+[rib-layouts.md](rib-layouts.md#contouring-only-what-changed).
 
 ### Accuracy
 
@@ -103,7 +135,59 @@ On a sphere of radius 100 at an 8 mm voxel the signed distance is within **0.2 m
 the band - which is the faceting of the tessellated sphere, not the voxel size, because the
 distance itself is computed exactly rather than sampled.
 
-### Getting a surface back
+### Looking at a field
+
+**A field can be looked at directly.** It does not have to be turned into a surface first, and a
+contour is not the field - it is a reconstruction of one, and it can be wrong in ways the field is
+not.
+
+The interface draws three layers, each switchable, because two of them occupy the same space and
+the only way to tell which is which is to turn one off:
+
+| layer | what it is | to send | to draw, each frame |
+|---|---|---|---|
+| **field cells** | the cells as stored. The field itself | 0.4 / 1.8 / 7.2 MB | 0.7 / 2.7 / 10.8 M vertices |
+| **contour** | the surface fitted through them. A reconstruction | 5.2 / 20.0 / 79.8 MB | 0.7 / 2.7 / 10.8 M vertices |
+| **geometry** | the tessellated B-rep it was all built from | 4.3 MB | 0.5 M vertices |
+
+Both surfaces are **indexed and welded by normal**. Sending three separate corners per triangle
+says everything three times - 10.8 million vertices for the 1.8 million a 2.5 mm contour has, and
+303 MB for what fits in 80. Vertices are shared wherever they agree about which way the surface
+faces, which is where they can be: a machined edge has two normals at one point and needs two
+vertices, a smooth wall needs one. Welding on position alone rounds every edge off; not welding at
+all costs four times the bytes for the same picture. Normals ride as three signed bytes, which is
+under a degree of direction for a third of what floats cost.
+
+Two things keep the cells cheap, and the second is not optional.
+
+**Only the boundary**, because the interior is solid and hidden. **And only the faces that show** -
+a cell has six and you see at most three, so drawing a whole cube each is six times the work for
+the same picture. On a 2.5 mm field that is the difference between 48 million vertices a frame and
+10.8 million, which is the difference between a browser drawing it and a browser stopping.
+
+Each face is one integer - the cell's index and which way it points - and the grid it indexes into
+travels once as a uniform. Four bytes a face against twelve for a position, so the payload is
+**forty times smaller than the contour** while drawing the same amount. That is why the cells are
+the default view and the contour is loaded on request.
+
+Two more views are worth having and are not built: **slices**, which show the actual numbers on a
+plane and are cheaper still, and **ray marching**, which draws the surface per pixel with no
+geometry at all.
+
+### Getting a surface back, and what for
+
+**Simulation never needs one.** An immersed solve puts cells on the same fixed grid and asks each
+how full it is, which is a field question. It sees no triangle, no contour and no boolean.
+
+Three other things do need a surface:
+
+- **Checking.** Volume, area and watertightness are measured on one.
+- **Handing over.** Export, or a body-fitted mesh for whatever is used as the reference solver.
+- **Selecting.** Picking a face to author a parameter on runs against triangles carrying CAD face
+  ids. A ray-marched view is prettier and has nothing to click.
+
+That last one is why contouring comes before the other two views despite being the most work: it
+keeps the picking, the selection tools and the controlled-face highlighting that already exist.
 
 **Dual contouring**, not marching cubes. Marching cubes cannot represent an edge inside a cell, so
 every machined corner comes back rounded to the voxel - on a casting whose whole character is crisp
@@ -111,30 +195,29 @@ machined faces against soft cast ones, that erases the distinction the part is a
 contouring places one vertex per cell where the surface's own planes intersect, and reproduces an
 edge exactly.
 
-The surface is for display and for measurement. The field is the design.
-
 ## Parameters
 
 Every parameter is a person's or an agent's choice, authored on the geometry. **Nothing is
 preloaded** - a fresh project has no parameters until someone puts one there.
 
-### Ribs first
+### Ribs
 
-A rib is a rounded slab: a footprint on a host face, a height, a thickness, and the global blend
-`k` where it meets the wall. Its distance function is closed-form, so unioning it is a few lines,
-and unioning it onto the **production casting as it stands** means no ribs have to be stripped
-first. That was the root of the quality problem in the previous system, and in a field it simply
-does not arise.
+Ribs are generated, not placed one at a time. A formation - spokes, a web, a square or triangle
+grid - draws lines across a zone; each becomes a rib with a thickness, a height, a draft and rounded
+free edges, grown on a baseline with the production ribs removed - in CAD, where removing a face is
+reliable, because a formation can only vary ribs it owns. The point is range: many kinds of
+formation, each set by a few levers, to be compared once they are simulated. Designed in
+[rib-layouts.md](rib-layouts.md).
 
-`height` is the continuous dial. Footprint and thickness are authored once; height is what a
-campaign sweeps.
+The first version - one rounded slab on a face selection, its height the dial, joined by the
+global blend `k` - is still in the API and gone from the interface. It returns as the manual
+formation.
 
-### Face-set offset second
+### Face-set offset
 
 Select faces, push them along a direction. The atlas, the picking and `grow`/`similar` already
-exist to author the selection. It lands second because offsetting an arbitrary subset of the
-boundary means building a field for that patch and blending it into its neighbours, which is
-genuinely harder than adding a primitive.
+exist to author the selection, and `offset.py` computes it, unwired. It is parked: the rib layouts
+keep the walls as they are.
 
 ### Authoring is a task
 
@@ -144,21 +227,24 @@ agent produces becomes a parameter on its own.
 
 ## The loop
 
-**Apply and see, first.** Set values, press apply, see the result in under a second, server-side.
-Not a live slider: a live slider on a two-metre casting is a large investment for a demo effect,
-and it buys no understanding that a sub-second round trip does not.
+**Set, then generate.** Pick a formation, set its levers, press Generate, and see the design and
+its checks in a few seconds. The design updating while a lever is dragged is later work.
 
-**Sample, second.** Fix the parameters, sample N designs across their ranges, and get a gallery.
-This is the workflow that actually feeds a campaign, and the reason designs are stored as vectors:
-a hundred variants is a hundred short rows, and any of them regenerates exactly.
+**Sample, second.** A seeded list of designs, built by a script that writes a summary table. This
+is what feeds a campaign, and the reason designs are stored as settings: a hundred variants is a
+hundred short rows, and any of them regenerates exactly - entering its values in the stage shows it.
+Launching a campaign from the interface comes later.
 
 ## Validity
 
 Three things are checked before a design is offered, because an invalid one poisons a campaign more
-quietly than it fails:
+quietly than it fails. The full set for rib layouts - each pass, warn or reject with its reason - is
+in [rib-layouts.md](rib-layouts.md#checks).
 
-- **Watertight by construction.** A level set of a continuous field is closed. There is nothing to
-  gate, which is the point.
+- **Watertight.** A level set of a continuous field is closed; its contour has to be made manifold
+  to stay so. With a vertex per piece of surface in each cell, and a vertex of its own for each
+  stretch across a face whose corners alternate, the part in `assets/` contours at 2.5 mm with no
+  edge in more than two triangles - it had 64.
 - **Minimum wall thickness**, measured on the field itself - the distance transform already holds
   it.
 - **Controlled faces unmoved.** A face a drawing tolerances must not be within reach of any
@@ -166,8 +252,22 @@ quietly than it fails:
 
 ## Build order
 
-1. `field.py` - the narrow-band signed distance field, cached against the CAD digest
-2. `primitives.py` - the rib slab, and smooth-min with the global `k`
-3. `design.py` - a design as a digest and a vector; deterministic regeneration
-4. `surface.py` - dual contouring back to the face-tagged mesh the renderer already reads
-5. the API routes and the Generate stage in the interface
+Done:
+
+- `field.py` - the narrow-band signed distance field, cached against the CAD digest
+- `surface.py` - dual contouring the whole field back into triangles. No patching, no seam, no
+  mesh boolean, and therefore no dependency for one
+- `cells.py` and `shading.py` - the field drawn as itself, and a contour lit as one surface
+- the Field tab: three layers, each switchable, each priced
+- `primitives.py` - the rib as a rounded slab with an exact distance function, and the smooth
+  minimum the fillets come out of
+- `design.py` - a parameter, a design as a digest and a vector, and evaluation confined to the
+  cells a parameter can reach. About ten milliseconds a move on the part in `assets/`
+- `corrections.py` - a baseline trimmed to its reference, applied once a person approves it
+- manifold dual contouring, and re-contouring only the cells a design changed
+- `ribs.py`, `formations.py`, `zones.py`, `compose.py`, `checks.py`, `designs.py` - ribs in
+  formations inside approved zones, with round-blend root fillets, checked and measured
+- the Generate tab: approve zones and protected areas, pick a formation, set its levers, Generate
+- `fastcae designs` - a seeded list of designs and a summary table
+
+Next is in [status.md](status.md).

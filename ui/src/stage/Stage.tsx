@@ -9,10 +9,25 @@
 import { useEffect, useRef } from "react";
 import type { ColourMode } from "../render/renderer";
 import { Renderer } from "../render/renderer";
-import type { Mesh } from "../api/client";
+import type { Mesh, VoxelCells } from "../api/client";
 
 interface StageProps {
   mesh: Mesh;
+  /**
+   * A second surface drawn over the first, for comparing them, and the field's own cells.
+   *
+   * Passed whenever they are *loaded*, not whenever they are *shown*: whether a layer is visible
+   * is a separate flag, so switching one off leaves it on the GPU rather than throwing away
+   * eighty megabytes that have to be uploaded again to switch it back on.
+   */
+  overlay?: Mesh | null;
+  voxels?: VoxelCells | null;
+  overlayAlpha?: number;
+  /** The overlay's colour. Ochre by default, against the steel of the main surface. */
+  overlayTint?: [number, number, number];
+  showSurface?: boolean;
+  showOverlay?: boolean;
+  showVoxels?: boolean;
   faceCount: number;
   bbox: number[];
   selected: Set<number>;
@@ -23,6 +38,8 @@ interface StageProps {
   onHover: (faceId: number | null) => void;
   onPick: (faceId: number | null, event: MouseEvent) => void;
 }
+
+const OCHRE: [number, number, number] = [0.541, 0.416, 0.122];
 
 export function Stage(props: StageProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -38,6 +55,13 @@ export function Stage(props: StageProps) {
     if (!canvas) return;
 
     const renderer = new Renderer(canvas, props.mesh, props.faceCount);
+    renderer.showSurface = props.showSurface ?? true;
+    renderer.showOverlay = props.showOverlay ?? true;
+    renderer.showVoxels = props.showVoxels ?? true;
+    renderer.overlayAlpha = props.overlayAlpha ?? 0.42;
+    renderer.overlayTint = props.overlayTint ?? OCHRE;
+    renderer.setOverlay(props.overlay ?? null);
+    renderer.setVoxels(props.voxels ?? null);
     renderer.frame(props.bbox);
     rendererRef.current = renderer;
     dirtyRef.current = true;
@@ -60,9 +84,37 @@ export function Stage(props: StageProps) {
     return () => {
       cancelAnimationFrame(frame);
       window.removeEventListener("resize", onResize);
+      renderer.dispose();
       rendererRef.current = null;
     };
   }, [props.mesh, props.faceCount]);
+
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    renderer.setOverlay(props.overlay ?? null);
+    dirtyRef.current = true;
+  }, [props.overlay]);
+
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    renderer.setVoxels(props.voxels ?? null);
+    dirtyRef.current = true;
+  }, [props.voxels]);
+
+  // Cheap to change and cheap to apply, so these ride along with the face state rather than
+  // rebuilding anything.
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    renderer.showSurface = props.showSurface ?? true;
+    renderer.showOverlay = props.showOverlay ?? true;
+    renderer.showVoxels = props.showVoxels ?? true;
+    renderer.overlayAlpha = props.overlayAlpha ?? 0.42;
+    renderer.overlayTint = props.overlayTint ?? OCHRE;
+    dirtyRef.current = true;
+  }, [props.showSurface, props.showOverlay, props.showVoxels, props.overlayAlpha, props.overlayTint]);
 
   // Face state and colour mode: cheap texture writes, so this can run on every state change.
   useEffect(() => {
