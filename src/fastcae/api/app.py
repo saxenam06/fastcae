@@ -1,8 +1,8 @@
 """HTTP surface.
 
 Routes contain no logic. Each unpacks a request, calls one function from the engine, and packs the
-result. Anything a route could do that the engine cannot is something the agent would not be able
-to do.
+result. Anything a route could do that the engine cannot is something nothing else driving the
+engine would be able to do.
 
 **Nothing is loaded at startup.** The server begins with no project open, because the first thing
 a person does is choose what to extract. A server that pre-loads one part is a server built around
@@ -11,21 +11,28 @@ that part.
 
 from __future__ import annotations
 
+import copy
+import json
 import struct
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from pathlib import Path
+from typing import Any, Literal
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from .. import cache
+from .. import spec as specs
 from ..extract import Extraction
 from ..extract import run as run_extract
+from ..features import extent as feature_extent
+from ..features import neighbours as feature_neighbours
 from ..generate import Field as DistanceField
 from ..generate import designs as design_space
 from ..generate import field_for
@@ -34,7 +41,17 @@ from ..generate.design import Design, Parameter, apply, host_from, rib_on
 from ..generate.field import field_key as key_of_field
 from ..generate.formations import FORMATIONS
 from ..generate.primitives import Slab
+from ..generate.session import (
+    Session,
+    design_from_spec,
+    paths_for_card,
+    refill,
+    verdict,
+    write_from_card,
+)
 from ..generate.shading import corner_normals
+from ..generate.slots import CardError
+from ..generate.slots import Edit as CardEdit
 from ..generate.surface import CODE as SURFACE_CODE
 from ..generate.surface import Surface, contour, surface_for
 from ..project import ASSETS_ROOT, ArtifactKind, Project, classify, discover, open_project
@@ -67,6 +84,12 @@ class State:
     space: design_space.DesignSpace | None = None
     made: design_space.Design | None = None
     made_blob: bytes | None = None
+
+    # The rib work: the card, the spec it writes and designs made from that - one session, shared
+    # with the agent when there is one, so a design made anywhere is the one the Generate tab shows.
+    intent: Any = None
+    agent: Any = None
+    made_verdict: dict | None = None
 
     @property
     def stage(self) -> str:
@@ -487,6 +510,64 @@ def get_features(kind: str | None = None, limit: int = 300) -> list[dict]:
     return [_feature_row(result, f) for f in features[:limit]]
 
 
+@app.get("/api/features/{feature_id}")
+def get_feature(feature_id: str) -> dict:
+    result = extracted()
+    return _feature_row(result, _feature(result, feature_id))
+
+
+@app.get("/api/features/{feature_id}/extent")
+def get_feature_extent(feature_id: str, direction: str | None = None) -> dict:
+    """How far a feature reaches along a direction: its lowest and highest point.
+
+    ``direction`` is three numbers, ``x,y,z``. Left out, it is the feature's own: the way a planar
+    group faces, or the axis a hole, bore or boss turns about.
+    """
+    result = extracted()
+    feature = _feature(result, feature_id)
+    if direction is not None:
+        try:
+            unit = [float(v) for v in direction.split(",")]
+        except ValueError as error:
+            raise HTTPException(400, "direction is three numbers, x,y,z") from error
+    elif feature.normal is not None:
+        unit = list(feature.normal)
+    elif feature.axis_id is not None and result.features is not None:
+        unit = list(result.features.axes[feature.axis_id].direction)
+    else:
+        raise HTTPException(400, f"{feature_id} has no direction of its own; give one")
+    if len(unit) != 3 or not any(unit):
+        raise HTTPException(400, "direction is three numbers, x,y,z, not all zero")
+    assert result.tess is not None
+    low, high = feature_extent(result.tess, feature.face_ids, tuple(unit))
+    length = sum(v * v for v in unit) ** 0.5
+    return {
+        "feature": feature_id,
+        "direction": [v / length for v in unit],
+        "low_mm": round(low, 3),
+        "high_mm": round(high, 3),
+    }
+
+
+@app.get("/api/features/{feature_id}/neighbours")
+def get_feature_neighbours(feature_id: str) -> list[dict]:
+    """Every feature touching this one along an edge."""
+    result = extracted()
+    _feature(result, feature_id)
+    assert result.features is not None and result.atlas is not None
+    return [
+        _feature_row(result, result.features.features[other])
+        for other in feature_neighbours(result.features, result.atlas, feature_id)
+    ]
+
+
+def _feature(result: Extraction, feature_id: str):
+    found = None if result.features is None else result.features.get(feature_id)
+    if found is None:
+        raise HTTPException(404, f"no feature {feature_id}")
+    return found
+
+
 @app.get("/api/feature-kinds")
 def get_feature_kinds() -> list[dict]:
     result = extracted()
@@ -577,6 +658,9 @@ def get_face(face_id: int) -> dict:
         "analytic_area_mm2": round(face.area_mm2, 2),
         "analytic_area_is_valid": face.area_mm2 > 0,
         "centroid_mm": [round(v, 2) for v in face.centroid],
+        "bbox_mm": _face_box(result, face_id),
+        "normal": None if face.normal is None else [round(v, 6) for v in face.normal],
+        "axis": None if face.axis is None else [round(v, 6) for v in face.axis],
         "diameter_mm": None if face.diameter_mm is None else round(face.diameter_mm, 3),
         "minor_radius_mm": (
             None if face.minor_radius_mm is None else round(face.minor_radius_mm, 3)
@@ -589,6 +673,17 @@ def get_face(face_id: int) -> dict:
         "controlled": face_id in controlled,
         "features": [_feature_row(result, f) for f in features],
     }
+
+
+def _face_box(result: Extraction, face_id: int) -> list[float] | None:
+    """Where a face reaches, from its own triangles: OCC's box is padded by the face's tolerance."""
+    if result.tess is None:
+        return None
+    mine = result.tess.face_id == face_id
+    if not mine.any():
+        return None
+    points = result.tess.vertices[np.unique(result.tess.triangles[mine])]
+    return [round(float(v), 2) for v in (*points.min(axis=0), *points.max(axis=0))]
 
 
 # --- selection ---------------------------------------------------------------------------------
@@ -640,6 +735,39 @@ def post_grow(request: GrowRequest) -> dict:
     )
 
 
+class Seed(BaseModel):
+    face_id: int
+    grow_deg: float = Field(default=0.0, ge=0.0, le=180.0)
+    """Grow from this face across every edge shallower than this; zero is the face alone."""
+
+
+class SeedsRequest(BaseModel):
+    seeds: list[Seed] = Field(min_length=1)
+
+
+@app.post("/api/select/seeds")
+def post_select_seeds(request: SeedsRequest) -> dict:
+    """A selection made click by click: each face clicked, grown by its own angle or not at all.
+
+    One angle over every click grew faces clicked later as far as the first - the angle belongs to
+    the click, not to the selection.
+    """
+    result = extracted()
+    if result.atlas is None:
+        raise HTTPException(409, "no geometry")
+    unknown = [s.face_id for s in request.seeds if s.face_id not in result.atlas.faces]
+    if unknown:
+        raise HTTPException(404, f"no face {unknown[0]}")
+    ids: set[int] = set()
+    for seed in request.seeds:
+        if seed.grow_deg > 0:
+            ids |= result.atlas.grow([seed.face_id], max_dihedral_deg=seed.grow_deg)
+        else:
+            ids.add(seed.face_id)
+    grown = sum(1 for s in request.seeds if s.grow_deg > 0)
+    return _selection(result, ids, f"{len(request.seeds)} faces clicked, {grown} of them grown")
+
+
 @app.post("/api/select/similar")
 def post_similar(request: SimilarRequest) -> dict:
     result = extracted()
@@ -659,9 +787,7 @@ def post_similar(request: SimilarRequest) -> dict:
 @app.get("/api/select/feature/{feature_id:path}")
 def get_select_feature(feature_id: str) -> dict:
     result = extracted()
-    if result.features is None or feature_id not in result.features.features:
-        raise HTTPException(404, f"no feature {feature_id!r}")
-    feature = result.features.features[feature_id]
+    feature = _feature(result, feature_id)
     return _selection(result, set(feature.face_ids), feature.describe())
 
 
@@ -891,6 +1017,7 @@ def _forget_space() -> None:
     _state.space = None
     _state.made = None
     _state.made_blob = None
+    _state.made_verdict = None
 
 
 @app.get("/api/zones")
@@ -1192,6 +1319,9 @@ def _feature_row(result: Extraction, feature) -> dict:
         "station_mm": None if feature.station_mm is None else round(feature.station_mm, 2),
         "count": feature.count,
         "metrics": {k: (None if v != v else round(v, 3)) for k, v in feature.metrics.items()},
+        "centroid_mm": [round(v, 2) for v in feature.centroid],
+        "normal": None if feature.normal is None else [round(v, 6) for v in feature.normal],
+        "opens_onto": list(feature.opens_onto),
         "controlled": None if fact is None else _fact_row(fact),
     }
 
@@ -1237,3 +1367,194 @@ def _encode_mesh(tess, normals: np.ndarray | None = None) -> bytes:
     """Pack a surface for the renderer. The format, and why it is that format, is in
     :mod:`fastcae.api.mesh`."""
     return mesh_format.encode(tess.vertices, tess.triangles, tess.face_id, normals)
+
+
+# --- the spec, and designs made from it -----------------------------------------------------------
+
+
+class SpecDesignRequest(BaseModel):
+    fidelity: Literal["preview", "full"] = "preview"
+    levers: dict[str, float] = Field(default_factory=dict)
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1)
+    selection: list[int] = Field(default_factory=list)
+    """The faces selected on the part when the engineer wrote."""
+    role: Literal["auto", "host", "supports", "keep_out"] = "auto"
+    """What the engineer said the selection is for; ``auto`` leaves it to the agent."""
+
+
+def _intent() -> Session:
+    """The rib work on the open project: the card, and designs made from the spec it writes."""
+    project, result = _project(), extracted()
+    held = _state.intent
+    if held is None or held.project.root != project.root or held.extraction is not result:
+        _state.intent = Session(project, result)
+        _state.agent = None
+    return _state.intent
+
+
+@app.get("/api/spec")
+def get_spec() -> dict:
+    """The active spec: its versions, and the current one in full."""
+    spec = specs.active(_project())
+    if spec is None:
+        return {"spec": None}
+    return {
+        "spec": spec.name,
+        "versions": [
+            {"version": v.version, "created": v.created, "note": v.note, "changes": v.changes}
+            for v in spec.versions
+        ],
+        "current": spec.current.model_dump(),
+    }
+
+
+@app.post("/api/spec/design")
+def post_spec_design(request: SpecDesignRequest) -> dict:
+    """A design from the active spec, and its verdict."""
+    context = _intent()
+    reply = design_from_spec(context, request.fidelity, request.levers)
+    if "cannot" in reply:
+        raise HTTPException(409, reply["cannot"])
+    _hold_design(context)
+    return reply
+
+
+# --- the rib card ---------------------------------------------------------------------------------
+
+
+class CardStart(BaseModel):
+    selection: list[int] = Field(default_factory=list)
+    """The faces selected on the part: where ribs stand, and what they run between."""
+
+
+class CardEdits(BaseModel):
+    edits: list[CardEdit] = Field(min_length=1)
+
+
+class CardDesign(BaseModel):
+    fidelity: Literal["preview", "full"] = "preview"
+
+
+@app.get("/api/card")
+def get_card() -> dict:
+    """The rib card as it stands: every slot, where its value came from, what is wrong."""
+    return refill(_intent())
+
+
+@app.post("/api/card/start")
+def post_card_start(request: CardStart) -> dict:
+    """Start the card again from faces selected on the part."""
+    context = _intent()
+    context.card.begin(request.selection)
+    return refill(context)
+
+
+@app.post("/api/card")
+def post_card(request: CardEdits) -> dict:
+    """Change the card: a value, faces, or words, slot by slot. Nothing is kept if any edit is
+    refused."""
+    context = _intent()
+    before = copy.deepcopy(context.card)
+    try:
+        for edit in request.edits:
+            context.card.edit(edit)
+    except CardError as error:
+        context.card = before
+        raise HTTPException(422, str(error)) from error
+    return refill(context)
+
+
+@app.post("/api/card/paths")
+def post_card_paths() -> dict:
+    """Where the card would put ribs, as lines on the part, before any design is made."""
+    reply = paths_for_card(_intent())
+    if "cannot" in reply:
+        raise HTTPException(409, reply["cannot"])
+    return reply
+
+
+@app.post("/api/card/design")
+def post_card_design(request: CardDesign) -> dict:
+    """Write the card as a new version of the spec, and make a design from it."""
+    context = _intent()
+    written = write_from_card(context)
+    if "cannot" in written:
+        raise HTTPException(409, written["cannot"])
+    reply = design_from_spec(context, request.fidelity, {})
+    if "cannot" in reply:
+        raise HTTPException(409, reply["cannot"])
+    _hold_design(context)
+    return {"version": written["version"], "verdict": reply}
+
+
+@app.get("/api/designs/current")
+def get_current_design() -> dict:
+    """The verdict of the design last made from a spec, by the agent or the Generate tab."""
+    if _state.made_verdict is None:
+        raise HTTPException(404, "no design has been made from a spec")
+    return _state.made_verdict
+
+
+def _hold_design(context: Session) -> None:
+    if context.made is not None:
+        _state.made = context.made.design
+        _state.made_blob = None
+        _state.made_verdict = verdict(context.made)
+
+
+# --- the agent ------------------------------------------------------------------------------------
+
+
+def _agent():
+    from ..agent.runtime import Runtime
+
+    context = _intent()
+    if _state.agent is None:
+        _state.agent = Runtime(context.project, context.extraction, context=context)
+    return _state.agent
+
+
+@app.get("/api/agent/status")
+def get_agent_status() -> dict:
+    """Which model the agent runs on, whether its key is present, whether tracing is on."""
+    from ..agent.runtime import status
+
+    return status()
+
+
+@app.get("/api/agent/history")
+def get_agent_history() -> dict:
+    agent = _agent()
+    return {"thread": agent.thread, "messages": agent.history()}
+
+
+@app.post("/api/agent/new")
+def post_agent_new() -> dict:
+    """Start a new conversation. The old one is kept."""
+    agent = _agent()
+    agent.new_thread()
+    return {"thread": agent.thread, "messages": []}
+
+
+@app.post("/api/agent/chat")
+def post_agent_chat(request: ChatRequest) -> StreamingResponse:
+    """One message to the agent, answered as a stream of events: text, tools, what changed."""
+    try:
+        agent = _agent()
+    except Exception as error:  # noqa: BLE001 - a missing key or model has to reach the pane
+        raise HTTPException(503, f"the agent could not start: {error}") from error
+
+    def events():
+        for event in agent.turn(request.message, request.selection, request.role):
+            if event["type"] == "changed" and "design" in event["what"]:
+                _hold_design(agent.context)
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
