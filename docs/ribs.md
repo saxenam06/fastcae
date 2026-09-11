@@ -132,10 +132,10 @@ One group of ribs is a fixed list of slots:
 
 | slot | the engineer sets | otherwise |
 |---|---|---|
-| where ribs stand | faces, selected | the flat area the rest of the selection rises from - not merely the largest |
-| what they run between | faces, selected or named | the other faces selected; with none, what stands up round the host, past any fillet or chamfer at its foot, on the side ribs stand |
+| where ribs stand | faces, selected | the flat area the rest of the selection rises from, with every other selected flat face in its plane - not merely the largest |
+| what they run between | faces, selected or named | the other faces selected that stand up from the host; with none, what stands up round the host, past any fillet or chamfer at its foot, on the side ribs stand |
 | keep clear of | the faces whose holes to avoid, a clearance - or none | every hole through where ribs stand, 5 mm clear, listed |
-| pattern | parallel, square grid, triangle grid, spokes - and for spokes, what they turn about, picked from the bosses and bores among what they run between, largest first, and whether they fan across where ribs stand or go all the way round | spokes about the largest boss or bore standing in the host with the host round more than half of it; else a square grid. Asked for spokes, the largest boss or bore there is. Spokes fan across the host, so a count is ribs there - unless turned by an angle or a face, which needs them all the way round |
+| pattern | parallel, square grid, triangle grid, spokes - and for spokes, what they turn about, picked from the bosses and bores standing round the host, largest first, and whether they fan across where ribs stand or go all the way round | spokes about the largest boss or bore standing in the host with the host round more than half of it; else a square grid. Asked for spokes, the largest boss or bore there is. Spokes fan across the host, so a count is ribs there - unless turned by an angle or a face, which needs them all the way round |
 | orientation | an angle - or a face to run along or square to, or for spokes, to point the first one toward | set out from the longest wall round the host: a grid along it, parallel ribs square to it, running out from it; spokes fan, needing none. With no wall, the host's longest direction, and a number says which way 0° points |
 | how many | a count, or a spacing | 8 spokes, or a pitch of 8 thicknesses |
 | how tall | a height, faces to stay below, and whether the top slopes or is level | each end as tall as what it meets, the top sloping between |
@@ -160,13 +160,17 @@ or *needed* - and each is set in place:
 - **reset** forgets what the engineer set in a slot, and the part and the drawing fill it again.
 
 **The card draws where ribs would go before anything is made.** "Show paths" draws every line its
-layout tries on the part, coloured by what becomes of it - a rib, stopped by something to keep clear
-of, ending on something not named, too short, no room for its height, or missing where ribs stand -
-with the count in words, and redraws as the card changes. Only placing is done for it, so it takes
-seconds once the part is open at the preview grid; nothing is written to the spec.
+layout lays across where ribs stand - never past it - cut into pieces by holes and gaps, each piece
+coloured by what becomes of it: a rib, stopped by something to keep clear of, ending at an edge with
+nothing to meet, ending on something not named (which it names, to be added), too short, or no room
+for its height. The words count lines, pieces and what each piece became, so the numbers add up:
+*"18 lines cross where ribs stand, cut into 37 pieces: 13 ribs, 16 stopped by something to keep
+clear of, …"*. It redraws as the card changes. Only placing is done for it, so it takes seconds once
+the part is open at the preview grid; nothing is written to the spec.
 
 **The card says what is wrong, as it goes.** A face that is not on the part, a host that is not one
-plane, a face both stood on and run between, spokes with nothing to turn about, ribs closer than
+plane, a face both stood on and run between, a face to run between that does not stand up from the
+host, spokes with nothing to turn about, ribs closer than
 their own thickness, a height limit - a number, or a face to stay below - that leaves no room for a
 rib taller than its root fillet, a radius below the smallest the part allows, an edge round more
 than half the rib, words it could not read. The card is **ready** when nothing is needed and nothing is wrong, and
@@ -191,8 +195,9 @@ Everything the card fills is read off the part by code, in one pass:
   through a hole.
 - **What spokes turn about** is a boss or a bore: something round standing square to the host that
   goes a good way round its axis, with the rest of it if the CAD split it in pieces - a corner
-  fillet or a rounded wall corner never does. The card chooses spokes by itself only when the host
-  goes round more than half of one; asked for spokes, it takes the largest, and lists the rest.
+  fillet or a rounded wall corner never does. It is looked for among everything standing round the
+  host, named to run between or not. The card chooses spokes by itself only when the host goes round
+  more than half of one; asked for spokes, it takes the largest, and lists the rest.
 - **Which wall straight ribs are set out from** is the longest flat face standing round the host,
   measured along it.
 - **How tall a rib can stand at an end** is measured on the metal its end is buried in, at every

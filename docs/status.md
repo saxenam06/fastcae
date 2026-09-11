@@ -28,10 +28,12 @@ What runs:
     ribs square to it - or from a face the engineer picks, or a number, with a note saying which way
     0° points. Spokes fan across where ribs stand and need none.
   - **What is wrong shows on its slot as it happens**, down to a height limit that leaves no room
-    for a rib, such as a face to stay below on the other side of the host.
-  - **Show paths** draws every line the layout tries on the part, coloured by what becomes of it,
-    and redraws as the card changes: one to three seconds once the part is open. A design's verdict
-    says the same in words - how many paths became ribs, and why the others did not.
+    for a rib, such as a face to stay below on the other side of the host, or a face to run between
+    that does not stand up from it. Flat faces selected in one plane are where ribs stand together.
+  - **Show paths** draws every line the layout lays across where ribs stand, never past it, cut
+    into pieces by holes and gaps and coloured by what becomes of each piece, and redraws as the
+    card changes: one to three seconds once the part is open. The words count lines, pieces and
+    what each piece became, so the numbers add up; a design's verdict says the same.
 - **Selecting**: each click is grown by its own angle or not at all; the stage lists the clicks,
   and the grow control acts on one of them. A face clicked after growing another starts ungrown.
 - **Reading the part**: holes go round (a fillet in a corner is not a hole; a cast hole with draft
@@ -47,7 +49,8 @@ What runs:
   are spans from one support to another. Each end stands as tall as what it meets there - buried as
   deep as it must be to stay inside it all the way up, never through it - and the top slopes
   between the ends, or stays level at the lower if asked; a named feature or a given height caps
-  both. No rib is shorter than its root fillet. Every path is accounted for: a rib, or why not.
+  both. No rib is shorter than its root fillet. Every piece of every path is accounted for: a rib,
+  or why not - a keep-out, an open edge, something not named (and what), too short, no room.
 - **Designs from a spec**, at preview (twice the design grid) or full; the verdict lists the
   engineer's constraints, verified on the ribs placed and citing their words, then the checks.
 - **The agent** - a model with tools over the same card and engine, on LangChain, OpenRouter and
@@ -59,23 +62,27 @@ in the tree, unused by the interface.
 
 ## On the housing
 
-**The card, started from the ceiling alone** - `face:1201`, 132,731 mm², facing down - is ready
-with nothing typed: 31 faces standing round it (its walls; four rounded wall corners; the bearing
-boss's cone, `face:1453`; the corner fillets between walls); 12 holes through it, two of them cast
-holes with draft; a square grid every 100 mm along `face:723`, the longest wall; 12 mm thick, 0.8
-of the 15 mm plate; R6 root; R3 edges and smallest radius, from the drawing's *"ALL NON-SPECIFIED
-RADII R3.0"*, page 1; 1° draft.
+**The card, started from the two halves of the ceiling** - `face:1201` and `face:1543`, one plane,
+facing down - is ready with nothing typed: both halves are where ribs stand; 60 faces stand round
+them; 12 holes go through them, two of them cast holes with draft; a square grid every 100 mm along
+`face:723`, the longest wall; 12 mm thick, 0.8 of the 15 mm plate; R6 root; R3 edges and smallest
+radius, from the drawing's *"ALL NON-SPECIFIED RADII R3.0"*, page 1; 1° draft. Spokes turn about
+the bearing boss `face:1453`, Ø421, the largest round thing standing in the ceiling; the boss
+`face:262`, Ø290, and two bores are offered too.
 
 What each pattern draws there with nothing else set, before anything is made:
 
-| pattern | set out | ribs from paths | the others |
-|---|---|---|---|
-| square grid, every 100 mm | along `face:723` | 8 of 20 | stretches stopping at holes: 10; missing the ceiling: 6 |
-| parallel, every 100 mm | square to `face:723` | 3 of 9 | stopping at holes: 10; too short: 2 |
-| triangle grid, every 100 mm | along `face:723` | 7 of 27 | stopping at holes: 21; missing the ceiling: 7 |
-| spokes, 8 | fanned about `face:1453`, the largest boss there | 5 of 8 | stopping at holes: 5; too short: 1 |
+| pattern | set out | lines | pieces | ribs | the other pieces |
+|---|---|---|---|---|---|
+| square grid, every 100 mm | along `face:723`, 135° | 18 | 37 | 13 | at holes 16; too short 6; at an open edge 2 |
+| parallel, every 100 mm | square to `face:723`, 45° | 8 | 18 | 10 | at holes 5; too short 2; no room for a rib's height 1 |
+| triangle grid, every 100 mm | along `face:723`, 135° | 26 | 59 | 18 | at holes 25; too short 10; at an open edge 6 |
+| spokes, 8 | fanned across the ceiling about `face:1453` | 8 | 9 | 4 | at holes 4; too short 1 |
 
-Designs made there (preview):
+Spokes about `face:262` make 7 ribs of 8 lines; about the Ø20 bore `face:1536`, 2 - its fan crosses
+the holes and runs off the ceiling's open edges.
+
+Designs made from the first half, `face:1201`, alone (preview):
 
 | design | ribs | tall, each end | added | made in | verdict |
 |---|---|---|---|---|---|
@@ -93,8 +100,8 @@ Opening the housing at a preview grid the first time builds its field: about 2 m
   part's own pull direction.
 - **Tall ribs are slow.** Heights that follow each end made the housing's ribs 100 mm and more, and
   a preview 4 to 6 minutes, most of it checking a window that grows with the ribs.
-- **Holes cut most paths.** On the ceiling, half the stretches a grid draws stop at a hole's
-  keep-out, and a stretch that ends there is not a rib. A grid's ribs cannot end on each other yet,
+- **Holes cut most paths.** On the ceiling, nearly half the pieces a grid is cut into stop at a
+  hole's keep-out, and a piece that ends there is not a rib. A grid's ribs cannot end on each other yet,
   only on what they run between, so round holes a grid comes apart instead of closing on its own
   crossings.
 - **Only named supports count at both ends.** Name two faces and spokes that reach any other wall
@@ -118,7 +125,7 @@ longest wall, the largest boss for spokes, a fan, heights that follow each end -
 that which needs no model. See [ribs.md](ribs.md#where-language-comes-in).
 
 Size: 38 Python files, ~14,200 lines; 18 TypeScript files, ~5,100 lines. Tests are kept locally
-as working checks and are not tracked; all 362 pass.
+as working checks and are not tracked; all 368 pass.
 
 One project in `assets/`: **GRC Gearbox Housing** - the rib-free housing (`housing_baseline.brep`),
 its 4-page drawing, and `project.json`.
