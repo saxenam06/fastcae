@@ -294,7 +294,21 @@ def infer(
         flat = [f for f in start if faces[f].surface_type == "plane"]
         if flat:
             group = _host_among(features, flat, start)
-            host_refs = [f"face:{f}" for f in group.face_ids]
+            chosen = list(group.face_ids)
+            # Other flat faces selected in the same plane are where ribs stand too: two halves
+            # of a floor, not a floor and something to run to.
+            normal_of = np.asarray(group.normal, dtype=float)
+            level_of = float(np.dot(group.centroid, normal_of))
+            tolerance = max(features.diagonal_mm * 1e-4, 1e-3)
+            for f in flat:
+                face = faces[f]
+                if f in chosen or face.normal is None:
+                    continue
+                if float(np.dot(face.normal, normal_of)) > math.cos(math.radians(1.0)) and (
+                    abs(float(np.dot(face.centroid, normal_of)) - level_of) < tolerance
+                ):
+                    chosen.append(f)
+            host_refs = [f"face:{f}" for f in chosen]
             host_source = "selected"
             host_note = "the flat area the rest of your selection rises from"
     host: Feature | None = None
@@ -321,20 +335,36 @@ def infer(
 
     # --- what they run between -----------------------------------------------------------------
     note, problems = "", []
+    # What stands up round where ribs stand, past any blend at its foot: what they run between
+    # unless the engineer says, and where anything else round - a centre for spokes - is looked for.
+    standing: list[str] = []
+    if host is not None and normal is not None:
+        standing = [
+            f"face:{f}"
+            for f in _walls_around(
+                atlas, host_faces, normal, hole_faces, float(np.dot(host.centroid, normal))
+            )
+        ]
     if given.supports:
         support_refs, source = list(given.supports), said("supports")
     else:
-        rest = [f for f in start if f not in host_faces and f not in hole_faces]
+        # The rest of the selection, less any flat face that does not stand up from where ribs
+        # stand: a rib has nothing to meet there.
+        rest = [
+            f
+            for f in start
+            if f not in host_faces
+            and f not in hole_faces
+            and not (
+                normal is not None
+                and faces[f].surface_type == "plane"
+                and not _rises(faces[f], normal)
+            )
+        ]
         if rest:
             support_refs, source = [f"face:{f}" for f in rest], "selected"
-        elif host is not None and normal is not None:
-            support_refs = [
-                f"face:{f}"
-                for f in _walls_around(
-                    atlas, host_faces, normal, hole_faces, float(np.dot(host.centroid, normal))
-                )
-            ]
-            source = "measured" if support_refs else "default"
+        elif standing:
+            support_refs, source = list(standing), "measured"
             note = "what rises round where ribs stand, past any fillet or chamfer at its foot"
         else:
             support_refs, source = [], "default"
@@ -348,6 +378,23 @@ def infer(
     ]
     if crossing:
         problems.append(f"{', '.join(crossing)} is where ribs stand, not what they run between")
+    elif host is not None and normal is not None:
+        # A rib ends against something standing up from where it stands. A face level with the
+        # floor, or below it, has nothing for a rib to meet.
+        level = float(np.dot(host.centroid, normal))
+        tolerance = max(features.diagonal_mm * 1e-4, 0.5)
+        flat_out = [
+            r
+            for r in support_refs
+            if r not in unknown
+            and extent(extraction.tess, features.get(r).face_ids, tuple(normal))[1] - level
+            <= tolerance
+        ]
+        if flat_out:
+            problems.append(
+                f"{', '.join(flat_out)} does not stand up from where ribs stand - a rib cannot "
+                "end on it"
+            )
     slots.append(
         Slot(
             "supports",
@@ -430,7 +477,13 @@ def infer(
 
     # --- the pattern ---------------------------------------------------------------------------
     problems = []
-    offered = _centres(features, support_refs, normal, hole_faces) if normal is not None else []
+    # What spokes could turn about: round things standing round where ribs stand, whether or not
+    # they were named to run between.
+    offered = (
+        _centres(features, list(dict.fromkeys([*support_refs, *standing])), normal, hole_faces)
+        if normal is not None
+        else []
+    )
     if given.pattern is not None:
         pattern, pattern_source, pattern_note = given.pattern, "you", ""
         centre = given.centre

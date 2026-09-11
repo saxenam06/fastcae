@@ -468,7 +468,9 @@ function FacesPart(props: {
           }}
         >
           {current ? null : (
-            <option value="">{part.options.length ? "pick one…" : "nothing round here"}</option>
+            <option value="">
+              {part.options.length ? "pick one…" : "none found - select one, then use selected"}
+            </option>
           )}
           {part.options.map((option) => (
             <option key={option.value} value={option.value}>
