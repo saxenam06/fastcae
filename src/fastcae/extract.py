@@ -530,8 +530,7 @@ def _crosscheck(result: Extraction) -> str:
             locator=f"{callout.raw!r} matched to {feature.id}",
             method="matched on nearest diameter; the drawing does not state this is a diameter",
             detail=(
-                f"drawing {callout.nominal:.3f} mm against "
-                f"modelled {feature.diameter_mm:.3f} mm"
+                f"drawing {callout.nominal:.3f} mm against modelled {feature.diameter_mm:.3f} mm"
             ),
             confidence=1.0 if callout.is_diameter else 0.7,
         )
@@ -541,9 +540,7 @@ def _crosscheck(result: Extraction) -> str:
             if gap > 1e-3
             else ""
         )
-        result.controlled[feature.id] = Fact(
-            True, (from_drawing, from_cad, inferred), False, note
-        )
+        result.controlled[feature.id] = Fact(True, (from_drawing, from_cad, inferred), False, note)
         result.log.record(f"{feature.id} controlled", from_drawing)
         result.log.record(f"{feature.id} controlled", from_cad)
 

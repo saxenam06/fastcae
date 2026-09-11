@@ -27,10 +27,9 @@ from .. import cache
 from ..extract import Extraction
 from ..extract import run as run_extract
 from ..generate import Field as DistanceField
-from ..generate import corrections, field_for
 from ..generate import designs as design_space
+from ..generate import field_for
 from ..generate.cells import exposed_faces
-from ..generate.corrections import reference_field_for
 from ..generate.design import Design, Parameter, apply, host_from, rib_on
 from ..generate.field import field_key as key_of_field
 from ..generate.formations import FORMATIONS
@@ -38,7 +37,6 @@ from ..generate.primitives import Slab
 from ..generate.shading import corner_normals
 from ..generate.surface import CODE as SURFACE_CODE
 from ..generate.surface import Surface, contour, surface_for
-from ..generate.zones import major_axes, propose
 from ..project import ASSETS_ROOT, ArtifactKind, Project, classify, discover, open_project
 from ..provenance import Evidence, Fact
 from . import mesh as mesh_format
@@ -141,20 +139,15 @@ class FieldRequest(BaseModel):
 
 
 class RolesRequest(BaseModel):
-    """Which CAD file designs grow from, and which is kept to compare against."""
+    """Which CAD file designs grow from."""
 
     baseline: str = Field(min_length=1)
-    reference: str | None = None
-
-
-class CorrectionRequest(BaseModel):
-    approved: bool
 
 
 class SpaceRequest(BaseModel):
-    """Which grid designs are made on. The delivered spacing: smallest root fillet over four."""
+    """Which grid designs are made on. Unset: a quarter of the root fillet."""
 
-    spacing_mm: float = Field(default=2.5, gt=0.0)
+    spacing_mm: float | None = Field(default=None, gt=0.0)
 
 
 class ApprovalRequest(BaseModel):
@@ -254,78 +247,26 @@ def post_field(request: FieldRequest) -> dict:
         reuse=request.reuse,
         headroom_mm=request.headroom_mm,
     )
-    try:
-        field, applied = corrections.corrected(_state.project, field)
-    except ValueError as error:
-        raise HTTPException(409, str(error)) from error
     _state.field = field
     _state.surface = None
     _state.surface_blob = None
     _forget_parameters()
-    row = _field_row(field, hit)
-    row["corrections"] = [
-        {
-            "kind": a["kind"],
-            "reference": a["reference"],
-            "removed_cm3": round(a["removed_mm3"] / 1e3, 1),
-        }
-        for a in applied
-    ]
-    return row
+    return _field_row(field, hit)
 
 
 @app.put("/api/project/roles")
 def put_roles(request: RolesRequest) -> dict:
-    """Name the baseline, and optionally the reference, then read the project again.
+    """Name the baseline, then read the project again.
 
     The baseline decides what is read, so everything read before this is about a different file.
     """
     if _state.project is None:
         raise HTTPException(409, "no project is open")
-    roles = {"baseline": request.baseline}
-    if request.reference is not None:
-        roles["reference"] = request.reference
     try:
-        _state.project.set_roles(**roles)
+        _state.project.set_roles(baseline=request.baseline)
     except ValueError as error:
         raise HTTPException(400, str(error)) from error
     return post_extract(ExtractRequest(project=str(_state.project.root)))
-
-
-@app.get("/api/corrections")
-def get_corrections() -> list[dict]:
-    """Every correction there is, whether it could apply here, and whether it is approved."""
-    if _state.project is None:
-        raise HTTPException(409, "no project is open")
-    approved = corrections.approved(_state.project)
-    return [
-        {
-            "kind": kind,
-            "approved": kind in approved,
-            "available": _state.project.reference() is not None,
-        }
-        for kind in corrections.KINDS
-    ]
-
-
-@app.post("/api/corrections/{kind}")
-def post_correction(kind: str, request: CorrectionRequest) -> list[dict]:
-    """Approve a correction, or take the approval back. The field is rebuilt on the next ask."""
-    if _state.project is None:
-        raise HTTPException(409, "no project is open")
-    try:
-        if request.approved:
-            corrections.approve(_state.project, kind)
-        else:
-            corrections.withdraw(_state.project, kind)
-    except ValueError as error:
-        raise HTTPException(400, str(error)) from error
-    _state.field = None
-    _state.surface = None
-    _state.surface_blob = None
-    _forget_parameters()
-    _forget_space()
-    return get_corrections()
 
 
 # Voxel sizes the interface offers. Round numbers rather than one derived from the part, because
@@ -954,37 +895,12 @@ def _forget_space() -> None:
 
 @app.get("/api/zones")
 def get_zones() -> dict:
-    """The zones proposed and approved, what is protected, and whether zones can be proposed."""
+    """The project's zones and whether each is approved, and what is protected."""
     project = _project()
     return {
-        "zones": [
-            {**z, "summary": _zone_summary(z)} for z in project.data().get("zones", [])
-        ],
+        "zones": [{**z, "summary": _zone_summary(z)} for z in project.data().get("zones", [])],
         "protected": design_space.protection(project),
-        "corrections": get_corrections(),
-        "can_propose": project.reference() is not None,
     }
-
-
-@app.post("/api/zones/propose")
-def post_propose_zones(request: SpaceRequest) -> dict:
-    """Propose zones from the material the reference has and the baseline does not.
-
-    Needs the baseline's field and the reference sampled on the same grid - minutes the first
-    time, kept after.
-    """
-    result = extracted()
-    project = _project()
-    reference = project.reference()
-    if reference is None or result.tess is None or result.features is None:
-        raise HTTPException(409, "zones are proposed from a reference, and this project names none")
-    raw, _ = field_for(project.root, result.tess, result.cad_digest, spacing_mm=request.spacing_mm)
-    base, _ = corrections.corrected(project, raw)
-    ref, _ = reference_field_for(project.root, reference, raw.grid)
-    zones = propose(base, ref, major_axes(result.features.significant_axes()))
-    design_space.save_proposals(project, zones)
-    _forget_space()
-    return get_zones()
 
 
 @app.post("/api/zones/{zone_id}")
@@ -1042,7 +958,7 @@ def get_formations() -> dict:
 
 @app.post("/api/designspace")
 def post_design_space(request: SpaceRequest) -> dict:
-    """Open the project for designing: the corrected baseline, its contour, a window per zone.
+    """Open the project for designing: the baseline, its contour, a window per zone.
 
     Minutes the first time on a large part, and kept on disk after.
     """
@@ -1111,10 +1027,6 @@ def _space_row(space: design_space.DesignSpace) -> dict:
         "base_faults": list(space.surface.faults),
         "radius_mm": space.radius_mm,
         "density": space.density,
-        "corrections": [
-            {"kind": a["kind"], "removed_cm3": round(a["removed_mm3"] / 1e3, 1)}
-            for a in space.corrections
-        ],
     }
 
 

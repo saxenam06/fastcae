@@ -172,6 +172,8 @@ class Conflict:
             + f"\n    left  {self.left.render()}"
             + f"\n    right {self.right.render()}"
         )
+
+
 @dataclass
 class ProvenanceLog:
     """Everything asserted during one extraction, in order.

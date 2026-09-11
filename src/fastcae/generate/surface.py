@@ -69,9 +69,18 @@ _CORNERS = np.array(
 # The twelve edges of a cell, as pairs of corner indices into _CORNERS.
 _EDGES = np.array(
     [
-        [0, 4], [1, 5], [2, 6], [3, 7],  # along x
-        [0, 2], [1, 3], [4, 6], [5, 7],  # along y
-        [0, 1], [2, 3], [4, 5], [6, 7],  # along z
+        [0, 4],
+        [1, 5],
+        [2, 6],
+        [3, 7],  # along x
+        [0, 2],
+        [1, 3],
+        [4, 6],
+        [5, 7],  # along y
+        [0, 1],
+        [2, 3],
+        [4, 5],
+        [6, 7],  # along z
     ],
     dtype=np.int64,
 )
@@ -766,7 +775,6 @@ def _nearest_face(
     """
     if source is None or triangles.size == 0:
         return np.zeros(max(triangles.shape[0], 0), dtype=np.int32)
-
 
     base = np.asarray(source.vertices)  # type: ignore[attr-defined]
     faces = np.asarray(source.triangles)  # type: ignore[attr-defined]

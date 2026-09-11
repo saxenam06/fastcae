@@ -233,7 +233,7 @@ export interface Mesh {
   indexCount: number;
 }
 
-/** Where ribs may go, as proposed from the part and approved - or not yet - by a person. */
+/** Where ribs may go, and whether a person has approved it. */
 export interface ZoneRow {
   id: string;
   label: string;
@@ -246,8 +246,6 @@ export interface ZoneRow {
 export interface ZonesInfo {
   zones: ZoneRow[];
   protected: { kinds: string[]; clearance_mm: number; status: "proposed" | "approved" };
-  corrections: { kind: string; approved: boolean; available: boolean }[];
-  can_propose: boolean;
 }
 
 export interface LeverRow {
@@ -280,7 +278,6 @@ export interface SpaceInfo {
   base_faults: number[];
   radius_mm: number;
   density: { g_cm3?: number; basis?: string; state?: string };
-  corrections: { kind: string; removed_cm3: number }[];
 }
 
 export type Outcome = "pass" | "warn" | "reject";
@@ -421,15 +418,12 @@ export const api = {
   fieldVoxels: () => fetchVoxels("/api/field/voxels"),
 
   zones: () => getJson<ZonesInfo>("/api/zones"),
-  proposeZones: (spacingMm = 2.5) =>
-    postJson<ZonesInfo>("/api/zones/propose", { spacing_mm: spacingMm }),
   approveZone: (id: string, approved: boolean) =>
     postJson<ZonesInfo>(`/api/zones/${encodeURIComponent(id)}`, { approved }),
   approveProtected: (approved: boolean) => postJson<ZonesInfo>("/api/protected", { approved }),
-  approveCorrection: (kind: string, approved: boolean) =>
-    postJson<unknown>(`/api/corrections/${encodeURIComponent(kind)}`, { approved }),
   formations: () => getJson<Formations>("/api/formations"),
-  openSpace: (spacingMm = 2.5) => postJson<SpaceInfo>("/api/designspace", { spacing_mm: spacingMm }),
+  openSpace: (spacingMm?: number) =>
+    postJson<SpaceInfo>("/api/designspace", { spacing_mm: spacingMm ?? null }),
   generate: (settings: Record<string, ZoneSettings>) =>
     postJson<MadeDesign>("/api/designs", {
       zones: Object.fromEntries(

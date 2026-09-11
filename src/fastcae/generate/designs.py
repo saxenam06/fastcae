@@ -1,6 +1,6 @@
 """A design space, and the designs made in it.
 
-**Opened once.** The corrected baseline, its contour, and a window for every approved zone are what
+**Opened once.** The baseline, its contour, and a window for every approved zone are what
 every design is made from, and none of them depends on the design - so they are built once, kept on
 disk, and a design only pays for its own ribs.
 
@@ -8,9 +8,9 @@ disk, and a design only pays for its own ribs.
 settings, the baseline's key, the rules and the code, so the same settings on the same part give the
 same bytes - and a test holds it to that.
 
-**Zones and protected areas are decisions.** They are proposed by the system and approved by a
-person, and both are written in ``project.json``; a zone nobody approved has no levers and cannot be
-designed in.
+**Zones and protected areas are decisions.** Both are written in ``project.json``: a zone comes
+from the engineer's intent, protected areas are proposed from detected features, and a person
+approves each. A zone nobody approved has no levers and cannot be designed in.
 """
 
 from __future__ import annotations
@@ -27,7 +27,6 @@ from ..extract import Extraction
 from ..project import Project
 from .checks import Finding, Rules, check
 from .compose import CODE_COMPOSE, Composition, compose
-from .corrections import corrected
 from .field import Field, field_for
 from .formations import FORMATIONS, build
 from .surface import Surface, recontour, surface_for
@@ -56,19 +55,10 @@ PROTECTED_KINDS = ("bore", "hole_pattern", "controlled")
 # --- decisions in project.json -----------------------------------------------------------------
 
 
-def save_proposals(project: Project, zones: list[Zone]) -> None:
-    """Write proposed zones, keeping any approval already given to a zone with the same id."""
-    was = {z["id"]: z.get("status") for z in project.data().get("zones", [])}
-    project.write_data(
-        "zones",
-        [{**z.to_dict(), "status": was.get(z.id, "proposed") or "proposed"} for z in zones],
-    )
-
-
 def approve_zone(project: Project, zone_id: str, approved: bool) -> None:
     zones = project.data().get("zones", [])
     if not any(z["id"] == zone_id for z in zones):
-        raise ValueError(f"no zone {zone_id!r} has been proposed")
+        raise ValueError(f"no zone {zone_id!r} in this project")
     for zone in zones:
         if zone["id"] == zone_id:
             zone["status"] = "approved" if approved else "proposed"
@@ -164,24 +154,28 @@ class DesignSpace:
     windows: dict
     rules: Rules
     radius_mm: float
-    corrections: list = field(default_factory=list)
     density: dict = field(default_factory=dict)
 
     @staticmethod
     def open(
         project: Project,
         extraction: Extraction,
-        spacing_mm: float = 2.5,
+        spacing_mm: float | None = None,
         radius_mm: float | None = None,
     ) -> DesignSpace:
         rules = Rules(**project.data().get("rules", {}))
+        if rules.missing():
+            raise ValueError(
+                "not set for this part: " + ", ".join(rules.missing()).replace("_mm", "")
+            )
         radius = rules.root_fillet_mm if radius_mm is None else radius_mm
+        # Four voxels across the smallest radius a design must hold, unless a grid is asked for.
+        spacing_mm = radius / 4.0 if spacing_mm is None else spacing_mm
         tess = extraction.tess
         if tess is None:
             raise ValueError("no geometry was read")
 
-        raw, _ = field_for(project.root, tess, extraction.cad_digest, spacing_mm=spacing_mm)
-        base, applied = corrected(project, raw)
+        base, _ = field_for(project.root, tess, extraction.cad_digest, spacing_mm=spacing_mm)
         surface, _ = surface_for(project.root, base, base.key, face_ids_from=tess)
 
         zones = zones_of(project, "approved")
@@ -219,7 +213,6 @@ class DesignSpace:
             windows=windows,
             rules=rules,
             radius_mm=radius,
-            corrections=applied,
             density=project.data().get("density", {}),
         )
 

@@ -180,6 +180,8 @@ class Tessellation:
         for fid in np.unique(self.face_id):
             out[int(fid)] = float(area[self.face_id == fid].sum())
         return out
+
+
 def declared_unit(path: Path) -> str:
     """The length unit the STEP file declares, read from its header.
 

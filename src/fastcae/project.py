@@ -4,10 +4,10 @@ The whole configuration surface of the platform. A project is a directory; its *
 directory's name**; its artifacts are the files inside it, classified by extension. There is no
 schema to fill in and no per-part code path.
 
-**Decisions live in one file.** Which of two CAD files a design grows from is a *role*, and a role
-cannot be read out of geometry. ``project.json`` holds those decisions, and only those: a person
-makes them, the system checks them before writing, and a project without the file behaves exactly
-as if nobody had decided anything.
+**Decisions live in one file.** Which CAD file designs grow from, what an engineer wants of
+them, and what they approved cannot be read out of geometry. ``project.json`` holds those decisions,
+and only those: a person makes them, the system checks them before writing, and a project without
+the file behaves exactly as if nobody had decided anything.
 
 That is the point. Dropping a `DEEPJEB_Bracket/` folder beside `GRC_Gearbox_Housing/` makes a
 second project, and if it contains a STEP file and no drawing then the system has a STEP file and
@@ -33,9 +33,9 @@ ASSETS_ROOT = Path("assets")
 # artifacts, and listing it among them would offer it up for extraction as data.
 DATA_FILE_NAME = "project.json"
 
-# The roles a CAD file can hold. The baseline is what every design grows from; the reference is
-# another version of the same part, kept to compare against.
-ROLES = ("baseline", "reference")
+# The roles a CAD file can hold. The baseline is what every design grows from. There is no other:
+# an engineer brings a part to add to, not a finished version to compare against.
+ROLES = ("baseline",)
 
 
 class ArtifactKind(StrEnum):
@@ -199,10 +199,6 @@ class Project:
         """The CAD every design grows from: the one named as baseline, else the first CAD."""
         return self._holding("baseline") or self.first(ArtifactKind.CAD)
 
-    def reference(self) -> Artifact | None:
-        """The CAD kept to compare against, if one is named. Never guessed."""
-        return self._holding("reference")
-
     def _holding(self, role: str) -> Artifact | None:
         name = self.roles().get(role)
         if name is None:
@@ -224,10 +220,18 @@ def classify(path: Path) -> Artifact:
 
 
 def discover(root: Path = ASSETS_ROOT) -> list[Project]:
-    """Every project folder under ``root``, alphabetically."""
+    """Every project folder under ``root``, alphabetically.
+
+    A folder whose name starts with ``_`` or ``.`` is set aside rather than a project - somewhere to
+    keep files out of the way without deleting them.
+    """
     if not root.exists():
         return []
-    return [Project(root=path) for path in sorted(root.iterdir()) if path.is_dir()]
+    return [
+        Project(root=path)
+        for path in sorted(root.iterdir())
+        if path.is_dir() and not path.name.startswith(("_", "."))
+    ]
 
 
 def open_project(name_or_path: str | Path, root: Path = ASSETS_ROOT) -> Project:

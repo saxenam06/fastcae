@@ -35,19 +35,13 @@ const GENERATE_LABELS: Record<keyof GenerateLayers, string> = {
   design: "Ribs and fillets",
 };
 
-const CORRECTION_LABELS: Record<string, string> = {
-  trim_to_reference: "Trim the baseline to the reference",
-};
-
 interface GenerateIndexProps {
   layers: GenerateLayers;
   onLayers: (layers: GenerateLayers) => void;
 
   zones: ZonesInfo | null;
-  onPropose: () => void;
   onApproveZone: (id: string, approved: boolean) => void;
   onApproveProtected: (approved: boolean) => void;
-  onApproveCorrection: (kind: string, approved: boolean) => void;
 
   space: SpaceInfo | null;
   onOpen: () => void;
@@ -93,19 +87,10 @@ export function GenerateIndex(props: GenerateIndexProps) {
           {!zones ? (
             <div className="card-note">Reading the project&hellip;</div>
           ) : zones.zones.length === 0 ? (
-            <>
-              <div className="card-note">
-                {zones.can_propose
-                  ? "No zones yet. They are proposed from where the reference has material the " +
-                    "baseline does not - minutes the first time, kept after."
-                  : "Zones are proposed from a reference, and this project names none."}
-              </div>
-              <div className="actions">
-                <button onClick={props.onPropose} disabled={!zones.can_propose || working}>
-                  Propose zones
-                </button>
-              </div>
-            </>
+            <div className="card-note">
+              No zones yet. Where ribs may go comes from what you ask for: the faces they stand on,
+              what they run between, and what they keep away from.
+            </div>
           ) : (
             zones.zones.map((zone) => (
               <div key={zone.id} className="approval">
@@ -152,32 +137,6 @@ export function GenerateIndex(props: GenerateIndexProps) {
             </div>
           ) : null}
 
-          {zones?.corrections
-            .filter((c) => c.available)
-            .map((correction) => (
-              <div key={correction.kind} className="approval">
-                <div className="card-head">
-                  <span className="card-title">
-                    {CORRECTION_LABELS[correction.kind] ?? correction.kind}
-                  </span>
-                  <span className="chip" data-state={correction.approved ? "approved" : "proposed"}>
-                    {correction.approved ? "approved" : "proposed"}
-                  </span>
-                </div>
-                <div className="card-note">
-                  Removes anything the baseline has that the reference does not - what a patched
-                  surface added when features were deleted.
-                </div>
-                <div className="actions">
-                  <button
-                    onClick={() => props.onApproveCorrection(correction.kind, !correction.approved)}
-                    disabled={working}
-                  >
-                    {correction.approved ? "Withdraw" : "Approve"}
-                  </button>
-                </div>
-              </div>
-            ))}
         </div>
       </section>
 
@@ -194,13 +153,6 @@ export function GenerateIndex(props: GenerateIndexProps) {
               <dd>{space.base_volume_cm3.toLocaleString()} cm³</dd>
               <dt>root fillet</dt>
               <dd>R{space.radius_mm}</dd>
-              {space.corrections.map((c) => (
-                <FragmentRow
-                  key={c.kind}
-                  label={CORRECTION_LABELS[c.kind] ?? c.kind}
-                  value={`${c.removed_cm3} cm³ removed`}
-                />
-              ))}
             </dl>
           ) : (
             <div className="card-note">
@@ -355,14 +307,6 @@ function Finding({ finding }: { finding: FindingRow }) {
   );
 }
 
-function FragmentRow({ label, value }: { label: string; value: string }) {
-  return (
-    <>
-      <dt>{label}</dt>
-      <dd>{value}</dd>
-    </>
-  );
-}
 
 /** A formation's levers set to the middle of their ranges, snapped to their steps. */
 export function defaults(formation: {

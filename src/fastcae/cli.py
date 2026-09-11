@@ -104,7 +104,9 @@ def main(argv: list[str] | None = None) -> int:
     batch.add_argument("project", help="project folder name under assets/, or a path")
     batch.add_argument("--per-formation", type=int, default=16)
     batch.add_argument("--seed", type=int, default=0)
-    batch.add_argument("--spacing", type=float, default=2.5, help="grid spacing, mm")
+    batch.add_argument(
+        "--spacing", type=float, default=None, help="grid spacing, mm (default: root fillet / 4)"
+    )
     batch.add_argument(
         "--out", type=Path, default=None, help="where to write; the project's designs/"
     )

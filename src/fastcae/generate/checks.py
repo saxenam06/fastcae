@@ -28,30 +28,36 @@ from .surface import Surface
 
 @dataclass(frozen=True)
 class Rules:
-    """The casting rules a design is held to. Values and where each comes from.
+    """The rules a design is held to. Values and where each comes from.
 
-    Defaults are assumed unless a basis says otherwise; a project replaces them with its own.
+    What belongs to the part - the rib section, its fillet and edge round, the smallest radius the
+    drawing allows - has no default: the engineer sets it, or the agent proposes it and says so.
+    What is left are general rules of thumb, each labelled assumed until a project replaces it.
     """
 
-    thickness_mm: tuple[float, float] = (15.0, 25.0)
+    thickness_mm: tuple[float, float] | None = None
+    edge_round_mm: float | None = None
+    root_fillet_mm: float | None = None
+    fillet_floor_mm: float | None = None
     draft_deg: tuple[float, float] = (0.0, 2.0)
     draft_used_deg: float = 1.0
-    edge_round_mm: float = 5.0
-    root_fillet_mm: float = 10.0
-    fillet_floor_mm: float = 3.0
     fillet_tolerance: float = 0.2
     rib_to_wall: float = 0.8
     root_gap: float = 2.0
     thick_spot: float = 2.0
     basis: tuple[tuple[str, str, bool], ...] = (
-        ("thickness_mm", "castable window", True),
         ("draft_deg", "castable window", True),
-        ("root_fillet_mm", "target", True),
-        ("fillet_floor_mm", "drawing note 3, ALL NON-SPECIFIED RADII R3.0", False),
         ("rib_to_wall", "foundry rule of thumb", True),
         ("root_gap", "clear gap between rib roots", True),
         ("thick_spot", "section at a junction against the wall beside it", True),
     )
+
+    # Set per part, never defaulted.
+    PART_RULES = ("thickness_mm", "edge_round_mm", "root_fillet_mm", "fillet_floor_mm")
+
+    def missing(self) -> list[str]:
+        """The part's own rules nobody has set yet."""
+        return [name for name in self.PART_RULES if getattr(self, name) is None]
 
     def source(self, name: str) -> tuple[str, bool]:
         for key, text, assumed in self.basis:

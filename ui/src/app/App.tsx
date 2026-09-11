@@ -226,15 +226,6 @@ export function App() {
     api.formations().then(setFormations).catch((caught) => setDesignError(String(caught)));
   }, [view, model]);
 
-  const proposeZones = useCallback(
-    () =>
-      act("Proposing zones from the reference. Minutes the first time, kept after.", async () => {
-        setZonesInfo(await api.proposeZones());
-        forgetDesigns();
-      }),
-    [act, forgetDesigns],
-  );
-
   const approveZone = useCallback(
     (id: string, approved: boolean) =>
       act("Recording the decision.", async () => {
@@ -248,16 +239,6 @@ export function App() {
     (approved: boolean) =>
       act("Recording the decision.", async () => {
         setZonesInfo(await api.approveProtected(approved));
-        forgetDesigns();
-      }),
-    [act, forgetDesigns],
-  );
-
-  const approveCorrection = useCallback(
-    (kind: string, approved: boolean) =>
-      act("Recording the decision.", async () => {
-        await api.approveCorrection(kind, approved);
-        setZonesInfo(await api.zones());
         forgetDesigns();
       }),
     [act, forgetDesigns],
@@ -502,10 +483,8 @@ export function App() {
               layers={generateLayers}
               onLayers={setGenerateLayers}
               zones={zonesInfo}
-              onPropose={proposeZones}
               onApproveZone={approveZone}
               onApproveProtected={approveProtected}
-              onApproveCorrection={approveCorrection}
               space={space}
               onOpen={openSpace}
               formations={formations}
