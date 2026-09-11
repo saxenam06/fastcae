@@ -10,12 +10,12 @@ engineer's objectives - which steers what is sampled next.
 
 Two of the six stages run. **Extract** reads a folder of artifacts and produces an understood
 model, with every claim traceable to the file, page and literal text it came from. **Generate** is
-being built around intent: an engineer brings a rib-free structure, says in plain language where
-ribs may go and what they must respect, and an agent turns that into a spec that designs follow
-strictly, each with an auditable verdict - see [docs/ribs.md](docs/ribs.md). Its geometry
-machinery runs: the part as a signed distance field on a fixed grid, ribs with true root fillets,
-a closed surface, checks. [docs/status.md](docs/status.md) is the honest account of where that
-stands.
+being built around intent: an engineer brings a rib-free structure, selects where ribs may go and
+sets what they must respect on a rib card - faces, values and words - and the card is written as a
+spec that designs follow strictly, each with an auditable verdict - see [docs/ribs.md](docs/ribs.md).
+Its geometry machinery runs: the part as a signed distance field on a fixed grid, ribs with true
+root fillets, a closed surface, checks. [docs/status.md](docs/status.md) is the honest account of
+where that stands.
 
 ---
 
@@ -28,6 +28,15 @@ uv run python scripts/dev.py
 API on `127.0.0.1:8021`, interface on **http://localhost:5183/**. Neither port is the conventional
 one, because the machine this was built on already runs something on 8000 and 5173 and a silent
 bind failure is worse than an unusual number.
+
+The rib card needs no model. The agent kept in `agent/` - out of the interface for now - does; its
+settings go in a `.env` at the repository root, which is never committed:
+
+```
+FASTCAE_AGENT_MODEL=openrouter:deepseek/deepseek-v4-pro
+OPENROUTER_API_KEY=...
+LANGSMITH_TRACING=true          # optional, with LANGSMITH_API_KEY and LANGSMITH_PROJECT
+```
 
 Nothing is loaded at startup. The interface opens on a list of projects and waits.
 
@@ -49,8 +58,8 @@ finished version to compare against.
 
 `project.json` holds the decisions made about the part, and only those: which CAD file designs grow
 from (the *baseline*, when there is more than one), which spec is active, and what a person
-approved. Specs live in `specs/`, one file each, written by the agent from what the engineer asked
-for. The system proposes; a person confirms. A project without either behaves as if nobody had
+approved. Specs live in `specs/`, one file each, written from the rib card when a design is made
+from it. The system proposes; a person confirms. A project without either behaves as if nobody had
 decided anything.
 
 A folder whose name starts with `_` or `.` is set aside rather than a project.
@@ -78,7 +87,8 @@ src/fastcae/
     brep.py       STEP and BREP loading, face-tagged tessellation, vertex welding
     health.py     the watertightness and fidelity gate
     atlas.py      per-face measurement, adjacency, measured dihedrals, visibility
-  features.py     generic detection: axes, bores, bosses, hole patterns, planar groups, fillets
+  features.py     generic detection: axes, bores, bosses, holes, hole patterns, planar groups,
+                  fillets - and how far a feature reaches, and what it touches
   drawing.py      PDF text extraction and callout parsing
   extract.py      the deterministic pipeline, and drawing-to-CAD association
   generate/
@@ -94,14 +104,20 @@ src/fastcae/
     compose.py    ribs joined into a part's field inside a zone's window
     checks.py     pass, warn or reject, with a reason and the rule it used
     designs.py    a project opened for designing, and a design made from settings
+    placement.py  ribs from a placement: paths on a host, spans between supports
+    intent.py     designs made from a spec, with the two-part verdict
+    slots.py      the rib card: its slots filled from the part, edited by value, face or words
+    session.py    the rib work on an open project: the card, the spec it writes, designs
+  spec.py         the spec: the engineer's words, placements and rules, versioned
+  agent/          a model with tools over the engine; kept, out of the interface for now
   cli.py          fastcae designs: a seeded list of designs and a summary table
   provenance.py   Evidence, Fact, Conflict - how anything is known
   api/app.py      HTTP surface; routes contain no logic
   api/mesh.py     the wire format a surface reaches the browser in
 ui/src/
   app/            shell, tab definitions, product strings
-  stage/          upload, the drawing, the 3D view
-  panel/          the per-tab rails, the selection, the agent's pane, the card vocabulary
+  stage/          upload, the drawing, the 3D view and the card for the face under the cursor
+  panel/          the per-tab rails, the selection, the rib card, the card vocabulary
   render/         WebGL2 renderer: surfaces, field cells, ID-buffer picking
 ```
 
@@ -110,7 +126,7 @@ ui/src/
 - [architecture.md](docs/architecture.md) — how it is built, and the rule that keeps it general
 - [extract.md](docs/extract.md) — the pipeline, and the limits of associating a drawing with a model
 - [generate.md](docs/generate.md) — how a design variant is represented, and what the field costs
-- [ribs.md](docs/ribs.md) — ribs from intent: the spec, placements, layouts, the verdict, the agent
+- [ribs.md](docs/ribs.md) — ribs from intent: the rib card, the spec, placements, the verdict
 - [tasks.md](docs/tasks.md) — how the system asks a person for work; designed, not built
 - [verification.md](docs/verification.md) — the human-verification workflow; designed, not built
 - [status.md](docs/status.md) — what is true today, what is unverified, what is next

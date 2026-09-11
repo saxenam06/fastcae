@@ -17,8 +17,8 @@ and back: what is learned and the objectives set steer which designs are sampled
 
 Generate leads because it is the thing a solver cannot do: the campaign, the training set and the
 search all exist to serve designs that had to be generated first. What is generated comes from the
-engineer's intent, stated in plain language and turned by an agent into a spec - see
-[ribs.md](ribs.md).
+engineer's intent - faces selected on the part and a rib card of values and words - written as a
+spec that designs follow - see [ribs.md](ribs.md).
 
 Extract and Model are built; Generate is being built. The other three are shown in the interface
 and not yet implemented — a shell that hides its unbuilt stages describes a tool; one that shows
@@ -75,8 +75,10 @@ features.py    generic feature detection. No domain vocabulary anywhere.
 drawing.py     PDF text to callouts. Every one cites its page and literal text.
 extract.py     the deterministic pipeline, and the drawing-to-CAD association.
 provenance.py  Evidence, Fact, Conflict. How anything is known.
-generate/      the part as a distance field, ribs composed into it, and the checks.
-agent/         (to build) the LLM agent: tools over the routes, the spec it writes.
+generate/      the part as a distance field; the rib card, filled from the part; ribs placed and
+               composed into the field; the checks.
+spec.py        the spec: the engineer's words, placements and rules, versioned.
+agent/         a model with tools over the engine. Kept, and out of the interface for now.
 cli.py         batches of designs, run without the interface.
 api/app.py     HTTP surface. Routes contain no logic.
 ```
@@ -84,7 +86,7 @@ api/app.py     HTTP surface. Routes contain no logic.
 `project.json` is not configuration in the usual sense: it holds no facts and no settings, only
 decisions - which CAD designs grow from, which spec is active, which protected areas a person
 approved. The system proposes each one; nothing in it is written except through an approval. Specs
-live beside it in `specs/`, one file each, written only by the agent.
+live beside it in `specs/`, one file each, written only from the rib card.
 
 ## Nothing derived is computed twice
 
@@ -134,11 +136,12 @@ earlier, as a task - see [tasks.md](tasks.md).
 ## The command layer
 
 `api/app.py` is the single seam between the engine and anything driving it. The browser calls it
-over HTTP; the agent's tools call the same routes with no privileged path, so anything the agent can
-do, the interface can do.
+over HTTP, and anything else that drives the engine - a batch, a model's tools - calls the same
+functions with no privileged path.
 
 **Routes contain no logic.** A route unpacks a request, calls one engine function, and packs the
-result. Anything a route can do that the engine cannot is something an agent will not be able to do.
+result. Anything a route can do that the engine cannot is something nothing else will be able to
+do.
 
 ## The interface
 
@@ -168,15 +171,14 @@ loaded are separate: uploading a surface to the GPU takes about as long as downl
 tearing one down to hide it makes a checkbox cost what a fetch costs, in both directions. Layers are
 uploaded once and drawn conditionally.
 
-**Two columns, both movable, and the right one shut by default.** The left column carries the
-current tab's detail and, under it, whatever is selected - a selection belongs beside the features
-it was made from, and it applies to two tabs of the three, so a pane that sits empty on the third
-is a pane in the wrong place. The right column is the **agent's**, opened from a mark in the bar
-and closed again to get the width back. It is where the engineer talks to the agent; until the agent
-exists it says so rather than offering a chat box that does nothing.
+**Two columns, both movable.** The left column carries the current tab's detail and, under it,
+whatever is selected - a selection belongs beside the features it was made from, and it applies to
+two tabs of the three, so a pane that sits empty on the third is a pane in the wrong place. The
+right column is the **rib card**, open by default and closed from its mark in the bar to get the
+width back: where the engineer says what ribs they want, whichever tab is showing.
 
-**Every face can be named.** Hovering a face on any 3D tab shows what it is and every feature it
-belongs to, so an engineer can refer to it in words - and hand that reference to the agent.
+**Every face can be named.** Hovering a face on any 3D tab shows its one name, `face:N`, and what it
+is, so an engineer can refer to it - on the card, in words or as a chip.
 
 The card vocabulary is the test of whether the model is general — each card renders one *kind of
 thing the platform knows about*, never one kind of part:

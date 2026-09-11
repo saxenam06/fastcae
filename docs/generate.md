@@ -2,7 +2,7 @@
 
 **Being built.** The stage that produces design variants: how a design is represented, built,
 turned back into a surface and checked. How the engineer's intent decides *what* is built - the
-spec, placements, the layout vocabulary, the agent - is in [ribs.md](ribs.md).
+spec, placements, the rib card, the layout vocabulary - is in [ribs.md](ribs.md).
 [status.md](status.md) says how much of it runs.
 
 ---
@@ -95,10 +95,14 @@ depends only on its own cell's eight samples, and a quad on the four cells aroun
 Every vertex carries a key - its cell and which piece of surface in it - and every triangle the key
 of the lattice edge its quad sits on, both kept in key order. A splice re-places the vertices of the
 cells a changed sample touches, rebuilds the quads on those cells' edges, and merges by key. Nothing
-is joined by a mesh boolean, and the result is meant to be exactly what contouring the whole field
-gives. On the housing a rib-sized edit splices in 6.8 s against 18.7 s for the whole contour, to
-identical bytes; with ribs across a zone the splice currently leaves open edges, see
-[status.md](status.md).
+is joined by a mesh boolean, and the result is exactly what contouring the whole field gives: on
+the housing, a grid of eleven ribs splices to the same bytes as a whole contour, in about a third
+of the time.
+
+**The edge of the grid is always outside.** Nothing is ever made solid on the grid's outermost
+layer, so a design's surface always closes; a surface that reached the edge would end there, open.
+A rib that gets that far has left the part or outgrown the room the grid was built with, and the
+design is rejected with where.
 
 ## The rib
 
@@ -152,6 +156,7 @@ rule came from. Every check is shown to reject a part built to fail it before it
 | check | rule | outcome |
 |---|---|---|
 | protected areas unchanged | every cell in every protected band equals the baseline | reject |
+| within the grid | no rib reaches the grid's outermost layer | reject |
 | nothing floating | every piece of rib touches the part, directly or through other ribs | reject |
 | rib thickness | inside the thickness window, and at least 4 voxels | reject |
 | rib against wall | thickness ≤ the rib-to-wall ratio × the wall under the root | warn |
