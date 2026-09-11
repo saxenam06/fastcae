@@ -30,6 +30,11 @@ def main() -> int:
             "--port",
             str(API_PORT),
             "--reload",
+            # A reload waits for open connections to finish, and an agent's reply can be minutes of
+            # streaming - or a stream whose client has gone. Without a limit the old worker never
+            # exits, and the server neither answers nor restarts.
+            "--timeout-graceful-shutdown",
+            "3",
         ],
         cwd=ROOT,
     )

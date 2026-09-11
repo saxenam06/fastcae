@@ -35,3 +35,6 @@ Thumbs.db
 
 # Tests are the assistant's working checks, kept locally and not tracked.
 tests/
+
+# Credentials. Read from the environment, never committed.
+.env
