@@ -32,3 +32,6 @@ assets/
 Thumbs.db
 .DS_Store
 *.tsbuildinfo
+
+# Tests are the assistant's working checks, kept locally and not tracked.
+tests/
