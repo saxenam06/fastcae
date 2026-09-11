@@ -25,6 +25,7 @@ from enum import StrEnum
 import numpy as np
 
 from .geometry.atlas import Atlas, FaceRecord
+from .geometry.brep import Tessellation
 
 # Two axes are the same axis when their directions are parallel to within this angle and their
 # lines pass within this fraction of the part's diagonal of each other.
@@ -34,6 +35,10 @@ AXIS_DISTANCE_TOL_FRACTION = 1e-3
 # A hole is "small" below this fraction of the part diagonal. Everything larger is treated as a
 # bore in its own right rather than as a member of a fastener pattern.
 SMALL_HOLE_FRACTION = 0.03
+
+# A hole's wall goes at least this far round its axis, in degrees. A fillet in a square corner is
+# a small concave cylinder too, and goes a quarter of the way.
+HOLE_WRAP_DEG = 200.0
 
 # Circle fits accept this residual, relative to the fitted radius.
 PATTERN_FIT_TOLERANCE = 0.02
@@ -60,14 +65,23 @@ class FeatureKind(StrEnum):
     BOSS = "boss"
     """A convex cylinder: material inside. A shaft journal, a spigot, a pin."""
 
+    HOLE = "hole"
+    """A small concave cylinder or cone, with the cones that chamfer or countersink it, going round
+    its axis: one hole, alone or in any arrangement, and the faces it opens onto."""
+
     HOLE_PATTERN = "hole_pattern"
-    """Equal holes repeated on a circle or a line. Fastener circles, dowel rings, bolt rows."""
+    """Equal holes repeated on a circle. Fastener circles, dowel rings."""
 
     PLANAR_GROUP = "planar_group"
-    """Coplanar faces. Mounting faces, split lines, machined pads."""
+    """A connected flat area: coplanar faces that touch. Pads, lands, floors, mounting faces. Two
+    pads on one plane with a gap between them are two groups."""
 
     FILLET = "fillet"
-    """A toroidal or spherical blend between two surfaces."""
+    """A blend between two surfaces: a torus or sphere, or a small concave cylinder that is not a
+    hole - a fillet along a straight edge."""
+
+    FACE = "face"
+    """One CAD face, named as ``face:N``: whatever an engineer points at, feature or not."""
 
 
 @dataclass(frozen=True)
@@ -127,6 +141,10 @@ class Feature:
     station_mm: float | None = None
     centroid: tuple[float, float, float] = (0.0, 0.0, 0.0)
     metrics: dict[str, float] = field(default_factory=dict)
+    normal: tuple[float, float, float] | None = None
+    """Which way it faces: a planar group's outward normal, a hole's axis direction."""
+    opens_onto: tuple[int, ...] = ()
+    """The faces a hole opens onto - the surfaces it pierces."""
 
     @property
     def count(self) -> int:
@@ -151,6 +169,40 @@ class FeatureSet:
     axes: dict[str, Axis] = field(default_factory=dict)
     features: dict[str, Feature] = field(default_factory=dict)
     diagonal_mm: float = 0.0
+    faces: dict[int, FaceRecord] = field(default_factory=dict)
+    """Every face of the part, so any one can be named as ``face:N``."""
+
+    def get(self, ref: str) -> Feature | None:
+        """A feature by id, or a single face named as ``face:N``. None if the part has neither."""
+        if ref in self.features:
+            return self.features[ref]
+        if not ref.startswith("face:"):
+            return None
+        try:
+            face = self.faces.get(int(ref.split(":", 1)[1]))
+        except ValueError:
+            return None
+        return None if face is None else self._face_feature(face)
+
+    def _face_feature(self, face: FaceRecord) -> Feature:
+        flat = face.surface_type == "plane" and face.normal is not None
+        direction = face.normal if flat else face.axis
+        axis_id = next((a.id for a in self.axes.values() if face.face_id in a.face_ids), None)
+        return Feature(
+            id=f"face:{face.face_id}",
+            kind=FeatureKind.FACE,
+            face_ids=(face.face_id,),
+            area_mm2=face.area,
+            axis_id=axis_id,
+            diameter_mm=face.diameter_mm,
+            centroid=face.centroid,
+            metrics={"flat": float(flat)},
+            normal=None
+            if direction is None
+            else tuple(
+                float(v) for v in (direction if flat else _canonical(np.asarray(direction)))
+            ),
+        )
 
     def of_kind(self, kind: FeatureKind) -> list[Feature]:
         return [f for f in self.features.values() if f.kind is kind]
@@ -172,7 +224,10 @@ class FeatureSet:
         that happens to sit alone still appears.
         """
         total = sum(a.area_mm2 for a in self.axes.values()) or 1.0
-        carrying = {f.axis_id for f in self.features.values() if f.axis_id}
+        # A single hole is addressable, but its axis organises nothing.
+        carrying = {
+            f.axis_id for f in self.features.values() if f.axis_id and f.kind != FeatureKind.HOLE
+        }
         return [
             axis
             for axis in self.axes.values()
@@ -197,10 +252,11 @@ def detect(atlas: Atlas, bbox_mm: tuple[float, float, float, float, float, float
     x0, y0, z0, x1, y1, z1 = bbox_mm
     diagonal = float(math.dist((x0, y0, z0), (x1, y1, z1)))
 
-    result = FeatureSet(diagonal_mm=diagonal)
+    result = FeatureSet(diagonal_mm=diagonal, faces=dict(atlas.faces))
     result.axes = _detect_axes(atlas, diagonal)
 
     _detect_cylindrical(atlas, result, diagonal)
+    _detect_holes(atlas, result, diagonal)
     _detect_hole_patterns(atlas, result, diagonal)
     _detect_planar_groups(atlas, result, diagonal)
     _detect_fillets(atlas, result)
@@ -318,6 +374,148 @@ def _detect_cylindrical(atlas: Atlas, result: FeatureSet, diagonal: float) -> No
         )
 
 
+def _detect_holes(atlas: Atlas, result: FeatureSet, diagonal: float) -> None:
+    """Every small hole, wherever it is: alone, in a row, or on a circle.
+
+    A hole is a small concave cylinder - or, for a cast hole with draft, a small concave cone -
+    together with every face that continues it along its own axis: the other half of a split
+    cylinder, the cone of a chamfer or a countersink. Together they go round the axis; a fillet
+    in a corner is a small concave cylinder too, and goes a quarter of the way. What a hole opens
+    onto is everything else its faces touch: the surfaces it pierces, which is what "not over any
+    holes on this face" has to be answered from.
+    """
+    small = diagonal * SMALL_HOLE_FRACTION
+    tolerance = diagonal * AXIS_DISTANCE_TOL_FRACTION
+    axis_of_face = _face_to_axis(result)
+    taken: set[int] = set()
+    index = 0
+
+    # Cylinders first, so a countersink joins the hole it sinks rather than seeding its own.
+    seeds = [*atlas.of_type("cylinder"), *atlas.of_type("cone")]
+    for seed in seeds:
+        if seed.face_id in taken or not _is_small_hole(seed, small):
+            continue
+        stack = {seed.face_id}
+        frontier = [seed]
+        while frontier:
+            face = frontier.pop()
+            for other_id in face.neighbours:
+                other = atlas.faces.get(other_id)
+                if other is None or other_id in stack or other_id in taken:
+                    continue
+                continues = _is_small_hole(other, small) or other.surface_type == "cone"
+                if continues and _coaxial(seed, other, tolerance):
+                    stack.add(other_id)
+                    frontier.append(other)
+        taken |= stack
+        if wrap_deg([atlas.faces[f] for f in stack]) < HOLE_WRAP_DEG:
+            continue
+
+        walls = [atlas.faces[f] for f in stack if atlas.faces[f].surface_type == "cylinder"]
+        walls = walls or [atlas.faces[f] for f in stack]
+        weights = np.array([max(w.area, 1e-9) for w in walls])
+        centre = np.average(np.array([w.centroid for w in walls]), axis=0, weights=weights)
+        radius = min(w.radius_mm for w in walls if w.radius_mm is not None)
+        axis_id = axis_of_face.get(seed.face_id)
+        axis = result.axes.get(axis_id) if axis_id else None
+        opens = {n for f in stack for n in atlas.faces[f].neighbours} - stack
+
+        feature_id = f"hole:{index}"
+        index += 1
+        result.features[feature_id] = Feature(
+            id=feature_id,
+            kind=FeatureKind.HOLE,
+            face_ids=tuple(sorted(stack)),
+            area_mm2=sum(atlas.faces[f].area for f in stack),
+            axis_id=axis_id,
+            diameter_mm=2.0 * radius,
+            station_mm=None if axis is None else axis.station(tuple(centre)),
+            centroid=tuple(float(v) for v in centre),
+            metrics={"radius_mm": radius},
+            normal=tuple(float(v) for v in _canonical(np.asarray(seed.axis, dtype=float))),
+            opens_onto=tuple(sorted(opens)),
+        )
+
+
+def _is_small_hole(face: FaceRecord, small: float) -> bool:
+    return (
+        face.surface_type in ("cylinder", "cone")
+        and face.concave is True
+        and face.radius_mm is not None
+        and face.radius_mm < small
+    )
+
+
+def turning_with(faces: dict[int, FaceRecord], face_id: int, tolerance: float) -> list[FaceRecord]:
+    """A face of revolution and every face of the same kind it joins on the same axis: the rest of
+    a cylinder or cone the CAD split in pieces. ``tolerance`` is how far apart two axis lines may
+    pass and still be one."""
+    first = faces[face_id]
+    group = {face_id: first}
+    frontier = [first]
+    while frontier:
+        face = frontier.pop()
+        for other_id in face.neighbours:
+            other = faces.get(other_id)
+            if other is None or other_id in group or other.surface_type != first.surface_type:
+                continue
+            if _coaxial(first, other, tolerance):
+                group[other_id] = other
+                frontier.append(other)
+    return [group[f] for f in sorted(group)]
+
+
+def wrap_deg(faces: list[FaceRecord]) -> float:
+    """How far round their shared axis some faces of revolution go, in degrees: 360 for the wall
+    of a hole, about 90 for a fillet in a square corner.
+
+    Read from each face's mean normal, which the atlas measures on the tessellation. An arc of
+    angle t has a mean normal 2 sin(t/2) / t long, so the further round a face goes, the more of
+    itself it cancels. Faces on one axis are summed, so the two halves of a split cylinder go all
+    the way round together. A cone's normals lean along its axis; only their part square to the
+    axis counts, scaled back up by the cosine of the cone's half angle.
+    """
+    turning = [f for f in faces if f.axis is not None and f.area > 0]
+    if not turning:
+        return 0.0
+    axis = _canonical(np.asarray(turning[0].axis, dtype=float))
+    total = sum(f.area for f in turning)
+    mean = sum(f.area * f.flatness * np.asarray(f.facing, dtype=float) for f in turning) / total
+    lean = sum(f.area * math.cos(math.radians(f.half_angle_deg or 0.0)) for f in turning) / total
+    square = mean - float(mean @ axis) * axis
+    length = min(float(np.linalg.norm(square)) / max(lean, 1e-9), 1.0)
+    low, high = 1e-9, 2.0 * math.pi
+    for _ in range(60):
+        middle = 0.5 * (low + high)
+        if 2.0 * math.sin(middle / 2.0) / middle > length:
+            low = middle
+        else:
+            high = middle
+    return math.degrees(0.5 * (low + high))
+
+
+def _coaxial(a: FaceRecord, b: FaceRecord, tolerance: float) -> bool:
+    """Whether two faces turn about the same line."""
+    if a.axis is None or b.axis is None or a.axis_point is None or b.axis_point is None:
+        return False
+    da = _canonical(np.asarray(a.axis, dtype=float))
+    db = _canonical(np.asarray(b.axis, dtype=float))
+    if abs(float(np.dot(da, db))) < math.cos(math.radians(AXIS_ANGLE_TOL_DEG)):
+        return False
+    pa = _closest_point_to_origin(da, np.asarray(a.axis_point, dtype=float))
+    pb = _closest_point_to_origin(da, np.asarray(b.axis_point, dtype=float))
+    return float(np.linalg.norm(pa - pb)) <= tolerance
+
+
+def _canonical(direction: np.ndarray) -> np.ndarray:
+    """A direction and its reverse describe one line: unit length, first non-zero part positive."""
+    direction = direction / float(np.linalg.norm(direction))
+    for component in direction:
+        if abs(component) > 1e-9:
+            return -direction if component < 0 else direction
+    return direction
+
+
 def _detect_hole_patterns(atlas: Atlas, result: FeatureSet, diagonal: float) -> None:
     """Find repeated equal holes arranged on a circle or a line.
 
@@ -333,11 +531,12 @@ def _detect_hole_patterns(atlas: Atlas, result: FeatureSet, diagonal: float) -> 
     sit on a 9 degree grid with gaps - the circle has 40 positions and 30 are used. Reporting
     360/30 = 12 degrees would describe a pattern that is not there.
     """
-    small = diagonal * SMALL_HOLE_FRACTION
+    # The walls of the holes found - not every small concave cylinder, which includes fillets.
+    walls = {f for h in result.of_kind(FeatureKind.HOLE) for f in h.face_ids}
     holes = [
         face
         for face in atlas.of_type("cylinder")
-        if face.radius_mm is not None and face.concave and face.radius_mm < small
+        if face.face_id in walls and face.radius_mm is not None
     ]
     if len(holes) < MIN_PATTERN_COUNT:
         return
@@ -406,11 +605,11 @@ def _detect_hole_patterns(atlas: Atlas, result: FeatureSet, diagonal: float) -> 
 
 
 def _detect_planar_groups(atlas: Atlas, result: FeatureSet, diagonal: float) -> None:
-    """Group coplanar faces into the interfaces a document would name.
+    """Group coplanar faces that touch into the flat areas an engineer would name.
 
-    A mounting face is rarely one face - it is a ring, a pad, or a set of lands split by pockets.
-    Grouping by plane rather than by connectivity finds the whole interface, which is what a
-    document callout usually means.
+    A flat area is rarely one CAD face - a floor split by edges, a land cut in two - so faces on one
+    plane that share an edge are one group. Faces on one plane that do not touch are separate
+    groups: "ribs on this face" means one place, not every place that happens to be coplanar.
     """
     tolerance = diagonal * 1e-4
     buckets: dict[tuple[int, int, int, int], list[FaceRecord]] = defaultdict(list)
@@ -432,41 +631,74 @@ def _detect_planar_groups(atlas: Atlas, result: FeatureSet, diagonal: float) -> 
         buckets[key].append(face)
 
     index = 0
-    for members in buckets.values():
-        area = sum(m.area for m in members)
-        # A plane worth naming carries real area. Below a thousandth of the part's projected
-        # size it is a chamfer land or a sliver, and listing those buries the interfaces.
-        if area < (diagonal**2) * 1e-4:
+    for coplanar in buckets.values():
+        for members in _connected(coplanar):
+            area = sum(m.area for m in members)
+            # A plane worth naming carries real area. Below a thousandth of the part's projected
+            # size it is a chamfer land or a sliver, and listing those buries the interfaces.
+            if area < (diagonal**2) * 1e-4:
+                continue
+            feature_id = f"planar_group:{index}"
+            index += 1
+            weights = np.array([max(m.area, 1e-9) for m in members])
+            centre = np.average(np.array([m.centroid for m in members]), axis=0, weights=weights)
+            facing = np.average(np.array([m.normal for m in members]), axis=0, weights=weights)
+            facing = facing / max(float(np.linalg.norm(facing)), 1e-12)
+            result.features[feature_id] = Feature(
+                id=feature_id,
+                kind=FeatureKind.PLANAR_GROUP,
+                face_ids=tuple(sorted(m.face_id for m in members)),
+                area_mm2=area,
+                centroid=tuple(float(v) for v in centre),
+                metrics={
+                    "count": float(len(members)),
+                    "exterior": float(any(m.exterior for m in members)),
+                },
+                normal=tuple(float(v) for v in facing),
+            )
+
+
+def _connected(faces: list[FaceRecord]) -> list[list[FaceRecord]]:
+    """The given faces split into groups that touch, each in face order."""
+    by_id = {f.face_id: f for f in faces}
+    seen: set[int] = set()
+    groups = []
+    for face in faces:
+        if face.face_id in seen:
             continue
-        feature_id = f"planar_group:{index}"
-        index += 1
-        centre = np.average(
-            np.array([m.centroid for m in members]),
-            axis=0,
-            weights=np.array([max(m.area, 1e-9) for m in members]),
-        )
-        result.features[feature_id] = Feature(
-            id=feature_id,
-            kind=FeatureKind.PLANAR_GROUP,
-            face_ids=tuple(sorted(m.face_id for m in members)),
-            area_mm2=area,
-            centroid=tuple(float(v) for v in centre),
-            metrics={
-                "count": float(len(members)),
-                "exterior": float(any(m.exterior for m in members)),
-            },
-        )
+        group, frontier = [], [face]
+        seen.add(face.face_id)
+        while frontier:
+            current = frontier.pop()
+            group.append(current)
+            for other in current.neighbours:
+                if other in by_id and other not in seen:
+                    seen.add(other)
+                    frontier.append(by_id[other])
+        groups.append(sorted(group, key=lambda f: f.face_id))
+    return groups
 
 
 def _detect_fillets(atlas: Atlas, result: FeatureSet) -> None:
-    """Toroidal and spherical blends, grouped into tangent-connected chains.
+    """Blends, grouped into tangent-connected chains: tori and spheres, and the small concave
+    cylinders that are not holes - a fillet along a straight edge.
 
     Useful generically for two reasons: a fillet chain is usually the boundary of the feature it
     blends, and a part's smallest fillet radius bounds how fine a discretisation has to be before
     it resolves the geometry at all.
     """
+    small = result.diagonal_mm * SMALL_HOLE_FRACTION
+    in_holes = {f for h in result.of_kind(FeatureKind.HOLE) for f in h.face_ids}
     blends = {f.face_id for f in atlas.of_type("torus")} | {
         f.face_id for f in atlas.of_type("sphere")
+    }
+    blends |= {
+        f.face_id
+        for f in atlas.of_type("cylinder")
+        if f.concave
+        and f.radius_mm is not None
+        and f.radius_mm < small
+        and f.face_id not in in_holes
     }
     if not blends:
         return
@@ -615,3 +847,38 @@ def _spans_full_circle(angles: list[float]) -> bool:
     gaps = [b - a for a, b in zip(angles, angles[1:], strict=False)]
     gaps.append(360.0 - angles[-1] + angles[0])
     return max(gaps) < 180.0
+
+
+# --- questions asked of features ------------------------------------------------------------------
+
+
+def extent(
+    tess: Tessellation, face_ids: tuple[int, ...] | list[int], direction: tuple[float, ...]
+) -> tuple[float, float]:
+    """How far the given faces reach along a direction: the lowest and highest point, projected.
+
+    Measured on the tessellation, so it is defined for every surface type. "No taller than the bore"
+    needs the bore's top, and a bore records only where its axis is.
+    """
+    unit = np.asarray(direction, dtype=float)
+    unit = unit / float(np.linalg.norm(unit))
+    mine = np.isin(tess.face_id, list(face_ids))
+    if not mine.any():
+        raise ValueError("none of these faces has triangles")
+    points = tess.vertices[np.unique(tess.triangles[mine])]
+    along = points @ unit
+    return float(along.min()), float(along.max())
+
+
+def neighbours(features: FeatureSet, atlas: Atlas, feature_id: str) -> list[str]:
+    """Every feature with a face touching one of this feature's faces, along an edge."""
+    feature = features.get(feature_id)
+    if feature is None:
+        raise KeyError(feature_id)
+    mine = set(feature.face_ids)
+    touching = {n for f in mine for n in atlas.faces[f].neighbours} - mine
+    return sorted(
+        other.id
+        for other in features.features.values()
+        if other.id != feature_id and touching.intersection(other.face_ids)
+    )

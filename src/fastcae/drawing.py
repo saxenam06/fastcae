@@ -137,6 +137,13 @@ class DrawingRead:
     callouts: list[Callout] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     units: str = ""
+    lines: list[tuple[int, str]] = field(default_factory=list)
+    """Every line of text, with its page: what a search reads, notes and all, parsed or not."""
+
+    def search(self, text: str) -> list[tuple[int, str]]:
+        """The lines containing ``text``, case-insensitive, with their pages."""
+        needle = text.lower().strip()
+        return [(page, line) for page, line in self.lines if needle and needle in line.lower()]
 
     def of_kind(self, kind: CalloutKind) -> list[Callout]:
         return [c for c in self.callouts if c.kind is kind]
@@ -195,6 +202,7 @@ def read(path: Path) -> DrawingRead:
             result.warnings.append(f"page {index} text extraction failed: {error}")
             continue
         result.characters += len(text)
+        result.lines.extend((index, line.strip()) for line in text.splitlines() if line.strip())
         result.callouts.extend(_parse_page(text, index))
 
     if not result.has_text:
