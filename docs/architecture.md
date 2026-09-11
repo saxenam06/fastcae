@@ -13,11 +13,16 @@ The arc, in the order it runs:
 
 > **Extract → Model → Generate → Simulate → Learn → Optimize**
 
-Generate leads because it is the thing a solver cannot do: the campaign, the training set and the
-search all exist to serve designs that had to be generated first.
+and back: what is learned and the objectives set steer which designs are sampled next.
 
-Extract and Model are built. The other four are shown in the interface and not yet implemented — a
-shell that hides its unbuilt stages describes a tool; one that shows them describes a product.
+Generate leads because it is the thing a solver cannot do: the campaign, the training set and the
+search all exist to serve designs that had to be generated first. What is generated comes from the
+engineer's intent, stated in plain language and turned by an agent into a spec - see
+[ribs.md](ribs.md).
+
+Extract and Model are built; Generate is being built. The other three are shown in the interface
+and not yet implemented — a shell that hides its unbuilt stages describes a tool; one that shows
+them describes a product.
 
 ## The rule that keeps it general
 
@@ -70,15 +75,16 @@ features.py    generic feature detection. No domain vocabulary anywhere.
 drawing.py     PDF text to callouts. Every one cites its page and literal text.
 extract.py     the deterministic pipeline, and the drawing-to-CAD association.
 provenance.py  Evidence, Fact, Conflict. How anything is known.
-generate/      the part as a distance field, and ribs placed in it in formations.
+generate/      the part as a distance field, ribs composed into it, and the checks.
+agent/         (to build) the LLM agent: tools over the routes, the spec it writes.
 cli.py         batches of designs, run without the interface.
 api/app.py     HTTP surface. Routes contain no logic.
 ```
 
 `project.json` is not configuration in the usual sense: it holds no facts and no settings, only
-decisions - which CAD designs grow from, which zones and protected areas a person approved, which
-corrections to the baseline were accepted. The system proposes each one; nothing in it is written
-by hand except through an approval.
+decisions - which CAD designs grow from, the spec, which protected areas and regions a person
+approved. The system proposes each one; nothing in it is written except through an approval or an
+edit the engineer makes.
 
 ## Nothing derived is computed twice
 
@@ -91,13 +97,11 @@ derived and inside the project because they belong to the part.
 digest of the source that produced it. Change the STEP and the key changes; change a threshold and
 the key changes. There is no timestamp to be wrong about and no cache to clear.
 
-**Which source is declared per result, and it has to be only that source.** A zone's window takes
-eleven minutes to build; when its key also named the checks' code, every change to a check threw
-the window away. A key names the modules that build the result and nothing downstream of it.
+**Which source is declared per result, and it has to be only that source.** A key names the
+modules that build the result and nothing downstream of it - a region's exact distance takes
+minutes, and must not be thrown away because a check that merely reads it changed.
 
-The four newest entries of each kind are kept. That is enough for one project at a time, and it
-means a test that opens the real project at a coarse grid can push out a 2.5 mm field that took
-minutes - not yet a problem, but the next thing that would be.
+The four newest entries of each kind are kept, which is enough for one project at a time.
 
 Including the source is what makes it safe rather than merely fast. A cache keyed on inputs alone
 hands back a result computed by code that no longer exists, and that failure presents as the new
@@ -130,7 +134,8 @@ earlier, as a task - see [tasks.md](tasks.md).
 ## The command layer
 
 `api/app.py` is the single seam between the engine and anything driving it. The browser calls it
-over HTTP; an agent will call the same routes with no privileged path.
+over HTTP; the agent's tools call the same routes with no privileged path, so anything the agent can
+do, the interface can do.
 
 **Routes contain no logic.** A route unpacks a request, calls one engine function, and packs the
 result. Anything a route can do that the engine cannot is something an agent will not be able to do.
@@ -147,7 +152,7 @@ the *subject*, and the left rail holds that subject's own detail:
 | **Drawing** | callout kinds, and the steps that read them, warnings included | every callout beside the literal text it was parsed from |
 | **Geometry** | what the CAD yielded, its steps, axes, feature kinds | the tessellated surface, pickable |
 | **Field** | layers, the field's own statistics, the contour's | the field, its contour and the CAD, as switchable layers |
-| **Generate** | the levers, their dials, and what this design weighs | the design's own cells, rebuilt as a dial moves |
+| **Generate** | the spec, its levers, and each design's verdict | the design's new surfaces over the part |
 
 The pipeline report has no tab of its own because it does not need one: every step belongs to an
 artifact, so it appears in that artifact's rail. Putting the tabs in the rail instead lets a tab and
@@ -167,9 +172,11 @@ uploaded once and drawn conditionally.
 current tab's detail and, under it, whatever is selected - a selection belongs beside the features
 it was made from, and it applies to two tabs of the three, so a pane that sits empty on the third
 is a pane in the wrong place. The right column is the **agent's**, opened from a mark in the bar
-and closed again to get the width back. It is shown before it works for the same reason the unbuilt
-stages are, and for the same reason it contains no chat box: showing what is coming is a product,
-pretending it works is not.
+and closed again to get the width back. It is where the engineer talks to the agent; until the agent
+exists it says so rather than offering a chat box that does nothing.
+
+**Every face can be named.** Hovering a face on any 3D tab shows what it is and every feature it
+belongs to, so an engineer can refer to it in words - and hand that reference to the agent.
 
 The card vocabulary is the test of whether the model is general — each card renders one *kind of
 thing the platform knows about*, never one kind of part:

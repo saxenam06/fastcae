@@ -1,12 +1,12 @@
 # Archive
 
-These documents are **not current**. [rib-layouts.md](../rib-layouts.md) was drawn from them on
-2026-09-11 and supersedes them. Four of them were written for the previous project, so they cite
+These documents are **not current**; [ribs.md](../ribs.md) and [generate.md](../generate.md) are.
+Four of them were written for the previous project, so they cite
 files that do not exist in this repository: `mesh/surface.py`, `fem/aster.py`, `handbook/`,
 `production.step`, `groups.json`, `basis.npy`. They also disagree with each other on schedule and
 phase order.
 
-| document | what it is | what the plan took from it |
+| document | what it is | what the current design keeps from it |
 |---|---|---|
 | [16-implicit-rib-variants.md](16-implicit-rib-variants.md) | Research note. How nTop builds ribs, with sources; the housing and its ribs as measured; candidate open-source kernels; the case for offset-closing; the measured cost of an immersed grid on this part | The mechanism: layout, then ribs, then blended union, then protected areas. The rib's parameters, the ring zones and the division of work. Offset-closing is kept as the fallback fillet. The grid-cost numbers go to the physics plan |
 | [grc-rib-plan.html](grc-rib-plan.html) | Plain-language plan. Five rules, the checks, milestones M0 and M1, the tools | Ribs follow the mould. Building is not the same as correct. Videos are not designs. The agent suggests and a script checks. Protected areas are cut back after every blend. The check list, and the first campaign of 64 |
