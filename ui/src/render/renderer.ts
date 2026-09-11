@@ -136,11 +136,26 @@ layout(location = 0) in vec3 a_position;
 layout(location = 2) in uint a_faceId;
 uniform mat4 u_viewProjection;
 uniform mat4 u_model;
+uniform int u_useConstant;
+uniform uint u_constant;
 flat out uint v_faceId;
 void main() {
-  v_faceId = a_faceId;
+  v_faceId = u_useConstant == 1 ? u_constant : a_faceId;
   gl_Position = u_viewProjection * u_model * vec4(a_position, 1.0);
 }`;
+
+/**
+ * What a pick returns for the design's own surfaces - ribs and fillets - rather than a CAD face.
+ * The top of the id range, which no part comes near.
+ */
+export const DESIGN_PICK = 0xfffffe;
+
+/**
+ * How the overlay takes part in picking. ``faces``: it carries CAD face ids of its own, as a
+ * contour of the part does. ``design``: it is new surface, and every pixel of it is
+ * {@link DESIGN_PICK}. Either way it hides what is behind it, as it does on screen.
+ */
+export type OverlayPick = "none" | "faces" | "design";
 
 const PICK_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
@@ -239,6 +254,33 @@ void main() {
   fragColour = vec4(pow(colour, vec3(0.4545)), u_alpha);
 }`;
 
+/** Lines in the part's frame, each vertex with its own colour: where ribs would go, and why not. */
+const LINE_VERTEX_SHADER = `#version 300 es
+precision highp float;
+layout(location = 0) in vec3 a_position;
+layout(location = 1) in vec3 a_colour;
+uniform mat4 u_viewProjection;
+out vec3 v_colour;
+void main() {
+  v_colour = a_colour;
+  gl_Position = u_viewProjection * vec4(a_position, 1.0);
+}`;
+
+const LINE_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+in vec3 v_colour;
+uniform float u_alpha;
+out vec4 fragColour;
+void main() {
+  fragColour = vec4(v_colour, u_alpha);
+}`;
+
+/** Line segments: two points per segment, and a colour per point. */
+export interface LineSet {
+  positions: Float32Array;
+  colours: Float32Array;
+}
+
 /** Two triangles over a unit square, centred on the origin. Every cell face is this, moved. */
 const QUAD = new Float32Array([
   -0.5, -0.5, 0.5, -0.5, 0.5, 0.5,
@@ -279,6 +321,12 @@ export class Renderer {
   private voxelShape: [number, number, number] = [1, 1, 1];
   private voxelOrigin: [number, number, number] = [0, 0, 0];
 
+  /** Lines drawn over everything: where a layout would put ribs. */
+  private lineProgram: WebGLProgram | null = null;
+  private lineVao: WebGLVertexArrayObject | null = null;
+  private lineBuffers: WebGLBuffer[] = [];
+  private lineVertexCount = 0;
+
   /** Colour and opacity of the voxel layer. */
   voxelTint: [number, number, number] = [0.059, 0.239, 0.569];
   voxelAlpha = 1.0;
@@ -299,6 +347,7 @@ export class Renderer {
   /** Colour and opacity of the overlay pass. Ochre against the steel of the main surface. */
   overlayTint: [number, number, number] = [0.541, 0.416, 0.122];
   overlayAlpha = 0.42;
+  overlayPick: OverlayPick = "none";
 
   /** The model extent the camera was framed to. Zoom limits derive from it. */
   private extent = 1000;
@@ -393,7 +442,7 @@ export class Renderer {
     for (const id of state.frozen) this.faceStateData[id * 4 + 1] = 255;
     for (const id of state.exterior) this.faceStateData[id * 4 + 3] = 255;
     for (const id of state.selected) this.faceStateData[id * 4 + 0] = 255;
-    if (state.hovered !== null && state.hovered >= 0) {
+    if (state.hovered !== null && state.hovered >= 0 && state.hovered * 4 < this.faceStateData.length) {
       this.faceStateData[state.hovered * 4 + 2] = 255;
     }
 
@@ -491,7 +540,55 @@ export class Renderer {
         gl.polygonOffset(0.0, 0.0);
       }
     }
+
+    // Lines last, twice: faint where the part hides them - a line behind a wall is still found -
+    // and solid where it does not.
+    if (this.lineProgram && this.lineVao && this.lineVertexCount > 0) {
+      gl.useProgram(this.lineProgram);
+      gl.uniformMatrix4fv(
+        gl.getUniformLocation(this.lineProgram, "u_viewProjection"),
+        false,
+        viewProjection,
+      );
+      const lineAlpha = gl.getUniformLocation(this.lineProgram, "u_alpha");
+      gl.bindVertexArray(this.lineVao);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.disable(gl.DEPTH_TEST);
+      gl.uniform1f(lineAlpha, 0.3);
+      gl.drawArrays(gl.LINES, 0, this.lineVertexCount);
+      gl.enable(gl.DEPTH_TEST);
+      gl.uniform1f(lineAlpha, 1.0);
+      gl.drawArrays(gl.LINES, 0, this.lineVertexCount);
+      gl.disable(gl.BLEND);
+      gl.useProgram(this.program);
+    }
     gl.bindVertexArray(null);
+  }
+
+  /** Draw these lines over the part, or take them away. */
+  setLines(lines: LineSet | null): void {
+    const gl = this.gl;
+    if (this.lineVao) {
+      gl.deleteVertexArray(this.lineVao);
+      for (const buffer of this.lineBuffers) gl.deleteBuffer(buffer);
+      this.lineVao = null;
+      this.lineBuffers = [];
+      this.lineVertexCount = 0;
+    }
+    if (!lines || lines.positions.length === 0) return;
+    if (!this.lineProgram) {
+      this.lineProgram = linkProgram(gl, LINE_VERTEX_SHADER, LINE_FRAGMENT_SHADER);
+    }
+    const position = createBuffer(gl, lines.positions);
+    const colour = createBuffer(gl, lines.colours);
+    this.lineBuffers = [position, colour];
+    this.lineVao = gl.createVertexArray()!;
+    gl.bindVertexArray(this.lineVao);
+    bindFloatAttribute(gl, position, 0, 3);
+    bindFloatAttribute(gl, colour, 1, 3);
+    gl.bindVertexArray(null);
+    this.lineVertexCount = lines.positions.length / 3;
   }
 
   /**
@@ -536,8 +633,7 @@ export class Renderer {
   /**
    * Put a second surface over the first, or take it away.
    *
-   * Picking is unaffected: it runs against the main surface only, so whichever mesh carries real
-   * CAD face ids should be the one passed to the constructor.
+   * Whether it can be picked, and as what, is {@link overlayPick}.
    */
   setOverlay(mesh: Mesh | null): void {
     const gl = this.gl;
@@ -581,7 +677,9 @@ export class Renderer {
     const gl = this.gl;
     this.setOverlay(null);
     this.setVoxels(null);
+    this.setLines(null);
     if (this.voxelProgram) gl.deleteProgram(this.voxelProgram);
+    if (this.lineProgram) gl.deleteProgram(this.lineProgram);
     for (const buffer of this.buffers) gl.deleteBuffer(buffer);
     this.buffers = [];
     gl.deleteVertexArray(this.vao);
@@ -616,8 +714,19 @@ export class Renderer {
       this.viewProjection(width / height),
     );
     gl.uniformMatrix4fv(gl.getUniformLocation(this.pickProgram, "u_model"), false, IDENTITY);
-    gl.bindVertexArray(this.pickVao);
-    gl.drawElements(gl.TRIANGLES, this.indexCount, gl.UNSIGNED_INT, 0);
+    const useConstant = gl.getUniformLocation(this.pickProgram, "u_useConstant");
+    // Only what is on screen can be picked: a hidden part is not under the cursor.
+    if (this.showSurface) {
+      gl.uniform1i(useConstant, 0);
+      gl.bindVertexArray(this.pickVao);
+      gl.drawElements(gl.TRIANGLES, this.indexCount, gl.UNSIGNED_INT, 0);
+    }
+    if (this.overlayPick !== "none" && this.showOverlay && this.overlayVao) {
+      gl.uniform1i(useConstant, this.overlayPick === "design" ? 1 : 0);
+      gl.uniform1ui(gl.getUniformLocation(this.pickProgram, "u_constant"), DESIGN_PICK);
+      gl.bindVertexArray(this.overlayVao);
+      gl.drawElements(gl.TRIANGLES, this.overlayIndexCount, gl.UNSIGNED_INT, 0);
+    }
     gl.bindVertexArray(null);
 
     const pixel = new Uint8Array(4);

@@ -1,7 +1,7 @@
 .shell {
   display: grid;
   grid-template-columns: var(--rail) 1fr var(--inspector);
-  grid-template-rows: 48px 1fr 26px;
+  grid-template-rows: 48px minmax(0, 1fr) 26px;
   grid-template-areas:
     "topbar topbar topbar"
     "index  stage  inspector"
@@ -20,12 +20,12 @@
   min-width: 0;
 }
 
-/* The agent's column. Hidden by default - an empty panel is worse than a wide view - and opened
-   from the bar above. */
-.agent {
+/* The rib card's column, opened and closed from the bar above. */
+.card-pane {
   grid-area: inspector;
   position: relative;
-  overflow: auto;
+  overflow: hidden;
+  min-height: 0;
   background: var(--sheet);
   border-left: 1px solid var(--hairline);
   min-width: 0;
@@ -61,23 +61,19 @@
   background: var(--blue);
 }
 
-.agent-body .section:first-child {
-  border-top: none;
-}
-
-/* The agent's own button in the bar: a mark rather than a word, and lit when its pane is open. */
-.agent-toggle {
+/* The card's button in the bar: a mark and a word, lit when its pane is open. */
+.pane-toggle {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
 
-.agent-toggle[data-open="true"] {
+.pane-toggle[data-open="true"] {
   border-color: var(--blue);
   color: var(--blue);
 }
 
-.agent-toggle svg {
+.pane-toggle svg {
   display: block;
 }
 
@@ -1163,4 +1159,527 @@ button.quiet:hover {
 
 .busy-note {
   padding: 8px 12px;
+}
+
+/* What is under the cursor, small: one name, a few measurements. Pinned by a click. */
+.hover-card {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  width: 236px;
+  padding: 6px 8px;
+  background: var(--sheet);
+  border: 1px solid var(--hairline);
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 1.35;
+  pointer-events: auto;
+}
+
+.hover-card[data-pinned="true"] {
+  border-color: var(--blue);
+}
+
+.hover-card header {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 3px;
+}
+
+.hover-card .name {
+  font-family: var(--mono);
+  font-weight: 600;
+  color: var(--blue);
+  user-select: all;
+  cursor: text;
+}
+
+.hover-card header .detail {
+  color: var(--muted);
+}
+
+.hover-card .kv {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  column-gap: 6px;
+  row-gap: 1px;
+}
+
+.hover-card .kv dt {
+  color: var(--muted);
+}
+
+.hover-card .kv dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.hover-card .release {
+  margin-left: auto;
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+}
+
+/* The engineer's words, as the spec quotes them. */
+.words p {
+  margin: 0 0 6px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.verdict-part {
+  margin: 10px 0 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.card-note.warn {
+  color: var(--conflict);
+  padding: 8px 12px;
+}
+
+/* The selection on the stage: the faces clicked, each grown by its own angle, and the one the
+   grow control acts on. */
+.stage-body .selection-bar {
+  position: absolute;
+  left: 12px;
+  bottom: 34px;
+  max-width: calc(100% - 24px);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 4px 8px;
+  background: var(--sheet);
+  border: 1px solid var(--hairline);
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.selection-bar[data-empty="true"] {
+  color: var(--faint);
+}
+
+.selection-bar label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.selection-bar input[type="range"] {
+  width: 90px;
+}
+
+.selection-bar .count {
+  font-family: var(--mono);
+}
+
+.selection-bar .seed {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+}
+
+.selection-bar .seed[data-active="true"] {
+  border-color: var(--blue);
+  background: var(--blue-wash);
+}
+
+.selection-bar .seed button {
+  border: none;
+  background: none;
+  padding: 1px 5px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--blue);
+}
+
+.selection-bar .seed .grown {
+  color: var(--muted);
+}
+
+.selection-bar .seed .remove {
+  color: var(--muted);
+  padding: 1px 4px 1px 0;
+}
+
+/* --- the rib card -------------------------------------------------------------------------- */
+
+/* A column: the head, the slots scrolling in the middle, the design buttons and verdict below. */
+.rib-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  font-size: 12px;
+}
+
+.rib-card > .card-note {
+  padding: 10px 12px;
+}
+
+.rib-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.rib-card-head button {
+  margin-left: auto;
+}
+
+.rib-slots {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.rib-slot {
+  padding: 6px 12px 7px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.rib-slot header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 3px;
+}
+
+.rib-slot .slot-label {
+  font-weight: 600;
+}
+
+.rib-slot[data-source="needed"] .slot-label {
+  color: var(--conflict);
+}
+
+.rib-slot header .chip {
+  margin-left: 0;
+}
+
+.rib-slot header .spacer {
+  flex: 1;
+}
+
+.rib-card button.icon,
+.rib-card button.link {
+  border: none;
+  background: none;
+  padding: 0 2px;
+  font-size: 11px;
+  color: var(--blue);
+}
+
+.rib-card button.icon {
+  color: var(--faint);
+}
+
+.rib-card button.icon:hover:not(:disabled),
+.rib-card button.link:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.rib-card button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.rib-card .chip[data-source="you"],
+.rib-card .chip[data-source="selected"] {
+  background: var(--blue-wash);
+  color: var(--blue);
+  border-color: var(--blue-wash);
+}
+
+.rib-card .chip[data-source="measured"],
+.rib-card .chip[data-source="drawing"] {
+  background: var(--measured-wash);
+  color: var(--measured);
+  border-color: var(--measured-wash);
+}
+
+.rib-card .chip[data-source="default"] {
+  background: var(--running-wash);
+  color: var(--running);
+  border-color: var(--running-wash);
+}
+
+.rib-card .chip[data-source="needed"] {
+  background: var(--conflict-wash);
+  color: var(--conflict);
+  border-color: var(--conflict);
+}
+
+.slot-parts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+
+.part {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.part-label {
+  color: var(--muted);
+}
+
+.part[data-type="faces"],
+.part[data-type="list"] {
+  flex-basis: 100%;
+}
+
+.part[data-type="faces"][data-default="true"] .ref-chip {
+  border-style: dashed;
+}
+
+.part[data-type="number"][data-active="false"] input {
+  color: var(--faint);
+}
+
+.part-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.refs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+/* A face or feature, by the one name it has: shown on the part by a click, taken out by its
+   cross. */
+.ref-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--blue-wash);
+  border-radius: 2px;
+  background: var(--blue-wash);
+}
+
+.ref-chip button {
+  border: none;
+  background: none;
+  padding: 0 4px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--blue);
+}
+
+.ref-chip .remove {
+  padding: 0 3px 0 0;
+  color: var(--muted);
+}
+
+.ref-inline {
+  border: none;
+  border-radius: 2px;
+  background: var(--blue-wash);
+  padding: 0 3px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--blue);
+}
+
+/* A number and its unit, with arrows to step it. */
+.stepper {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+  background: var(--sheet);
+}
+
+.stepper input {
+  width: 58px;
+  border: none;
+  padding: 2px 4px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  text-align: right;
+  background: none;
+}
+
+.stepper input:focus {
+  outline: 1px solid var(--blue);
+}
+
+.stepper .arrows {
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--hairline);
+}
+
+.stepper .arrows button {
+  border: none;
+  border-radius: 0;
+  padding: 0 4px;
+  font-size: 8px;
+  line-height: 1.1;
+  color: var(--muted);
+  background: none;
+}
+
+.stepper .arrows button:hover:not(:disabled) {
+  color: var(--blue);
+  background: var(--blue-wash);
+}
+
+.part .unit {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.part select {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  padding: 1px 2px;
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+  background: var(--sheet);
+}
+
+/* Words for one slot: typed in place, faces put in from the selection. */
+.words-line {
+  margin-top: 5px;
+}
+
+.words-edit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.words-edit input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 5px;
+  border: 1px solid var(--blue);
+  border-radius: 2px;
+}
+
+.words-edit button {
+  padding: 1px 7px;
+}
+
+.slot-said {
+  margin-top: 3px;
+  color: var(--ink);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.slot-note {
+  margin-top: 2px;
+  color: var(--faint);
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+
+.slot-problem {
+  margin-top: 3px;
+  padding: 2px 6px;
+  border-left: 2px solid var(--conflict);
+  background: var(--conflict-wash);
+  color: var(--conflict);
+  font-size: 11px;
+}
+
+.rib-card-foot {
+  border-top: 1px solid var(--hairline);
+  padding: 8px 12px 10px;
+  max-height: 45%;
+  overflow: auto;
+}
+
+.rib-card-foot .actions {
+  margin-top: 6px;
+}
+
+.rib-card-status {
+  color: var(--conflict);
+  font-size: 11px;
+}
+
+.rib-card-status[data-ready="true"] {
+  color: var(--measured);
+}
+
+.rib-card-foot .busy-note {
+  padding: 6px 0 0;
+}
+
+.rib-verdict {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-start;
+}
+
+.rib-verdict .finding {
+  align-self: stretch;
+}
+
+.verdict-line {
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.verdict-line .chip {
+  margin-left: 0;
+}
+
+/* What the lines drawn on the part mean: a colour per outcome, with how many. */
+.paths-key {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 12px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.paths-key .verdict-line {
+  flex-basis: 100%;
+  color: var(--ink);
+}
+
+.paths-key-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.paths-key-item .swatch {
+  display: inline-block;
+  width: 14px;
+  height: 3px;
+  border-radius: 1px;
 }

@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useRef } from "react";
-import type { ColourMode } from "../render/renderer";
+import type { ColourMode, LineSet, OverlayPick } from "../render/renderer";
 import { Renderer } from "../render/renderer";
 import type { Mesh, VoxelCells } from "../api/client";
 
@@ -22,9 +22,13 @@ interface StageProps {
    */
   overlay?: Mesh | null;
   voxels?: VoxelCells | null;
+  /** Lines over everything: where a layout would put ribs, before any design is made. */
+  lines?: LineSet | null;
   overlayAlpha?: number;
   /** The overlay's colour. Ochre by default, against the steel of the main surface. */
   overlayTint?: [number, number, number];
+  /** Whether the overlay can be picked, and as what. Not at all by default. */
+  overlayPick?: OverlayPick;
   showSurface?: boolean;
   showOverlay?: boolean;
   showVoxels?: boolean;
@@ -60,8 +64,10 @@ export function Stage(props: StageProps) {
     renderer.showVoxels = props.showVoxels ?? true;
     renderer.overlayAlpha = props.overlayAlpha ?? 0.42;
     renderer.overlayTint = props.overlayTint ?? OCHRE;
+    renderer.overlayPick = props.overlayPick ?? "none";
     renderer.setOverlay(props.overlay ?? null);
     renderer.setVoxels(props.voxels ?? null);
+    renderer.setLines(props.lines ?? null);
     renderer.frame(props.bbox);
     rendererRef.current = renderer;
     dirtyRef.current = true;
@@ -103,6 +109,13 @@ export function Stage(props: StageProps) {
     dirtyRef.current = true;
   }, [props.voxels]);
 
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    renderer.setLines(props.lines ?? null);
+    dirtyRef.current = true;
+  }, [props.lines]);
+
   // Cheap to change and cheap to apply, so these ride along with the face state rather than
   // rebuilding anything.
   useEffect(() => {
@@ -113,8 +126,16 @@ export function Stage(props: StageProps) {
     renderer.showVoxels = props.showVoxels ?? true;
     renderer.overlayAlpha = props.overlayAlpha ?? 0.42;
     renderer.overlayTint = props.overlayTint ?? OCHRE;
+    renderer.overlayPick = props.overlayPick ?? "none";
     dirtyRef.current = true;
-  }, [props.showSurface, props.showOverlay, props.showVoxels, props.overlayAlpha, props.overlayTint]);
+  }, [
+    props.showSurface,
+    props.showOverlay,
+    props.showVoxels,
+    props.overlayAlpha,
+    props.overlayTint,
+    props.overlayPick,
+  ]);
 
   // Face state and colour mode: cheap texture writes, so this can run on every state change.
   useEffect(() => {

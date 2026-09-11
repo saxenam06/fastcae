@@ -1,22 +1,14 @@
 /**
- * The rail for the Generate tab: approve where ribs may go, pick a formation, set its levers,
- * generate, and see what came out.
+ * The rail for the Generate tab: the spec the rib card wrote from what the engineer set, the design
+ * made from it, and that design's verdict.
  *
- * Nothing is preloaded and nothing is decided here. Zones and protected areas arrive as proposals
- * and a person approves them; levers exist only for an approved zone; every design comes back with
- * each check's verdict and the rule it used, so an assumed threshold never reads as a confirmed one.
- *
- * No part's vocabulary: zones, formations, levers and rules are all labelled by the server.
+ * Nothing here decides anything. The spec is written from the card, in the engineer's words and
+ * selections; this shows it and makes designs from it. Every verdict lists the engineer's
+ * constraints first, each citing the words it came from, then the checks the platform holds every
+ * rib to - with any threshold nobody confirmed marked assumed.
  */
 
-import type {
-  FindingRow,
-  Formations,
-  MadeDesign,
-  SpaceInfo,
-  ZoneSettings,
-  ZonesInfo,
-} from "../api/client";
+import type { SpecInfo, Verdict, VerdictRow } from "../api/client";
 
 export interface GenerateLayers {
   /** The part as its CAD describes it. */
@@ -27,7 +19,7 @@ export interface GenerateLayers {
 
 export const GENERATE_COLOURS: Record<keyof GenerateLayers, string> = {
   geometry: "#a5a9a4",
-  design: "#0f3d91",
+  design: "#0e6e74",
 };
 
 const GENERATE_LABELS: Record<keyof GenerateLayers, string> = {
@@ -38,28 +30,17 @@ const GENERATE_LABELS: Record<keyof GenerateLayers, string> = {
 interface GenerateIndexProps {
   layers: GenerateLayers;
   onLayers: (layers: GenerateLayers) => void;
-
-  zones: ZonesInfo | null;
-  onApproveZone: (id: string, approved: boolean) => void;
-  onApproveProtected: (approved: boolean) => void;
-
-  space: SpaceInfo | null;
-  onOpen: () => void;
-
-  formations: Formations | null;
-  settings: Record<string, ZoneSettings>;
-  onSettings: (zoneId: string, settings: ZoneSettings) => void;
-  onGenerate: () => void;
-
-  made: MadeDesign | null;
+  spec: SpecInfo | null;
+  verdict: Verdict | null;
+  onDesign: (fidelity: "preview" | "full") => void;
   busy: string | null;
   error: string | null;
 }
 
 export function GenerateIndex(props: GenerateIndexProps) {
-  const { zones, space, formations, made } = props;
-  const approved = zones?.zones.filter((z) => z.status === "approved") ?? [];
+  const { spec, verdict } = props;
   const working = props.busy !== null;
+  const current = spec?.current;
 
   return (
     <nav className="index">
@@ -81,247 +62,176 @@ export function GenerateIndex(props: GenerateIndexProps) {
 
       <section className="section">
         <header>
-          <span className="step">1</span> Approve where ribs may go
+          The spec
+          {current ? (
+            <span className="detail">
+              {" "}
+              {spec?.spec} · version {current.version}
+            </span>
+          ) : null}
         </header>
         <div className="body">
-          {!zones ? (
-            <div className="card-note">Reading the project&hellip;</div>
-          ) : zones.zones.length === 0 ? (
+          {!current ? (
             <div className="card-note">
-              No zones yet. Where ribs may go comes from what you ask for: the faces they stand on,
-              what they run between, and what they keep away from.
+              No spec yet. Start the rib card from faces on the part and make a design from it:
+              the card is written as the spec first, and designs are made only from that.
             </div>
           ) : (
-            zones.zones.map((zone) => (
-              <div key={zone.id} className="approval">
-                <div className="card-head">
-                  <span className="card-title">{zone.label}</span>
-                  <span className="chip" data-state={zone.status}>
-                    {zone.status}
-                  </span>
-                </div>
-                <div className="card-note">{zone.summary}</div>
-                <div className="actions">
-                  <button
-                    onClick={() => props.onApproveZone(zone.id, zone.status !== "approved")}
-                    disabled={working}
-                  >
-                    {zone.status === "approved" ? "Withdraw" : "Approve"}
-                  </button>
-                </div>
+            <>
+              <div className="words">
+                {current.words.map((word) => (
+                  <p key={word.id}>
+                    <span className="mono dim">{word.id}</span> &ldquo;{word.text}&rdquo;
+                  </p>
+                ))}
               </div>
-            ))
+              {current.placements.map((placement) => (
+                <PlacementCard key={String(placement.id)} placement={placement} />
+              ))}
+              {current.levers.length ? (
+                <div className="card-note">
+                  Levers:{" "}
+                  {current.levers
+                    .map((lever) => `${lever.path} ${lever.low}–${lever.high}`)
+                    .join(", ")}
+                </div>
+              ) : null}
+              {current.note ? <div className="card-note">{current.note}</div> : null}
+            </>
           )}
-
-          {zones ? (
-            <div className="approval">
-              <div className="card-head">
-                <span className="card-title">Protected areas</span>
-                <span className="chip" data-state={zones.protected.status}>
-                  {zones.protected.status}
-                </span>
-              </div>
-              <div className="card-note">
-                Every {zones.protected.kinds.map((k) => k.replace("_", " ")).join(", ")} face, and{" "}
-                {zones.protected.clearance_mm} mm around it. Ribs and fillets that reach them are
-                cut back, and the surface there stays exactly as it was.
-              </div>
-              <div className="actions">
-                <button
-                  onClick={() => props.onApproveProtected(zones.protected.status !== "approved")}
-                  disabled={working}
-                >
-                  {zones.protected.status === "approved" ? "Withdraw" : "Approve"}
-                </button>
-              </div>
-            </div>
-          ) : null}
-
         </div>
       </section>
 
       <section className="section">
-        <header>
-          <span className="step">2</span> Open for designing
-        </header>
+        <header>Design</header>
         <div className="body">
-          {space ? (
-            <dl className="kv compact">
-              <dt>grid</dt>
-              <dd>{space.spacing_mm} mm</dd>
-              <dt>part</dt>
-              <dd>{space.base_volume_cm3.toLocaleString()} cm³</dd>
-              <dt>root fillet</dt>
-              <dd>R{space.radius_mm}</dd>
-            </dl>
-          ) : (
-            <div className="card-note">
-              Builds or reads the part&rsquo;s field, its contour, and each approved zone&rsquo;s
-              window. Minutes the first time on a large part, seconds after.
-            </div>
-          )}
+          <div className="card-note">
+            Preview is the same design on a coarser grid, for looking. A design is accepted only
+            at full.
+          </div>
           <div className="actions">
-            <button onClick={props.onOpen} disabled={approved.length === 0 || working}>
-              {space ? "Open again" : "Open"}
+            <button onClick={() => props.onDesign("preview")} disabled={!current || working}>
+              Preview
+            </button>
+            <button onClick={() => props.onDesign("full")} disabled={!current || working}>
+              Full
             </button>
           </div>
+          {props.busy ? <div className="card-note busy-note">{props.busy}</div> : null}
+          {props.error ? <div className="warn">{props.error}</div> : null}
         </div>
       </section>
 
-      {space && formations ? (
-        <section className="section">
-          <header>
-            <span className="step">3</span> Set the levers
-          </header>
-          {space.zones.map((zone) => {
-            const chosen = props.settings[zone.id];
-            const formation = formations.formations.find((f) => f.name === chosen?.formation);
-            return (
-              <div key={zone.id} className="parameter">
-                <div className="card-head">
-                  <span className="card-title">{zone.label}</span>
-                  <select
-                    value={chosen?.formation ?? ""}
-                    onChange={(event) => {
-                      const next = formations.formations.find((f) => f.name === event.target.value);
-                      if (next) props.onSettings(zone.id, defaults(next));
-                    }}
-                  >
-                    {formations.formations.map((f) => (
-                      <option key={f.name} value={f.name}>
-                        {f.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                {formation && chosen
-                  ? formation.levers.map((lever) => (
-                      <label key={lever.name} className="slider">
-                        {lever.label.toLowerCase()}
-                        <input
-                          type="range"
-                          min={lever.low}
-                          max={lever.high}
-                          step={lever.step}
-                          value={chosen.values[lever.name] ?? lever.low}
-                          onChange={(event) =>
-                            props.onSettings(zone.id, {
-                              ...chosen,
-                              values: { ...chosen.values, [lever.name]: Number(event.target.value) },
-                            })
-                          }
-                        />
-                        <span className="mono">
-                          {format(chosen.values[lever.name] ?? lever.low, lever.step)}
-                          {lever.unit === "mm" || lever.unit === "deg"
-                            ? ` ${lever.unit === "deg" ? "°" : "mm"}`
-                            : ""}
-                        </span>
-                      </label>
-                    ))
-                  : null}
-              </div>
-            );
-          })}
-          <div className="body">
-            <div className="card-note">
-              Every rib shares R{formations.fixed.root_fillet_mm} root fillets, R
-              {formations.fixed.edge_round_mm} rounded free edges and {formations.fixed.draft_deg}
-              &deg; draft, from the casting rules. Rules marked assumed are defaults nobody has
-              confirmed.
-            </div>
-            <div className="actions">
-              <button onClick={props.onGenerate} disabled={working}>
-                {props.busy === "generating" ? "Generating…" : "Generate"}
-              </button>
-            </div>
-          </div>
-        </section>
-      ) : null}
-
-      {made ? <DesignResult made={made} /> : null}
-
-      {props.busy && props.busy !== "generating" ? (
-        <div className="card-note busy-note">{props.busy}</div>
-      ) : null}
-      {props.error ? <div className="warn">{props.error}</div> : null}
+      {verdict ? <VerdictCard verdict={verdict} /> : null}
     </nav>
   );
 }
 
-function DesignResult({ made }: { made: MadeDesign }) {
-  const { stats } = made;
-  const addedMass =
-    stats.mass_kg !== null && stats.base_mass_kg !== null ? stats.mass_kg - stats.base_mass_kg : null;
+function PlacementCard({ placement }: { placement: Record<string, unknown> }) {
+  const layout = placement.layout as Record<string, unknown> | undefined;
+  const section = placement.section as Record<string, unknown> | undefined;
+  const host = (placement.host as string[] | undefined) ?? [];
+  const supports = (placement.supports as string[] | undefined) ?? [];
+  const keep = (placement.keep_out as Record<string, unknown>[] | undefined) ?? [];
+  const cites = (placement.cites as string[] | undefined) ?? [];
+  return (
+    <div className="approval">
+      <div className="card-head">
+        <span className="card-title">Placement {String(placement.id)}</span>
+        <span className="mono dim">{cites.join(" ")}</span>
+      </div>
+      <dl className="kv compact">
+        <dt>on</dt>
+        <dd className="mono">{host.join(", ")}</dd>
+        <dt>between</dt>
+        <dd className="mono">{supports.length ? supports.join(", ") : "the host's edges"}</dd>
+        {keep.length ? (
+          <>
+            <dt>clear of</dt>
+            <dd>
+              {keep
+                .map(
+                  (k) =>
+                    `${[...((k.features as string[]) ?? []), ...((k.kinds as string[]) ?? []).map((kind) => `every ${kind}`)].join(", ")}` +
+                    ` by ${k.clearance_mm} mm`,
+                )
+                .join("; ")}
+            </dd>
+          </>
+        ) : null}
+        <dt>layout</dt>
+        <dd>{layout ? describeLayout(layout) : ""}</dd>
+        <dt>section</dt>
+        <dd>
+          {section
+            ? `${section.thickness_mm} mm thick, R${section.root_fillet_mm} root` +
+              (section.edge_round_mm ? `, R${section.edge_round_mm} edges` : "") +
+              (section.draft_deg ? `, ${section.draft_deg}° draft` : "")
+            : ""}
+        </dd>
+      </dl>
+    </div>
+  );
+}
+
+function describeLayout(layout: Record<string, unknown>): string {
+  if (layout.kind === "radial") {
+    return `${layout.count} spokes about ${layout.centre}`;
+  }
+  const families = (layout.families as Record<string, unknown>[] | undefined) ?? [];
+  return families
+    .map(
+      (f) =>
+        `${f.count ? `${f.count} paths` : `every ${f.spacing_mm} mm`} at ${f.angle_deg ?? 0}°`,
+    )
+    .join(" + ");
+}
+
+function VerdictCard({ verdict }: { verdict: Verdict }) {
   return (
     <section className="section">
       <header>
-        This design <span className="chip" data-outcome={made.outcome}>{made.outcome}</span>
+        This design <span className="chip" data-outcome={verdict.outcome}>{verdict.outcome}</span>
+        <span className="detail">
+          {" "}
+          {verdict.fidelity} · spec v{verdict.spec_version}
+        </span>
       </header>
       <div className="body">
         <dl className="kv compact">
           <dt>ribs</dt>
-          <dd>
-            {stats.ribs}
-            {stats.dropped ? ` · ${stats.dropped} pieces too short, dropped` : ""}
-          </dd>
-          <dt>mass</dt>
-          <dd>
-            {stats.mass_kg === null
-              ? "no density given"
-              : `${stats.mass_kg.toFixed(1)} kg` +
-                (addedMass === null ? "" : ` (${addedMass >= 0 ? "+" : ""}${addedMass.toFixed(1)} kg)`)}
-          </dd>
+          <dd>{verdict.ribs}</dd>
           <dt>added</dt>
-          <dd>{stats.added_cm3.toLocaleString(undefined, { maximumFractionDigits: 0 })} cm³</dd>
-          <dt>smallest fillet</dt>
-          <dd>{stats.smallest_fillet_mm === null ? "not measured" : `R${stats.smallest_fillet_mm}`}</dd>
+          <dd>{verdict.added_cm3.toLocaleString(undefined, { maximumFractionDigits: 0 })} cm³</dd>
           <dt>made in</dt>
-          <dd>
-            {Object.values(stats.seconds)
-              .reduce((a, b) => a + b, 0)
-              .toFixed(1)}{" "}
-            s
-          </dd>
+          <dd>{verdict.seconds} s</dd>
         </dl>
+        <div className="verdict-part">Your constraints</div>
         <div className="findings">
-          {made.findings.map((finding) => (
-            <Finding key={finding.check} finding={finding} />
+          {verdict.constraints.map((row) => (
+            <Row key={row.check} row={row} />
           ))}
         </div>
-        <div className="card-note mono dim">{made.digest.slice(0, 19)}</div>
+        <div className="verdict-part">Checks</div>
+        <div className="findings">
+          {verdict.checks.map((row) => (
+            <Row key={row.check} row={row} />
+          ))}
+        </div>
       </div>
     </section>
   );
 }
 
-function Finding({ finding }: { finding: FindingRow }) {
+function Row({ row }: { row: VerdictRow }) {
   return (
-    <div className="finding" data-outcome={finding.outcome} title={finding.rule}>
-      <span className="mark">{finding.outcome}</span>
+    <div className="finding" data-outcome={row.outcome} title={row.rule}>
+      <span className="mark">{row.outcome}</span>
       <span className="what">
-        <b>{finding.check}</b> {finding.reason}
-        {finding.assumed ? <span className="assumed"> · assumed rule</span> : null}
+        <b>{row.check}</b> {row.reason}
+        {row.cites?.length ? <span className="mono dim"> · {row.cites.join(" ")}</span> : null}
+        {row.assumed ? <span className="assumed"> · assumed rule</span> : null}
       </span>
     </div>
   );
-}
-
-
-/** A formation's levers set to the middle of their ranges, snapped to their steps. */
-export function defaults(formation: {
-  name: string;
-  levers: { name: string; low: number; high: number; step: number }[];
-}): ZoneSettings {
-  const values: Record<string, number> = {};
-  for (const lever of formation.levers) {
-    const middle = (lever.low + lever.high) / 2;
-    values[lever.name] = Number((Math.round(middle / lever.step) * lever.step).toFixed(6));
-  }
-  return { formation: formation.name, values };
-}
-
-function format(value: number, step: number): string {
-  const places = step >= 1 ? 0 : Math.min(3, Math.ceil(-Math.log10(step)));
-  return value.toFixed(places);
 }

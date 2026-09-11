@@ -1,5 +1,6 @@
 /**
- * The API surface. Every call here is an HTTP route the agent can call too.
+ * The API surface. Every call here is an HTTP route, the same one anything else driving the
+ * engine would use.
  *
  * No type names a component kind. A feature has a geometric `kind`; a callout has a drawing
  * `kind`. Both are strings the server chose, so a bracket needs no new types.
@@ -167,6 +168,11 @@ export interface Feature {
   station_mm: number | null;
   count: number;
   metrics: Record<string, number | null>;
+  centroid_mm: number[];
+  /** Which way it faces: a planar group's normal, a hole's axis. */
+  normal: number[] | null;
+  /** The faces a hole opens onto. */
+  opens_onto: number[];
   controlled: Fact | null;
 }
 
@@ -198,6 +204,10 @@ export interface FaceDetail {
   analytic_area_mm2: number;
   analytic_area_is_valid: boolean;
   centroid_mm: number[];
+  /** Where the face reaches, from its own triangles: x0, y0, z0, x1, y1, z1. */
+  bbox_mm: number[] | null;
+  normal: number[] | null;
+  axis: number[] | null;
   diameter_mm: number | null;
   minor_radius_mm: number | null;
   half_angle_deg: number | null;
@@ -316,6 +326,161 @@ export interface ZoneSettings {
   values: Record<string, number>;
 }
 
+/** The engineer's words, verbatim, as a spec keeps them. */
+export interface SpecWords {
+  id: string;
+  text: string;
+}
+
+export interface SpecLever {
+  path: string;
+  low: number;
+  high: number;
+  step: number;
+  basis: string;
+  cites: string[];
+}
+
+export interface SpecVersion {
+  version: number;
+  created: string;
+  words: SpecWords[];
+  placements: Record<string, unknown>[];
+  rules: Record<string, unknown>;
+  levers: SpecLever[];
+  note: string;
+  changes: string[];
+}
+
+export interface SpecInfo {
+  spec: string | null;
+  versions?: { version: number; created: string; note: string; changes: string[] }[];
+  current?: SpecVersion;
+}
+
+export interface VerdictRow {
+  check: string;
+  outcome: Outcome;
+  reason: string;
+  rule: string;
+  assumed?: boolean;
+  cites?: string[];
+}
+
+/** A design's verdict: the engineer's constraints first, then the checks. */
+export interface Verdict {
+  spec_version: number;
+  fidelity: "preview" | "full";
+  outcome: Outcome;
+  ribs: number;
+  added_cm3: number;
+  seconds: number;
+  constraints: VerdictRow[];
+  checks: VerdictRow[];
+}
+
+/** Where a slot's value came from. */
+export type Source = "you" | "selected" | "drawing" | "measured" | "default" | "needed";
+
+/** One control a slot is drawn with: faces, a number, a choice, a switch, or what it holds. */
+export type CardPart =
+  | {
+      type: "faces";
+      field: string;
+      label: string;
+      refs: string[];
+      /** What the part gave when the engineer set nothing - shown, and edited from. */
+      shown?: string[];
+      single?: boolean;
+      /** For a single face, what it could be, with a few words each - picked from a list. */
+      options?: { value: string; label: string }[];
+    }
+  | { type: "list"; label: string; refs: string[] }
+  | {
+      type: "number";
+      field: string;
+      label: string;
+      value: number | null;
+      unit: string;
+      step: number;
+      min: number | null;
+      active: boolean;
+    }
+  | {
+      type: "choice";
+      field: string;
+      label: string;
+      value: string | number | null;
+      options: { value: string | number; label: string }[];
+    }
+  | { type: "toggle"; field: string; label: string; value: boolean };
+
+export interface CardSlot {
+  key: string;
+  label: string;
+  shown: string;
+  source: Source;
+  refs: string[];
+  note: string;
+  parts: CardPart[];
+  problems: string[];
+  /** What the engineer set in this slot, as they said it. */
+  line: string;
+  /** Whether that line is words they typed, rather than a value they picked. */
+  typed: boolean;
+  /** Its value, written as words the card reads back: where typing over it starts from. */
+  words: string;
+  /** Words typed into this slot that could not be read. */
+  unread: string | null;
+}
+
+/** The rib card: every slot a group of ribs needs, and whether it is ready to make ribs from. */
+export interface RibCardData {
+  started: boolean;
+  slots: CardSlot[];
+  needed: string[];
+  problems: string[];
+  ready: boolean;
+  /** A few words for every face and feature the card names. */
+  names: Record<string, string>;
+}
+
+/** One change to one slot. */
+export interface CardEdit {
+  slot: string;
+  field?: string;
+  value?: number | string | boolean | null;
+  add?: string[];
+  remove?: string[];
+  replace?: string[];
+  words?: string;
+  reset?: boolean;
+  /** The faces came from a selection on the part. */
+  selected?: boolean;
+}
+
+/** One stretch of path the card's layout tried, just off the part, and what became of it. */
+export interface PathLine {
+  a: number[];
+  b: number[];
+  /** ``rib``, or why not: missed, keep_out, ended_elsewhere, too_short, no_height. */
+  outcome: string;
+}
+
+/** Where the card would put ribs, before anything is made. */
+export interface CardPaths {
+  lines: PathLine[];
+  ribs: number;
+  paths: number;
+  summary: string;
+}
+
+/** A face clicked on the part, and the angle it is grown by - zero for the face alone. */
+export interface Seed {
+  face: number;
+  angle: number;
+}
+
 async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(path);
   if (!response.ok) throw new Error(`${path}: ${response.status} ${response.statusText}`);
@@ -336,6 +501,17 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 }
 
 export const api = {
+  card: () => getJson<{ card: RibCardData }>("/api/card"),
+  startCard: (selection: number[]) =>
+    postJson<{ card: RibCardData }>("/api/card/start", { selection }),
+  editCard: (edits: CardEdit[]) => postJson<{ card: RibCardData }>("/api/card", { edits }),
+  cardDesign: (fidelity: "preview" | "full") =>
+    postJson<{ version: number; verdict: Verdict }>("/api/card/design", { fidelity }),
+  cardPaths: () => postJson<CardPaths>("/api/card/paths", {}),
+  spec: () => getJson<SpecInfo>("/api/spec"),
+  specDesign: (fidelity: "preview" | "full", levers: Record<string, number> = {}) =>
+    postJson<Verdict>("/api/spec/design", { fidelity, levers }),
+  currentDesign: () => getJson<Verdict>("/api/designs/current"),
   state: () => getJson<SessionState>("/api/state"),
   projects: () => getJson<ProjectRow[]>("/api/projects"),
   extract: (project: string, paths?: string[], reuse = true) =>
@@ -398,6 +574,10 @@ export const api = {
 
   grow: (seed: number[], maxDihedralDeg: number) =>
     postJson<Selection>("/api/select/grow", { seed, max_dihedral_deg: maxDihedralDeg }),
+  selectSeeds: (seeds: Seed[]) =>
+    postJson<Selection>("/api/select/seeds", {
+      seeds: seeds.map((s) => ({ face_id: s.face, grow_deg: s.angle })),
+    }),
   similar: (faceId: number) => postJson<Selection>("/api/select/similar", { face_id: faceId }),
   selectFeature: (featureId: string) =>
     getJson<Selection>(`/api/select/feature/${encodeURIComponent(featureId)}`),

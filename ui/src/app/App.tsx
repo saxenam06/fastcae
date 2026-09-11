@@ -9,7 +9,7 @@
  * change.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 import type {
   Axis,
@@ -20,31 +20,32 @@ import type {
   FieldOption,
   FieldSummary,
   ProjectRow,
+  Seed,
   Selection,
   SessionState,
   Step,
   Summary,
   SurfaceSummary,
   VoxelCells,
-  Formations,
-  MadeDesign,
-  SpaceInfo,
-  ZoneSettings,
-  ZonesInfo,
+  SpecInfo,
+  Verdict,
 } from "../api/client";
 import { ModelIndex } from "../panel/ModelIndex";
 import { DrawingIndex } from "../panel/DrawingIndex";
 import type { Layers } from "../panel/FieldIndex";
 import { FieldIndex } from "../panel/FieldIndex";
 import type { GenerateLayers } from "../panel/GenerateIndex";
-import { GenerateIndex, defaults } from "../panel/GenerateIndex";
+import { GenerateIndex } from "../panel/GenerateIndex";
 import { Inspector } from "../panel/Inspector";
-import { AgentPanel } from "../panel/AgentPanel";
+import { RibCard } from "../panel/RibCard";
 import { Splitter } from "../panel/Splitter";
 import { DrawingStage } from "../stage/DrawingStage";
 import { UploadStage } from "../stage/UploadStage";
 import { Stage as GeometryStage } from "../stage/Stage";
-import type { ColourMode } from "../render/renderer";
+import { HoverCard } from "../stage/HoverCard";
+import { SelectionBar } from "../stage/SelectionBar";
+import { DESIGN_PICK } from "../render/renderer";
+import type { ColourMode, LineSet } from "../render/renderer";
 import type { View } from "./product";
 import { ART, PRODUCT, STAGES, VENDOR, VIEWS } from "./product";
 
@@ -70,8 +71,16 @@ export function App() {
   const [selection, setSelection] = useState<Selection | null>(null);
   const [face, setFace] = useState<FaceDetail | null>(null);
   const [hovered, setHovered] = useState<number | null>(null);
+  // The card under the stage: the hovered face, or the one a click pinned. Faces are read once and
+  // kept, so moving back over a face costs nothing.
+  const [pinned, setPinned] = useState<number | null>(null);
+  const [cardFace, setCardFace] = useState<FaceDetail | null>(null);
+  const faceCache = useRef(new Map<number, FaceDetail>());
   const [colourMode, setColourMode] = useState<ColourMode>("surface");
-  const [growAngle, setGrowAngle] = useState(20);
+  // The faces clicked, each grown by its own angle - or not at all - and the one the grow control
+  // is on: the last clicked, or one picked from the list.
+  const [seeds, setSeeds] = useState<Seed[]>([]);
+  const [activeSeed, setActiveSeed] = useState<number | null>(null);
   const [kindFilter, setKindFilter] = useState<string | null>(null);
   const [ofKind, setOfKind] = useState<Feature[] | null>(null);
 
@@ -85,13 +94,9 @@ export function App() {
   const [calloutFilter, setCalloutFilter] = useState<string | null>(null);
   const [spacings, setSpacings] = useState<FieldOption[]>([]);
 
-  // Generate: what may be designed in, the levers set for it, and the last design made. Lever
-  // values live here, so moving a slider costs nothing until Generate is pressed.
-  const [zonesInfo, setZonesInfo] = useState<ZonesInfo | null>(null);
-  const [formations, setFormations] = useState<Formations | null>(null);
-  const [space, setSpace] = useState<SpaceInfo | null>(null);
-  const [settings, setSettings] = useState<Record<string, ZoneSettings>>({});
-  const [made, setMade] = useState<MadeDesign | null>(null);
+  // Generate: the spec the rib card wrote, and the last design made from it.
+  const [specInfo, setSpecInfo] = useState<SpecInfo | null>(null);
+  const [verdict, setVerdict] = useState<Verdict | null>(null);
   const [madeMesh, setMadeMesh] = useState<Mesh | null>(null);
   const [designBusy, setDesignBusy] = useState<string | null>(null);
   const [designError, setDesignError] = useState<string | null>(null);
@@ -103,17 +108,19 @@ export function App() {
   // Pane widths, remembered between sessions. Losing them on every reload is a small annoyance
   // that never stops being annoying.
   const [railWidth, setRailWidth] = useState(() => remembered("fastcae.rail", 300));
-  const [agentWidth, setAgentWidth] = useState(() => remembered("fastcae.agent", 340));
-  const [agentOpen, setAgentOpen] = useState(false);
+  const [cardWidth, setCardWidth] = useState(() => remembered("fastcae.card", 360));
+  const [cardOpen, setCardOpen] = useState(true);
+  // Where the rib card would put ribs, drawn on the part before anything is made.
+  const [pathLines, setPathLines] = useState<LineSet | null>(null);
 
   useEffect(() => {
     try {
       localStorage.setItem("fastcae.rail", String(railWidth));
-      localStorage.setItem("fastcae.agent", String(agentWidth));
+      localStorage.setItem("fastcae.card", String(cardWidth));
     } catch {
       // Private windows and blocked site data. A forgotten width is not worth an error.
     }
-  }, [railWidth, agentWidth]);
+  }, [railWidth, cardWidth]);
 
   // The field's own cells are cheap and are the field itself, so they are on by default. The
   // contour is a reconstruction and costs tens of megabytes, so it is off until asked for.
@@ -213,66 +220,35 @@ export function App() {
     }
   }, []);
 
-  // A decision changed: whatever was opened or made under the old one no longer holds.
-  const forgetDesigns = useCallback(() => {
-    setSpace(null);
-    setMade(null);
-    setMadeMesh(null);
-  }, []);
-
   useEffect(() => {
     if (view !== "generate" || model === null) return;
-    api.zones().then(setZonesInfo).catch((caught) => setDesignError(String(caught)));
-    api.formations().then(setFormations).catch((caught) => setDesignError(String(caught)));
+    api.spec().then(setSpecInfo).catch((caught) => setDesignError(String(caught)));
   }, [view, model]);
 
-  const approveZone = useCallback(
-    (id: string, approved: boolean) =>
-      act("Recording the decision.", async () => {
-        setZonesInfo(await api.approveZone(id, approved));
-        forgetDesigns();
-      }),
-    [act, forgetDesigns],
-  );
+  const showDesign = useCallback(async (made: Verdict) => {
+    setVerdict(made);
+    setMadeMesh(made.ribs > 0 ? await api.designMesh() : null);
+  }, []);
 
-  const approveProtected = useCallback(
-    (approved: boolean) =>
-      act("Recording the decision.", async () => {
-        setZonesInfo(await api.approveProtected(approved));
-        forgetDesigns();
-      }),
-    [act, forgetDesigns],
-  );
-
-  const openSpace = useCallback(
-    () =>
+  const makeDesign = useCallback(
+    (fidelity: "preview" | "full") =>
       act(
-        "Opening for designing: the part's field, its contour and each zone's window. " +
-          "Minutes the first time on a large part, seconds after.",
-        async () => {
-          const opened = await api.openSpace();
-          setSpace(opened);
-          setMade(null);
-          setMadeMesh(null);
-          const first = formations?.formations[0];
-          if (first) {
-            setSettings((was) =>
-              Object.fromEntries(opened.zones.map((z) => [z.id, was[z.id] ?? defaults(first)])),
-            );
-          }
-        },
+        fidelity === "preview"
+          ? "Making a preview: placing the ribs, joining them, checking. Seconds to minutes."
+          : "Making the full design. Minutes on a large part the first time.",
+        async () => showDesign(await api.specDesign(fidelity)),
       ),
-    [act, formations],
+    [act, showDesign],
   );
 
-  const generate = useCallback(
-    () =>
-      act("generating", async () => {
-        const design = await api.generate(settings);
-        setMade(design);
-        setMadeMesh(await api.designMesh());
-      }),
-    [act, settings],
+  // The rib card wrote the spec and made a design: show it where designs are looked at.
+  const cardDesigned = useCallback(
+    async (made: Verdict) => {
+      api.spec().then(setSpecInfo).catch(() => undefined);
+      setView("generate");
+      await showDesign(made);
+    },
+    [showDesign],
   );
 
   const forgetField = useCallback(() => {
@@ -296,16 +272,15 @@ export function App() {
   const reset = useCallback(async () => {
     setSession(await api.reset());
     setModel(null);
-    setSelection(null);
+    setSeeds([]);
+    setActiveSeed(null);
     setFace(null);
     setFieldInfo(null);
     setFieldSurface(null);
     setFieldMesh(null);
     setVoxels(null);
-    setZonesInfo(null);
-    setSpace(null);
-    setSettings({});
-    setMade(null);
+    setSpecInfo(null);
+    setVerdict(null);
     setMadeMesh(null);
     setView("drawing");
   }, []);
@@ -335,13 +310,6 @@ export function App() {
     return typeof value === "number" ? value : null;
   }, [model]);
 
-  // What the deterministic rules refused to settle. The agent's job starts where these are.
-  const openQuestions = useMemo(() => {
-    const produced = model?.steps.find((s) => s.id === "crosscheck")?.produced ?? {};
-    const count = (key: string) => (typeof produced[key] === "number" ? produced[key] : 0);
-    return count("ambiguous") + count("unresolved_pairings");
-  }, [model]);
-
   // What each layer costs to draw, every frame. The only honest answer to "why is this slow".
   const layerCost = useMemo(
     () => ({
@@ -354,46 +322,128 @@ export function App() {
 
   const selectedFaces = useMemo(() => new Set(selection?.face_ids ?? []), [selection]);
 
-  // The selection is measured by the server, never assembled here. A picked face has an area and
-  // may be controlled; inventing zeros for both put two panels on screen contradicting each other
-  // about the same face.
-  const pick = useCallback(
-    async (faceId: number | null, event: MouseEvent) => {
-      if (faceId === null) {
-        setSelection(null);
-        setFace(null);
-        return;
-      }
-      const additive = event.ctrlKey || event.metaKey;
-      const next = new Set(additive ? (selection?.face_ids ?? []) : []);
-      if (next.has(faceId)) next.delete(faceId);
-      else next.add(faceId);
+  useEffect(() => {
+    faceCache.current.clear();
+    setPinned(null);
+    setCardFace(null);
+  }, [model]);
 
-      setFace(await api.face(faceId));
-      setSelection(next.size ? await api.selectFaces([...next]) : null);
+  const cardTarget = pinned ?? hovered;
+  useEffect(() => {
+    if (cardTarget === null || cardTarget === DESIGN_PICK) return;
+    const known = faceCache.current.get(cardTarget);
+    if (known) {
+      setCardFace(known);
+      return;
+    }
+    // A short wait, so sweeping the cursor across a part does not ask about every face it crosses.
+    const timer = window.setTimeout(() => {
+      api
+        .face(cardTarget)
+        .then((detail) => {
+          faceCache.current.set(cardTarget, detail);
+          setCardFace(detail);
+        })
+        .catch(() => undefined);
+    }, 60);
+    return () => window.clearTimeout(timer);
+  }, [cardTarget]);
+
+  // The faces clicked are the seeds, each grown across every edge shallower than its own angle -
+  // recomputed from the seeds whenever one changes, never from the last result. Feeding a grown
+  // selection back in makes the angle a ratchet that can only add. The selection itself is
+  // measured by the server, never assembled here.
+  useEffect(() => {
+    if (!seeds.length) {
+      setSelection(null);
+      return;
+    }
+    let live = true;
+    const timer = window.setTimeout(() => {
+      api
+        .selectSeeds(seeds)
+        .then((selected) => {
+          if (live) setSelection(selected);
+        })
+        .catch(() => undefined);
+    }, 120);
+    return () => {
+      live = false;
+      window.clearTimeout(timer);
+    };
+  }, [seeds]);
+
+  // A click selects a face alone; ctrl-click adds it, or takes it out again. Either way the face
+  // clicked is the one the grow control is on, and it starts ungrown - an angle set for one click
+  // is never carried to the next.
+  const pick = useCallback(async (faceId: number | null, event: MouseEvent) => {
+    setPinned(faceId);
+    if (faceId === null) {
+      setSeeds([]);
+      setActiveSeed(null);
+      setFace(null);
+      return;
+    }
+    if (faceId === DESIGN_PICK) return;
+    const additive = event.ctrlKey || event.metaKey;
+    setSeeds((was) => {
+      if (!additive) return [{ face: faceId, angle: 0 }];
+      return was.some((s) => s.face === faceId)
+        ? was.filter((s) => s.face !== faceId)
+        : [...was, { face: faceId, angle: 0 }];
+    });
+    setActiveSeed(faceId);
+    setFace(await api.face(faceId));
+  }, []);
+
+  const activeAngle = seeds.find((s) => s.face === activeSeed)?.angle ?? 0;
+  const setActiveAngle = useCallback(
+    (angle: number) => {
+      setSeeds((was) => was.map((s) => (s.face === activeSeed ? { ...s, angle } : s)));
     },
-    [selection],
+    [activeSeed],
   );
 
-  // Always from the face that was clicked, never from the selection grow last produced. Feeding
-  // the result back in makes the angle a ratchet: it can only ever add, so lowering it appears to
-  // do nothing at all. Growing from the origin every time is what makes the slider a reading of
-  // one number rather than a record of how many times it was pressed.
-  const grow = useCallback(async () => {
-    if (!face) return;
-    setSelection(await api.grow([face.face_id], growAngle));
-  }, [face, growAngle]);
+  const grow = useCallback(() => {
+    setSeeds((was) =>
+      was.map((s) => (s.face === activeSeed && s.angle === 0 ? { ...s, angle: 20 } : s)),
+    );
+  }, [activeSeed]);
+
+  const clearSelection = useCallback(() => {
+    setSeeds([]);
+    setActiveSeed(null);
+    setFace(null);
+  }, []);
+
+  // Faces named somewhere - a card, a feature - become the selection, ungrown.
+  const selectFaces = useCallback((faces: number[]) => {
+    setSeeds([...new Set(faces)].map((face) => ({ face, angle: 0 })));
+    setActiveSeed(null);
+  }, []);
+
+  const selectRefs = useCallback(
+    async (refs: string[]) => {
+      const found = await Promise.all(refs.map((ref) => api.selectFeature(ref).catch(() => null)));
+      selectFaces(found.flatMap((s) => s?.face_ids ?? []));
+    },
+    [selectFaces],
+  );
 
   const similar = useCallback(async () => {
     if (!face) return;
-    setSelection(await api.similar(face.face_id));
-  }, [face]);
+    const found = await api.similar(face.face_id);
+    selectFaces(found.face_ids);
+  }, [face, selectFaces]);
 
-  const selectFeature = useCallback(async (feature: Feature) => {
-    setSelection(await api.selectFeature(feature.id));
-    if (feature.face_ids.length) setFace(await api.face(feature.face_ids[0]));
-    setView("geometry");
-  }, []);
+  const selectFeature = useCallback(
+    async (feature: Feature) => {
+      selectFaces([...feature.face_ids]);
+      if (feature.face_ids.length) setFace(await api.face(feature.face_ids[0]));
+      setView("geometry");
+    },
+    [selectFaces],
+  );
 
   if (error && !session) return <div className="error">{error}</div>;
   if (!session) return <div className="loading">starting&hellip;</div>;
@@ -409,7 +459,7 @@ export function App() {
       // template would override the rule that makes it so.
       style={
         open
-          ? { gridTemplateColumns: `${railWidth}px 1fr ${agentOpen ? agentWidth : 0}px` }
+          ? { gridTemplateColumns: `${railWidth}px 1fr ${cardOpen ? cardWidth : 0}px` }
           : undefined
       }
     >
@@ -432,13 +482,13 @@ export function App() {
         {open ? (
           <>
             <button
-              className="agent-toggle"
-              data-open={agentOpen}
-              onClick={() => setAgentOpen((was) => !was)}
-              title={agentOpen ? "Hide the agent" : "Show the agent"}
+              className="pane-toggle"
+              data-open={cardOpen}
+              onClick={() => setCardOpen((was) => !was)}
+              title={cardOpen ? "Hide the rib card" : "Show the rib card"}
             >
-              <AgentMark />
-              Agent
+              <RibMark />
+              Rib card
             </button>
             <button
               onClick={reextract}
@@ -482,16 +532,9 @@ export function App() {
             <GenerateIndex
               layers={generateLayers}
               onLayers={setGenerateLayers}
-              zones={zonesInfo}
-              onApproveZone={approveZone}
-              onApproveProtected={approveProtected}
-              space={space}
-              onOpen={openSpace}
-              formations={formations}
-              settings={settings}
-              onSettings={(zoneId, next) => setSettings((was) => ({ ...was, [zoneId]: next }))}
-              onGenerate={generate}
-              made={made}
+              spec={specInfo}
+              verdict={verdict}
+              onDesign={makeDesign}
               busy={designBusy}
               error={designError}
             />
@@ -529,12 +572,9 @@ export function App() {
                 onGrow={grow}
                 onSimilar={similar}
                 onSelectFeature={selectFeature}
-                onClear={() => {
-                  setSelection(null);
-                  setFace(null);
-                }}
-                growAngle={growAngle}
-                onGrowAngle={setGrowAngle}
+                onClear={clearSelection}
+                growAngle={activeAngle}
+                onGrowAngle={setActiveAngle}
               />
             ) : null}
 
@@ -622,7 +662,11 @@ export function App() {
                     overlay={view === "generate" ? madeMesh : fieldMesh}
                     overlayAlpha={view === "generate" ? 1.0 : layers.geometry ? 0.42 : 1.0}
                     overlayTint={view === "generate" ? DESIGN_TINT : undefined}
+                    overlayPick={
+                      view === "generate" ? "design" : view === "field" ? "faces" : "none"
+                    }
                     voxels={view === "generate" ? null : voxels}
+                    lines={pathLines}
                     selected={selectedFaces}
                     frozen={model.controlled}
                     exterior={EMPTY}
@@ -652,6 +696,26 @@ export function App() {
                       ))
                     )}
                   </div>
+                  <SelectionBar
+                    count={selection?.count ?? 0}
+                    seeds={seeds}
+                    active={activeSeed}
+                    onActive={setActiveSeed}
+                    onAngle={setActiveAngle}
+                    onRemove={(faceId) => {
+                      setSeeds((was) => was.filter((s) => s.face !== faceId));
+                      if (faceId === activeSeed) setActiveSeed(null);
+                    }}
+                    onClear={clearSelection}
+                  />
+                  <HoverCard
+                    target={
+                      cardTarget === DESIGN_PICK ? "design" : cardTarget
+                    }
+                    face={cardFace}
+                    pinned={pinned !== null}
+                    onRelease={() => setPinned(null)}
+                  />
                   <div className="hint">
                     {view === "field" && voxels ? (
                       <>
@@ -664,8 +728,8 @@ export function App() {
                       </>
                     ) : (
                       <>
-                        drag orbit &middot; shift-drag pan &middot; wheel zoom &middot; click select
-                        {hovered !== null ? ` · face ${hovered}` : ""}
+                        drag orbit &middot; shift-drag pan &middot; wheel zoom &middot; click pins a
+                        face
                       </>
                     )}
                   </div>
@@ -674,10 +738,16 @@ export function App() {
             </div>
           </div>
 
-          {agentOpen ? (
-            <div className="agent">
-              <Splitter side="left" onResize={(d) => setAgentWidth((w) => clampPane(w - d))} />
-              <AgentPanel session={session} view={view} openQuestions={openQuestions} />
+          {cardOpen ? (
+            <div className="card-pane">
+              <Splitter side="left" onResize={(d) => setCardWidth((w) => clampPane(w - d))} />
+              <RibCard
+                project={session.project?.name ?? null}
+                selection={selection?.face_ids ?? []}
+                onShow={selectRefs}
+                onDesign={cardDesigned}
+                onPaths={setPathLines}
+              />
             </div>
           ) : null}
 
@@ -708,15 +778,15 @@ export function App() {
 
 const EMPTY = new Set<number>();
 
-/** The design's new surfaces, in the Generate layer's blue, against the grey of the part. */
-const DESIGN_TINT: [number, number, number] = [0.059, 0.239, 0.569];
+/** The design's new surfaces: teal, a colour nothing else uses - selection is blue. */
+const DESIGN_TINT: [number, number, number] = [0.055, 0.431, 0.455];
 
-/** A four-point spark. A mark rather than a word, so the bar stays readable at any width. */
-function AgentMark() {
+/** Ribs standing on a plate, seen end on: the card's mark in the bar. */
+function RibMark() {
   return (
     <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
       <path
-        d="M8 0.6 L9.7 6.3 L15.4 8 L9.7 9.7 L8 15.4 L6.3 9.7 L0.6 8 L6.3 6.3 Z"
+        d="M1 14 H15 V12 H1 Z M3 12 V5 H5 V12 Z M7 12 V3 H9 V12 Z M11 12 V5 H13 V12 Z"
         fill="currentColor"
       />
     </svg>
