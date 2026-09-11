@@ -20,8 +20,8 @@ about the first step of that loop: turning intent into designs.
    features: *"ribs on planar group 60, between planar group 45 and the bore, not over any holes, no
    taller than the bore."* They can say a lot or a little; wherever they say nothing, the agent is
    free.
-3. **The agent writes a spec.** It turns the words into a written, editable spec, shows it, and asks
-   about anything missing or ambiguous - the fillet, the draft, which "bore height" is meant.
+3. **The agent writes a spec.** It turns the words into a written spec, shows it, and asks about
+   anything missing or ambiguous - the fillet, the draft, which "bore height" is meant.
 4. **Designs.** Generated to follow the spec strictly, each with a verdict: accept or reject, and
    every rule and check behind it.
 5. **Refine.** The engineer looks and adds or changes a constraint in the next turn. The agent
@@ -38,11 +38,18 @@ never "corrects" the engineer's part. If the CAD carries an artefact, the engine
 
 The conversation is how intent is found; the **spec** is what was agreed. Generation reads only the
 spec, never the chat, so the same spec always gives the same designs and a campaign can be re-run
-months later without the conversation that produced it. The engineer can edit it directly - pick a
-face, change a number - and the agent reads the edit like any other turn.
+months later without the conversation that produced it.
+
+**The spec changes only through the agent.** An edit by hand could not be guaranteed to satisfy
+every constraint the engineer has stated, so there is no such edit: to change the spec, the engineer
+tells the agent, which checks the change against everything already agreed before writing a new
+version.
 
 A spec holds:
 
+- **the engineer's words** - every constraint as the engineer stated it, verbatim, in the order it
+  was given. Each structured rule below cites the words it came from, so anyone can check that the
+  encoding says what the engineer said
 - **the baseline** - the CAD designs grow from
 - **placements** - for each group of ribs, its host, supports and keep-outs (below)
 - **rules** - what every design must satisfy, enforced and verified
@@ -61,6 +68,9 @@ again and numbers shift, the spec still finds the right faces, or says plainly t
 **Every change is a new version.** The agent shows what changed, in the engineer's words and as a
 diff. Designs made under an earlier version are re-checked against the new one; those that now break
 a rule are marked, not deleted, so the engineer can see what the new rule ruled out.
+
+**Where it lives.** One file per spec, `<project>/specs/<name>.json`, holding every version of it -
+a part can carry several studies. `project.json` names the active one.
 
 ## Where ribs go
 
@@ -120,6 +130,11 @@ A single value is **fixed** until the engineer says otherwise. The agent may off
 it, with what it computed to be feasible ("8 as asked; 6 to 10 fit between the holes here"), and the
 engineer decides.
 
+**Every feasible limit cites where it came from.** A geometric limit - holes, spans, spacing - is
+measured exactly on the part's surfaces, and cites the measurement. A limit set by a check - mould
+release, thick spots - is found by sampling the range and cites the designs where the check starts
+to fail.
+
 **When a phrase has more than one meaning, the agent asks.** "No taller than the bore" could be the
 bore's top face, the top of the boss around it, or its length; the agent measures each, shows the
 numbers, and asks which is meant. What was confirmed is written into the spec with the measurement.
@@ -158,10 +173,20 @@ write its own checks could write one that passes everything.
 
 A design at full fidelity takes minutes on a large part, which is too slow for a conversation.
 
-- **Preview** - a coarser grid and the quick checks, back in about half a minute. What the engineer
-  and the agent iterate on. Always labelled a preview.
-- **Full** - the design grid and every check. Run on designs worth keeping, or in the background. A
-  design can only be *accepted* at full fidelity.
+- **Preview** - the same design on a coarser grid. Nothing else is relaxed: placement, every
+  constraint and every check are exactly those of a full design; only the voxel is bigger. What the
+  engineer and the agent iterate on, always labelled a preview. If previews are still too slow, the
+  speed has to come from elsewhere, never from dropping geometry or checks.
+- **Full** - the design grid. Run on designs worth keeping, or in the background. A design can only
+  be *accepted* at full fidelity.
+
+## The design space
+
+When the agent states in which ways more designs can be made, it saves that as a design space: the
+spec version it belongs to, the free levers with their feasible ranges and the citations behind
+them, the fixed values, the sampler (a seeded Latin hypercube and a count), and the agent's plain
+statement of the space. A campaign reads it and builds its designs at full fidelity. Once Simulate
+exists, the objectives join it, and what is learned steers the next sample.
 
 ## The agent
 
@@ -181,8 +206,9 @@ Built the way the agent in `agenticCAE` is: LangChain's agent loop on LangGraph 
 middleware, a model reached through OpenRouter (DeepSeek by default, configurable), LangSmith
 tracing, and the chat streamed to the agent pane. Credentials come from the environment - variable
 names only in the code: `OPENROUTER_API_KEY`, `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`,
-`LANGSMITH_PROJECT`, and `FASTCAE_AGENT_MODEL` for the model. The conversation is kept with the
-project as the record of how each spec version came to be.
+`LANGSMITH_PROJECT`, and `FASTCAE_AGENT_MODEL` for the model. The conversation and the agent's
+checkpoints are kept with the project, in SQLite under `.fastcae/`, as the record of how each spec
+version came to be - no database server to run.
 
 ## What the model has to say about a part
 
@@ -228,23 +254,15 @@ knows this sentence.
    extents along a direction, feature neighbours - each exposed through a route.
 3. **Seeing and naming faces.** The hover card on every 3D tab, feature highlighting in its own
    colour, picking that sees ribs.
-4. **The spec.** Its schema, versions and diffs, feature fingerprints, written and read through
-   routes.
+4. **The spec.** Its schema, the engineer's words with citations, versions and diffs, feature
+   fingerprints; one file per spec, written and read through routes.
 5. **Placement.** The region from host, supports and keep-outs; ribs as spans; height and
    thickness following the supports; smooth cuts at clearances.
 6. **The layout vocabulary.** Paths, patterns and trims, with the four formations rebuilt as
    compositions.
 7. **The verdict.** Constraints enforced and verified; checks with thresholds from the spec and
-   their basis; mould release, root gap and floating pieces corrected; preview and full.
-8. **The agent.** Tools over the routes, asking, spec writing, re-evaluation on a new version, the
-   design space, the chat in the agent pane.
+   their basis; mould release, root gap and floating pieces corrected; preview on a coarser grid
+   with nothing else relaxed.
+8. **The agent.** Tools over the routes, asking, spec writing, re-evaluation on a new version,
+   feasible ranges with citations, the design space, the chat in the agent pane.
 9. **The acceptance test**, run by a person.
-
-## Open
-
-- Where the spec lives - a section of `project.json`, or a file per spec with its versions.
-- How the agent's conversation and checkpoints are stored with the project.
-- The preview grid, and which checks count as quick.
-- How the agent works out feasible lever ranges - from plan geometry where it can, from preview
-  samples where it cannot.
-- What a saved design space holds for a campaign, and how a campaign reads it.

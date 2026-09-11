@@ -153,15 +153,15 @@ Alongside, on Extract:
 |---|---|
 | Project | a folder under `assets/`; its name is the folder's name. Folders starting `_` or `.` are set aside |
 | What a project holds | the engineer's CAD - no ribs - and drawings. No reference part, ever |
-| `project.json` | decisions only: the baseline, the spec, approvals. Proposed by the system, confirmed by a person; no facts |
+| `project.json` | decisions only: the baseline, which spec is active, approvals. Proposed by the system, confirmed by a person; no facts |
 | Where ribs go | from the engineer's intent: host, supports and keep-outs named in the spec |
-| The spec | the source of truth. The agent writes it from the conversation; generation reads only it; every change a new version |
+| The spec | the source of truth, one file per spec with every version. Written only by the agent, carrying the engineer's words verbatim with each rule citing them; generation reads only it |
 | The agent | an LLM with tools over the platform's routes; never makes geometry; asks when a phrase is ambiguous; nothing scripted to an example |
-| Agent stack | LangChain agent loop on LangGraph with human-in-the-loop, OpenRouter (DeepSeek by default), LangSmith; credentials from the environment |
+| Agent stack | LangChain agent loop on LangGraph with human-in-the-loop, OpenRouter (DeepSeek by default), LangSmith; conversation and checkpoints in SQLite with the project; credentials from the environment |
 | Layouts | composed from a vocabulary of paths, patterns and trims, held as data. Formations are examples |
 | Constraints and checks | constraints enforced and verified; checks are code, tested against failing parts, thresholds from the spec, basis shown. The agent adds constraints, never checks |
 | The part's own rules | rib section, root fillet, edge round, fillet floor: no default; set per part |
-| Fidelity | preview while iterating; accept only at full |
+| Fidelity | preview on a coarser grid with nothing else relaxed; accept only at full |
 | Tessellation | OCC `BRepMesh`, chord tolerance derived from the model |
 | `cadquery-ocp` | pinned at 7.9.3.1.1; 8.x ships an unsigned binary Smart App Control blocks |
 | SciPy | `scipy.stats` is blocked by the same policy; anything needing it is written in numpy |

@@ -82,9 +82,9 @@ api/app.py     HTTP surface. Routes contain no logic.
 ```
 
 `project.json` is not configuration in the usual sense: it holds no facts and no settings, only
-decisions - which CAD designs grow from, the spec, which protected areas and regions a person
-approved. The system proposes each one; nothing in it is written except through an approval or an
-edit the engineer makes.
+decisions - which CAD designs grow from, which spec is active, which protected areas a person
+approved. The system proposes each one; nothing in it is written except through an approval. Specs
+live beside it in `specs/`, one file each, written only by the agent.
 
 ## Nothing derived is computed twice
 

@@ -48,8 +48,10 @@ A project is what an engineer brings: the part to add ribs to, and its drawings.
 finished version to compare against.
 
 `project.json` holds the decisions made about the part, and only those: which CAD file designs grow
-from (the *baseline*, when there is more than one), the spec, and what a person approved. The system
-proposes; a person confirms. A project without the file behaves as if nobody had decided anything.
+from (the *baseline*, when there is more than one), which spec is active, and what a person
+approved. Specs live in `specs/`, one file each, written by the agent from what the engineer asked
+for. The system proposes; a person confirms. A project without either behaves as if nobody had
+decided anything.
 
 A folder whose name starts with `_` or `.` is set aside rather than a project.
 
