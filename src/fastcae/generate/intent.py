@@ -47,16 +47,6 @@ class IntentError(ValueError):
     """A design that cannot be made from this spec, and why."""
 
 
-# Why a stretch of path did not become a rib, in the words the verdict uses.
-NOT_PLACED = {
-    "missed": "never crossed where ribs stand",
-    "keep_out": "met something to keep clear of",
-    "ended_elsewhere": "ended on something not named to run between",
-    "too_short": "too short to be a rib",
-    "no_height": "had no room for a rib's height",
-}
-
-
 @dataclass
 class Opened:
     """A part opened for designing at one fidelity."""
@@ -308,18 +298,11 @@ def _constraints(placement: Placement, placed: Placed) -> list[Finding]:
         if count > 1
         else (f"from {placement.supports[0]}" if count else "to the edges of where it stands")
     )
-    dropped = ", ".join(
-        f"{n} {NOT_PLACED.get(why, why.replace('_', ' '))}"
-        for why, n in sorted(placed.dropped.items())
-    )
-    elsewhere = ", ".join(f"{name} ×{n}" for name, n in sorted(placed.ended_on.items()))
     out.append(
         Finding(
             f"supports ({label})",
             "pass" if spans else "reject",
-            f"{len(spans)} ribs from {placed.paths} paths"
-            + (f" - not ribs: {dropped}" if dropped else "")
-            + (f"; paths ended on {elsewhere}" if elsewhere else ""),
+            placed.tally(),
             f"every rib runs {ends}",
             False,
             section="constraint",
@@ -334,13 +317,7 @@ def _constraints(placement: Placement, placed: Placed) -> list[Finding]:
 
 
 def _why_none(placed: Placed) -> str:
-    if placed.problems:
-        return placed.problems[0]
-    if placed.dropped:
-        return ", ".join(
-            f"{n} {why.replace('_', ' ')}" for why, n in sorted(placed.dropped.items())
-        )
-    return "no path crossed the host"
+    return placed.problems[0] if placed.problems else placed.tally()
 
 
 def _digest(opened: Opened, version: Version, levers: dict[str, float]) -> str:

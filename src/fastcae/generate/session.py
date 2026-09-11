@@ -14,7 +14,7 @@ from .. import spec as specs
 from ..extract import Extraction
 from ..project import Project
 from ..spec import Placement, Version, Words
-from .intent import NOT_PLACED, IntentError, Made, Opened, make
+from .intent import IntentError, Made, Opened, make
 from .placement import _Faces, place
 from .slots import Card, Slots
 
@@ -111,15 +111,11 @@ def paths_for_card(session: Session) -> dict:
     placed = place(
         session.opened[key].base, extraction.features, extraction.atlas, extraction.tess, placement
     )
-    why = ", ".join(
-        f"{n} {NOT_PLACED.get(reason, reason)}" for reason, n in sorted(placed.dropped.items())
-    )
     return {
         "lines": placed.tried,
         "ribs": len(placed.ribs),
         "paths": placed.paths,
-        "summary": f"{len(placed.ribs)} ribs from {placed.paths} paths"
-        + (f" - not ribs: {why}" if why else ""),
+        "summary": placed.tally(),
     }
 
 

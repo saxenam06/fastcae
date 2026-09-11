@@ -38,9 +38,10 @@ interface RibCardProps {
 
 /** What became of a stretch of path, by its colour on the part. */
 const OUTCOMES: Record<string, { colour: [number, number, number]; label: string }> = {
-  rib: { colour: [0.0, 0.62, 0.62], label: "becomes a rib" },
-  keep_out: { colour: [0.93, 0.55, 0.1], label: "stops at something to keep clear of" },
+  rib: { colour: [0.0, 0.62, 0.62], label: "a rib" },
+  keep_out: { colour: [0.93, 0.55, 0.1], label: "stopped by something to keep clear of" },
   ended_elsewhere: { colour: [0.85, 0.2, 0.2], label: "ends on something not named" },
+  open_end: { colour: [0.25, 0.45, 0.85], label: "ends at an edge with nothing to meet" },
   too_short: { colour: [0.6, 0.35, 0.8], label: "too short" },
   no_height: { colour: [0.6, 0.35, 0.8], label: "no room for its height" },
   missed: { colour: [0.55, 0.55, 0.55], label: "misses where ribs stand" },
@@ -762,21 +763,20 @@ function Said(props: { text: string; names: Record<string, string>; onShow: (ref
   );
 }
 
-/** What the lines on the part mean, with how many of each, and the count in words. */
+/** What became of the lines, counted in words, and what each colour on the part means. */
 function PathsKey({ paths, note }: { paths: CardPaths | null; note: string | null }) {
   if (note || !paths) return <div className="card-note">{note}</div>;
-  const counts = new Map<string, number>();
-  for (const line of paths.lines) counts.set(line.outcome, (counts.get(line.outcome) ?? 0) + 1);
+  const shown = [...new Set(paths.lines.map((line) => line.outcome))];
   return (
     <div className="paths-key">
       <div className="verdict-line">{paths.summary}</div>
-      {[...counts.entries()].map(([outcome, count]) => {
+      {shown.map((outcome) => {
         const known = OUTCOMES[outcome] ?? OUTCOMES.missed;
         const [r, g, b] = known.colour.map((c) => Math.round(c * 255));
         return (
           <span key={outcome} className="paths-key-item">
             <span className="swatch" style={{ background: `rgb(${r}, ${g}, ${b})` }} />
-            {count} {known.label}
+            {known.label}
           </span>
         );
       })}

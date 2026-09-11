@@ -463,7 +463,7 @@ export interface CardEdit {
 export interface PathLine {
   a: number[];
   b: number[];
-  /** ``rib``, or why not: missed, keep_out, ended_elsewhere, too_short, no_height. */
+  /** ``rib``, or why not: missed, keep_out, open_end, ended_elsewhere, too_short, no_height. */
   outcome: string;
 }
 

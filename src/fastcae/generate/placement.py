@@ -4,8 +4,9 @@ A placement names a **host** the ribs stand on, the **supports** they run betwee
 **keep out** of. This turns that into ribs, and says what happened to every path it tried.
 
 **Paths are drawn on the host's plane** by the layout - families of straight paths, or spokes out
-from a feature's axis - and walked in short steps. A rib can only be where the path is over the
-host and clear of every keep-out, grown by half the rib's thickness and the clearance asked for.
+from a feature's axis - laid only across where the host is, and walked in short steps. A rib can
+only be where the path is over the host and clear of every keep-out, grown by half the rib's
+thickness and the clearance asked for; keep-outs and gaps in the host cut a path into pieces.
 
 **Each rib is a span.** Where a stretch of path ends, the walk carries on a little way, a few
 millimetres above the host, to see what is there: metal belonging to a support, metal belonging to
@@ -82,7 +83,54 @@ class Placed:
     caps: dict = field(default_factory=dict)
     problems: list[str] = field(default_factory=list)
     ended_on: dict[str, int] = field(default_factory=dict)
-    """What paths that did not end on a support ended on instead, by feature."""
+    """What pieces that ended on something not named to run between ended on, by feature - what
+    could be named to make ribs of them."""
+
+    def tally(self) -> str:
+        """What became of every path, in counts that add up. Keep-outs and gaps cut a path into
+        pieces, so ribs can outnumber paths: this counts the lines that cross where ribs stand,
+        the pieces they are cut into and what each piece became - then the lines that miss."""
+        missed = self.dropped.get("missed", 0)
+        crossed = self.paths - missed
+        if not self.paths:
+            return "the layout lays no lines"
+        if not crossed:
+            if missed == 1:
+                return "the line misses where ribs stand"
+            return f"all {missed} lines miss where ribs stand"
+        rest = sorted((why, n) for why, n in self.dropped.items() if why != "missed")
+        pieces = len(self.ribs) + sum(n for _, n in rest)
+        cross = "crosses" if crossed == 1 else "cross"
+        words = f"{_many(crossed, 'line')} {cross} where ribs stand"
+        if pieces != crossed:
+            words += f", cut into {pieces} pieces"
+        became = [_many(len(self.ribs), "rib")]
+        for why, n in rest:
+            said = f"{n} {NOT_PLACED.get(why, why.replace('_', ' '))}"
+            if why == "ended_elsewhere" and self.ended_on:
+                named = sorted(self.ended_on, key=lambda name: (-self.ended_on[name], name))
+                more = f" and {len(named) - 3} more" if len(named) > 3 else ""
+                said += f" ({', '.join(named[:3])}{more})"
+            became.append(said)
+        words += ": " + ", ".join(became)
+        if missed:
+            miss = "line misses" if missed == 1 else "lines miss"
+            words += f"; {missed} more {miss} where ribs stand"
+        return words
+
+
+# Why a piece of a path did not become a rib, in the words the verdict uses.
+NOT_PLACED = {
+    "keep_out": "stopped by something to keep clear of",
+    "open_end": "ending at an edge with nothing to meet",
+    "ended_elsewhere": "ending on something not named to run between",
+    "too_short": "too short to be a rib",
+    "no_height": "with no room for a rib's height",
+}
+
+
+def _many(n: int, thing: str) -> str:
+    return f"no {thing}s" if n == 0 else f"{n} {thing}" + ("" if n == 1 else "s")
 
 
 def place(
@@ -148,7 +196,8 @@ def place(
         usable = over & ~blocked
         if not usable.any():
             _count(placed, "keep_out")
-            tried(uv[0], uv[-1], "keep_out")
+            where = np.flatnonzero(over)
+            tried(uv[where[0]], uv[where[-1]], "keep_out")
             continue
         for first, last in _runs(usable):
             if (s[last] - s[first]) < SHORTEST * thickness:
@@ -175,11 +224,21 @@ def place(
             ]
             ends = [met.kind for met in mets]
             if placement.connection == "supports" and ends != ["support", "support"]:
-                reason = "keep_out" if "keep_out" in ends else "ended_elsewhere"
+                # What stops it most: a keep-out, then an edge with nothing past it - naming a
+                # face would not help either - then something that could be named to run between.
+                reason = next(
+                    why
+                    for kind, why in (
+                        ("keep_out", "keep_out"),
+                        ("edge", "open_end"),
+                        ("elsewhere", "ended_elsewhere"),
+                    )
+                    if kind in ends
+                )
                 _count(placed, reason)
                 tried(uv[first], uv[last], reason)
                 for met in mets:
-                    if met.kind != "elsewhere" or met.face is None:
+                    if reason != "ended_elsewhere" or met.kind != "elsewhere" or met.face is None:
                         continue
                     for feature in features.containing(met.face) or [None]:
                         name = feature.id if feature else f"face:{met.face}"
@@ -324,9 +383,9 @@ class _Footprint:
         out[ok] = self.mask[index[ok, 0], index[ok, 1]]
         return out
 
-    def bounds(self) -> tuple[np.ndarray, np.ndarray]:
-        used = np.argwhere(self.mask)
-        return self.lo + used.min(axis=0) * self.step, self.lo + used.max(axis=0) * self.step
+    def cells(self) -> np.ndarray:
+        """Every cell where the host is, as a point on its plane."""
+        return self.lo + np.argwhere(self.mask) * self.step
 
 
 def _in_triangle(p: np.ndarray, a, b, c, pad: float) -> np.ndarray:
@@ -349,15 +408,16 @@ def _in_triangle(p: np.ndarray, a, b, c, pad: float) -> np.ndarray:
 
 
 def _paths(placement: Placement, frame: HostFrame, footprint: _Footprint, features: FeatureSet):
-    """Every path the layout draws: (start, unit direction, length), on the host's plane."""
+    """Every path the layout draws: (start, unit direction, length), on the host's plane. Each is
+    laid only across where the host is - never through the empty corners of a rectangle round a
+    host that is not one, where it could only miss."""
     layout = placement.layout
-    lo, hi = footprint.bounds()
-    corners = np.array([[lo[0], lo[1]], [lo[0], hi[1]], [hi[0], lo[1]], [hi[0], hi[1]]])
+    cells = footprint.cells()
     if layout.kind == "radial":
         centre_feature = features.get(layout.centre)
         assert centre_feature is not None
         centre = frame.to_plane(np.asarray(_axis_point(features, centre_feature)).reshape(1, 3))[0]
-        reach = float(np.max(np.linalg.norm(corners - centre, axis=1)))
+        reach = float(np.max(np.linalg.norm(cells - centre, axis=1))) + footprint.step
         count = int(layout.count or 0)
         first, arc = math.radians(layout.phase_deg), 2.0 * math.pi
         if layout.spread == "across":
@@ -380,7 +440,7 @@ def _paths(placement: Placement, frame: HostFrame, footprint: _Footprint, featur
         if first.count is not None:
             angle = math.radians(first.angle_deg)
             m = np.array([-math.sin(angle), math.cos(angle)])
-            across = corners @ m
+            across = cells @ m
             lattice = float(across.max() - across.min()) / first.count
         else:
             lattice = float(first.spacing_mm)
@@ -388,8 +448,8 @@ def _paths(placement: Placement, frame: HostFrame, footprint: _Footprint, featur
         angle = math.radians(family.angle_deg)
         d = np.array([math.cos(angle), math.sin(angle)])
         m = np.array([-d[1], d[0]])
-        across = corners @ m
-        along = corners @ d
+        across = cells @ m
+        along = cells @ d
         low, high = float(across.min()), float(across.max())
         if lattice is not None:
             n = np.arange(math.floor(low / lattice) - 1, math.ceil(high / lattice) + 1)
@@ -407,10 +467,9 @@ def _paths(placement: Placement, frame: HostFrame, footprint: _Footprint, featur
 def _arc_covered(footprint: _Footprint, centre: np.ndarray) -> tuple[float, float] | None:
     """The arc round ``centre`` that where ribs stand fills: where it starts, in radians, and how
     wide it is. None when it fills nearly all the way round - spokes then go all the way."""
-    used = np.argwhere(footprint.mask)
-    if not len(used):
+    points = footprint.cells() - centre
+    if not len(points):
         return None
-    points = footprint.lo + used * footprint.step - centre
     angles = np.sort(np.arctan2(points[:, 1], points[:, 0]) % (2.0 * math.pi))
     gaps = np.diff(np.concatenate([angles, [angles[0] + 2.0 * math.pi]]))
     widest = int(np.argmax(gaps))
