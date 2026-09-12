@@ -7,144 +7,211 @@
 ## Where it stands
 
 **Extract** and **Model** run end to end on any part. **Generate** runs end to end in a first form
-of the design in [ribs.md](ribs.md): the engineer selects faces, starts the rib card from them, sets
-what it has wrong, sees where the ribs would go, and makes a design from it - the card is written as
-a new version of the **study**, and the design is made from the study at its suggested point, with a
-verdict in two parts and a list of what nothing checks yet. No language model is involved.
-Simulate, Learn and Optimize are visible in the interface and not implemented.
+of the design in [ribs.md](ribs.md). The engineer says what they want; the agent writes it into the
+draft of the **study**, block by block, in the part's named entities; the **study card** shows the
+draft for the engineer to accept or undo; **Go** places many designs at once over what the study
+leaves free, and any of them - or the suggested one - is made and checked. Simulate, Learn and
+Optimize are visible in the interface and not implemented.
 
-The steps are in [build-plan.md](build-plan.md). Step 1, the study, runs - but for the model
-writing it from words, which comes with the archive it needs, in step 4. Next is step 2: candidate
-ribs and the conflicts between them.
+The steps are in [build-plan.md](build-plan.md). Step 1, the study, runs; so do the first part of
+step 4 - the model writing the study from words, over a few general tools and skills - and a first
+form of step 6: webs with nothing under them, T sections, the pull direction for them. Kill counts
+wait for the archive of step 3. Next is step 2: candidate ribs and the conflicts between them.
 
 What runs:
 
-- **The rib card**, in the right pane, open by default. Started from the faces selected, it fills
-  every slot from the selection, the part and the drawing, or with a labelled default, each marked
-  you, selected, drawing, measured, default or needed.
-  - **Faces** are chips: shown on the part by a click, taken out by their cross, added from the
-    selection or replaced by it. A slot the engineer has not set shows what the part gave, dashed.
-  - **Values** have steppers; the pattern, radii, draft, a rib's top and how spokes spread are
-    lists. What spokes turn about is a list of the bosses and bores there, largest first, each
-    shown on the part as it is picked.
-  - **Words** can go in any slot, read by code, with the faces selected put in where the cursor is.
-    Words it cannot read are kept and flagged, never guessed; only words typed are quoted.
-  - **Orientation** starts from the longest wall round where ribs stand - a grid along it, parallel
-    ribs square to it - or from a face the engineer picks, or a number, with a note saying which way
-    0° points. Spokes fan across where ribs stand and need none.
-  - **What is wrong shows on its slot as it happens**, down to a height limit that leaves no room
-    for a rib, such as a face to stay below on the other side of the host, or a face to run between
-    that does not stand up from it. Flat faces selected in one plane are where ribs stand together.
-  - **Show paths** draws every line the layout lays across where ribs stand, never past it, cut
-    into pieces by holes and gaps and coloured by what becomes of each piece, and redraws as the
-    card changes: one to three seconds once the part is open. The words count lines, pieces and
-    what each piece became, so the numbers add up; a design's verdict says the same.
-- **Selecting**: each click is grown by its own angle or not at all; the stage lists the clicks,
-  and the grow control acts on one of them. A face clicked after growing another starts ungrown.
-- **Reading the part**: holes go round (a fillet in a corner is not a hole; a cast hole with draft
-  is); what stands up round a host is found across fillets, rounds and chamfers, on the side ribs
-  stand on; the card chooses spokes only about a boss or bore the host surrounds; the plate is
-  measured by a ray through it; the smallest radius is the drawing's note, cited.
-- **The study**, one file per study in `studies/`, every version kept with what changed, written
-  from the card on every design:
-  - one block of ribs: the card's values as the suggested point, and everything the engineer left
-    open varying over a range read from the part - every pattern the floor allows, the round
-    things spokes could turn about, the angle, spacing in thicknesses, 4 to 16 spokes, thickness
-    from 0.6 to 1.0 of the plate, radii from the smallest the drawing allows. What the engineer
-    set is fixed.
-  - constraints, each hard, assumed or learned, with its source: the card's rules, the drawing's
-    smallest radius, and the part's interfaces closed - every hole and bore, what the drawing
-    controls, and the datums it names, waiting for someone to point at their faces.
-  - the pull direction, assumed from the floor.
-  - beside it, what nothing enforces yet - here the interfaces, until step 2 - and everything nobody
-    confirmed.
+- **Say what you want**, at the top of the Generate tab's rail. The engineer's words, with any faces
+  selected, go to the agent, which reads the part with a few general tools and writes the draft:
+  - it composes eight tools - find entities; describe them; relate them to the part (what they
+    stand on, what rises round a floor, what is round a face, what shares an axis, what lies across
+    the open space in front of them, what lies between several of them, under and over); measure
+    them; search the drawing; read and edit the study; and read a skill - composing them as a skill
+    says for a kind of request: ribs round a round thing, on a face, between things; keeping clear
+    of anything; rules from words; sections; naming things; refining turn by turn. Skills hold no
+    ids, numbers or example sentences.
+  - an edit is checked as a study version is - refused, with the reason and nothing changed, if a
+    quote is not the engineer's exact words or an entity is not on the part - and the part's
+    interfaces are closed whatever it sends. Every edit comes back with where each block's ribs
+    would go, counted, so the agent sees its reading makes ribs before the engineer does.
+  - each turn refines the study: another place is a new block; a limit on ribs already there is a
+    rule in their block; "without interfering with the ribs already there" keeps a new block clear
+    of every earlier block's ribs. A rule about one block's ribs lives in that block; one about
+    every rib, after the blocks.
+  - it says only what needs the engineer: at most three attention lines, entities as chips. They
+    stay until an edit gives them again or clears them, and every edit shows them back to the agent
+    to check they still hold. After eight questions of the part since the study last changed, every
+    answer reminds it that the engineer can be asked instead.
+- **The study card**, in the right pane, open by default: the draft of the study's next version,
+  read back from the study when the project opens.
+  - **Each block is its entities**: what its ribs stand on - a floor, or nothing, for webs between
+    what they join, with the way they stand and how high they reach; what they end on - named, or
+    read off the part; what they keep clear of - any face or feature, the holes found, another
+    block's ribs - each a chip that shows it on the part and says whose it is. Then its settings,
+    each fixed or what it may vary over and who suggested that, and its rules, each hard, assumed
+    or learned, with whether anything enforces it yet.
+  - After the blocks: rules for every block, what makes a design better, the pull, how many
+    designs, and the part's interfaces, folded. What the draft changes is marked; a bar folds the
+    changes, and Accept writes the next version while Undo reads the study back. A rule the words
+    put in, or one the part suggested, is taken out by its cross; the interfaces stay closed.
+  - **Where ribs would go** is drawn on the part as the draft changes: every line each block's
+    layout lays, cut into pieces by what it keeps clear of and by gaps, each piece coloured by what
+    became of it, and counted so the numbers add up.
+  - **Go** accepts the draft if it differs, then places 24 designs spread over every setting each
+    block leaves free - the suggested point first, the rest a Sobol spread, each value on its step -
+    listing each as it is placed, with its ribs per block; designs whose ribs all fall in the same
+    places are made once. A click draws one on the part; Make builds it at preview, with its
+    verdict.
+- **Reading the part**:
+  - holes go round (a fillet in a corner is not a hole; a cast hole with draft is);
+  - what a feature stands on is found across the fillets and chamfers at its foot, and through
+    every band of a round feature the CAD split, so a stacked boss stands on the floor at the foot
+    of the stack; floors at one level are said together, with whether they go round it;
+  - what rises round a floor is found across fillets, rounds and chamfers, on the side ribs stand
+    on;
+  - what lies across the open space from an entity - the wall a web from it would reach - by rays
+    straight out of its metal; and what lies under and over the space between several things -
+    a floor at their foot, or open space;
+  - the plate and walls are measured by rays through them; a rib is 0.8 of the thinner of the plate
+    it stands on and the thinnest of the six largest walls it meets; the smallest radius is the
+    drawing's note, cited.
+- **The study**, one file per study in `studies/`, every version kept with what changed:
+  - blocks, each what to add and where - what it stands on, possibly nothing, and ends on - with
+    its free settings, each a range or choices with a step, a suggested value and a source. What
+    the words set is fixed; the rest is read off the part: on a floor, every pattern it allows,
+    what spokes could turn about, the angle, spacing, count, thickness from the plate and walls,
+    radii from the drawing's smallest, draft, height, flat or T sections with the flange ranged from
+    the web; for webs with nothing under them, the way they stand, spokes about the round thing they
+    join or straight webs, thickness from the thinnest thing they join, a level top.
+  - constraints, each hard, assumed or learned, with its source and who wrote it - the engineer's
+    words, the part's suggestion for a block (recomputed each time the draft is read, and kept out
+    once taken out), or the platform closing the part's interfaces: every hole and bore, what the
+    drawing controls, and the datums it names.
+  - preferences, objectives, the pull, the target and seed; beside it, what nothing enforces yet and
+    everything nobody confirmed.
 
-  It refuses words never said, faces never selected, entities the part does not have, a hard rule
-  that cites nothing, a range that holds no value. Entities are kept with their fingerprints and
-  found again by them. The block at its suggested point is exactly the placement the card makes.
-  The Generate tab shows the study; the verdict lists what was not checked.
-- **The spec**, the study's first form, one file per spec in `specs/` - still what the agent reads
-  and writes.
-- **Placement** on a host of faces in one plane: straight families; grids laid as one lattice, so
-  their families cross at common points; spokes all the way round or fanned across the host. Ribs
-  are spans from one support to another. Each end stands as tall as what it meets there - buried as
-  deep as it must be to stay inside it all the way up, never through it - and the top slopes
-  between the ends, or stays level at the lower if asked; a named feature or a given height caps
-  both. No rib is shorter than its root fillet. Every piece of every path is accounted for: a rib,
-  or why not - a keep-out, an open edge, something not named (and what), too short, no room.
-- **Designs from the study**, at its suggested point or at other values, at preview (twice the
-  design grid) or full; the verdict lists the engineer's constraints, verified on the ribs placed and
-  citing their words, then the checks, then what nothing enforces yet.
-- **The agent** - a model with tools over the same card and engine, on LangChain, OpenRouter and
-  LangSmith - is kept in the code, tested, and not in the interface.
+  It refuses words never said, entities the part does not have, a hard rule that cites nothing, a
+  range that holds no value; words it already holds can be quoted again. Entities are kept with
+  their fingerprints and found again by them.
+- **Placement**, for ribs on a floor - faces in one plane - and for webs with nothing under them:
+  - straight families; grids laid as one lattice, so their families cross at common points; spokes
+    all the way round, or fanned across the floor - or, for webs, across the things they reach.
+  - webs with nothing under them stand along the direction the most of what they join runs along -
+    the pull first among equals - from the level where the most of it is present, laid across the
+    open space between them; each runs from one of them to another. Straight webs are laid where
+    two of them face each other.
+  - ribs are spans from one support to another, each end buried as deep as it must be to stay
+    inside what it meets all the way up; the top slopes between the ends or stays level at the
+    lower; a named feature, a given height or anything standing over the path caps it. Spokes may
+    meet at their roots, never run into each other past them.
+  - keeps clear of any entity by its outline - a disc for something round - and of another block's
+    ribs in three dimensions, placing that block first: a rib on a ceiling is no obstacle to one far
+    below it.
+  - every piece of every path is accounted for: a rib, or why not - a keep-out, an open edge,
+    something not named (and what), one thing at both ends, crowded, too short, no room.
+- **Designs from the study**, at its suggested point or any design Go placed, at preview (twice the
+  design grid) or full; the verdict lists the engineer's constraints, verified on the ribs placed
+  and citing their words, then the checks, then what nothing enforces yet.
 
-Not yet: candidate ribs and a solver choosing among them; many designs from one study; the model
-writing the study; layouts beyond straight families and spokes; ribs with no floor under them;
-re-checking earlier designs against a new version. The zone and formation code from before is still
-in the tree, unused by the interface.
+Not yet: candidate ribs and a solver choosing among them; tapers and gussets; keeping clear of one
+rib picked from a design; re-checking earlier designs against a new version; kill counts. The zone
+and formation code from before is still in the tree, unused by the interface.
 
 ## On the housing
 
-**The card, started from the two halves of the ceiling** - `face:1201` and `face:1543`, one plane,
-facing down - is ready with nothing typed: both halves are where ribs stand; 60 faces stand round
-them; 12 holes go through them, two of them cast holes with draft; a square grid every 100 mm along
-`face:723`, the longest wall; 12 mm thick, 0.8 of the 15 mm plate; R6 root; R3 edges and smallest
-radius, from the drawing's *"ALL NON-SPECIFIED RADII R3.0"*, page 1; 1° draft. Spokes turn about
-the bearing boss `face:1453`, Ø421, the largest round thing standing in the ceiling; the boss
-`face:262`, Ø290, and two bores are offered too.
+**The engineer's five requests, in one conversation**, the agent on DeepSeek through OpenRouter at
+high reasoning effort, each refining the study the earlier ones wrote:
 
-What each pattern draws there with nothing else set, before anything is made:
+| # | the engineer wrote | the agent wrote | ribs at the suggested point | time |
+|---|---|---|---|---|
+| 1 | *add ribs all around the bearing with face:1453 but make sure the ribs dont cross face:1417 and face:1456* | b1: spokes all the way round `face:1453`, standing on both ceiling halves, `planar_group:114` and `planar_group:115`; clear of `face:1417` and `face:1456`, a rule of b1's own; the 12 holes through the ceiling 5 mm clear, suggested by the part | 5 | 64 s |
+| 2 | *Add ribs on the face: face:1201* | b2 on `face:1201`, everything else read off the part - every pattern left open | 8 | 20 s |
+| 3 | *add ribs on the face:1543 but they should not cross the boss with face:1167* | b3 on `face:1543`, clear of `boss:1397` - of the two bosses `face:1167` touches, the one standing on `face:1543` - naming the other, `boss:1398`, in an attention line | 9 | 88 s |
+| 4 | *can you add ribs all around the bearing with face:1645 and face:349 and the wall without interfering with other ribs already in place due to the result of above queries* | b4: webs with nothing under them - spokes all the way round `boss:349` out to the outer wall, `planar_group:147`, found across the open space from it - clear of the ribs of b1 to b3 | 1 | 241 s |
+| 5 | *add ribs between face:349 and the wall without interfering with other ribs* | b5: webs between `face:349` and `planar_group:147`, fanned across the wall, clear of the ribs of b1 to b4 | 4 | 36 s |
 
-| pattern | set out | lines | pieces | ribs | the other pieces |
-|---|---|---|---|---|---|
-| square grid, every 100 mm | along `face:723`, 135° | 18 | 37 | 13 | at holes 16; too short 6; at an open edge 2 |
-| parallel, every 100 mm | square to `face:723`, 45° | 8 | 18 | 10 | at holes 5; too short 2; no room for a rib's height 1 |
-| triangle grid, every 100 mm | along `face:723`, 135° | 26 | 59 | 18 | at holes 25; too short 10; at an open edge 6 |
-| spokes, 8 | fanned across the ceiling about `face:1453` | 8 | 9 | 4 | at holes 4; too short 1 |
+`boss:349` and `face:1645` are the edge of a plate 70 mm thick round a bearing bore, and the
+housing's outer wall stands 130 to 160 mm across open space from it, from 110 mm up to 160; nothing
+lies under that space. So both b4 and b5 stand along z, from 110 mm, level with the lower end - 12
+mm thick, 0.8 of the 15 mm outer wall. The agent said in its attention lines which reading it took
+where the words allow two: which boss, which wall, and why b4 and b5 stand on nothing. Spokes all
+the way round `boss:349` reach the wall with one of four; fanned across the wall, as b5's are, four
+do.
 
-Spokes about `face:262` make 7 ribs of 8 lines; about the Ø20 bore `face:1536`, 2 - its fan crosses
-the holes and runs off the ceiling's open edges.
+A design of the same five blocks, written by hand and made at preview: 28 ribs, 5,309 cm³ added, 63
+seconds once the part is open. Every rule the engineer gave passes; the checks reject it for mould
+release and for ribs of two blocks 0.4 mm apart.
 
-**Written as a study**, that card is one block of 12 free settings - every pattern, the four round
-centres (`face:1453`, `face:262`, `face:1262`, `face:1536`), 0-179°, 60-200 mm apart, 4-16 spokes,
-9-15 mm from the 15 mm plate, R3-R12 roots - and 9 constraints: the 12 holes where ribs stand 5 mm
-clear, each end no taller than what it meets and every rib ending on what it runs between (both
-assumed), no radius under 3 mm (the drawing), and the part's 206 holes, 20 bores, `bore:196`,
-`bore:202` and `hole_pattern:2` closed as interfaces - listed as not enforced until step 2. All 289
-entities it names are found again by fingerprint.
+**Go** on the accepted study: 12 designs placed in 50 seconds, from 8 ribs to 43; b4 has none or one
+web in each, b5 from none to 6.
 
-Designs made from the first half, `face:1201`, alone (preview):
+## What the agent adds
 
-| design | ribs | tall, each end | added | made in | verdict |
-|---|---|---|---|---|---|
-| spokes about `face:1453`, 16 all the way round, 12 mm thick | 5 | 105 mm at the boss; 52-133 mm at the walls | 837 cm³ | 227 s | keep-out, height, supports pass; mould release rejects |
-| triangle grid at 45°, 8 across, 20 mm thick | 8 | up to 191 mm | 2,380 cm³ | 292 s | the same; a 20 mm rib on a 22 mm wall warned |
+On those five, every decision that shaped a block came from the part or from a rule written for
+the model:
 
-Opening the housing at a preview grid the first time builds its field: about 2 minutes.
+| # | decided by | left to the model |
+|---|---|---|
+| 1 | what `face:1453` stands on: both ceiling halves, round it together | turning *"dont cross"* into a rule of b1's |
+| 2 | the block read off `face:1201` | nothing a click could not do |
+| 3 | what `face:1167` touches - two bosses - and the rule to take the one standing where the ribs go | following the rule |
+| 4 | what `boss:349` looks at across open space, and that nothing lies under it: webs | putting the answers together |
+| 5 | the same, and the rule that words adding ribs start a new block | following the rule |
+
+It works from its instructions (3,500 characters), the eight tools' descriptions, eight skills
+(about 2,000 words, each read when a request is of its kind), what the tools answer, and the study.
+It has no knowledge base, no model of what the part's regions are for, no memory beyond the
+conversation, and no sight of the part. Its tools answer geometric questions, not engineering ones:
+which wall a word means takes several questions and minutes of reasoning, afresh each time - which
+is where the time goes, and where one run differs from the next.
+
+So, on requests that name what they mean by id, it adds only time; where the words name things
+loosely, it resolves them and says which reading it took. Nothing in making designs depends on it -
+every tool it calls could be a control on the card - but no control on the card writes a study, so
+today it is the only way in. The work where words are worth more than a form - documents,
+objections, explanation over many designs, a brief read into several kinds of feature - is not
+built, and needs the knowledge it lacks, in [ribs.md](ribs.md).
 
 ## Open
 
+- **A study is written only through the agent.** The card shows the draft, takes rules out and
+  accepts it, but has no control that adds a block or an entity.
+- **The agent knows only what its tools answer.** The part's regions carry no roles - bearing seat,
+  web, outer wall, flange, cover - and design knowledge is constants in code, not data that can be
+  read, cited and changed: a rib 0.8 of the wall it meets, a root gap of two thicknesses, a 1°
+  draft, ribs 5 to 16 thicknesses apart.
+- **The agent is slow**: a minute or more of reasoning between tool calls on DeepSeek at high
+  effort, so a request that needs the part read round an unfamiliar name takes several minutes; the
+  tools themselves answer in well under a second. Lower effort or a faster model would cut it; both
+  are settings.
+- **The same words can be read two ways from one run to the next** - one ceiling half or both,
+  spokes fanned across a wall or all the way round, a new block or the last one changed. The
+  attention lines say which reading was taken, and the engineer's next words settle it.
+- **Ribs of two blocks can run alongside each other too close to cast** where nobody asked one to
+  keep clear of the other - and keeping clear of another block's ribs holds them only to the
+  clearance asked, not to the gap casting needs. The root-gap check rejects such a design (two
+  thicknesses between ribs that do not cross, assumed); the conflicts between ribs of step 2 are
+  where it is settled.
 - **Mould release rejects every design on the housing.** It rejects any metal along the pull from
   a rib tip however far away, and a rib hanging from a ceiling has the rest of the housing below
   it. Correcting it is step 3 of the build order.
-- **Which way ribs stand.** A rib's pull is its host's normal; the spec does not yet carry the
-  part's own pull direction.
-- **Tall ribs are slow.** Heights that follow each end made the housing's ribs 100 mm and more, and
-  a preview 4 to 6 minutes, most of it checking a window that grows with the ribs.
 - **Holes cut most paths.** On the ceiling, nearly half the pieces a grid is cut into stop at a
-  hole's keep-out, and a piece that ends there is not a rib. A grid's ribs cannot end on each other yet,
-  only on what they run between, so round holes a grid comes apart instead of closing on its own
-  crossings.
+  hole's keep-out, and a piece that ends there is not a rib. A grid's ribs cannot end on each other
+  yet, only on what they run between, so round holes a grid comes apart instead of closing on its
+  own crossings.
 - **Only named supports count at both ends.** Name two faces and spokes that reach any other wall
-  are dropped, reported as the fillet at that wall's foot rather than the wall.
+  are dropped, reported as ending on something not named, with what.
 - **Bosses and bores are not yet required to go round.** Holes are; convex cylinders are still all
-  bosses, and 216 on the housing are mostly rounded wall corners and edge rounds. The card's list
-  of what spokes turn about leaves those out; the Geometry tab still lists them.
-- **Words** are read with a fixed vocabulary per slot; anything else is flagged for the engineer to
-  set another way.
+  bosses, and 216 on the housing are mostly rounded wall corners and edge rounds. What spokes turn
+  about leaves those out; the Geometry tab still lists them.
+- **The design space is ribs only.** Wall offsets, bulges, boss transitions, hole patterns, ribs the
+  part already has, and a choice of material are not yet kinds of block; the field operation a wall
+  offset needs - a face selection as a weight in the field - is in `generate/offset.py`, unused by
+  the study.
+- **Nothing after Go.** No meshing, simulation, dataset, surrogate, search or verification: the
+  designs carry no performance yet, so nothing ranks them but their geometry.
 
-Size: 39 Python files, ~15,600 lines; 18 TypeScript files, ~5,200 lines. Tests are kept locally
-as working checks and are not tracked; all 396 pass.
+Size: 42 Python files, ~17,700 lines; 20 TypeScript files, ~5,400 lines; 8 skills. Tests are kept
+locally as working checks and are not tracked; all 445 pass.
 
 One project in `assets/`: **GRC Gearbox Housing** - the rib-free housing (`housing_baseline.brep`),
 its 4-page drawing, and `project.json`.
@@ -229,9 +296,10 @@ drawn, not as brought; nothing reads it.
 | field at 2.5 mm, once | 158 s |
 | contour of the whole part, once | 20 s: 1.70 M vertices, 3.40 M triangles, closed, no faults |
 | field at 3 mm, the preview grid for R6 ribs, once | about 2 minutes |
-| the rib card filled from a selection | 0.1 s |
-| the card's paths drawn, once the part is open | 1 to 3 s |
-| a preview design from the card | 15 s to 6 minutes, growing with how tall the ribs are |
+| a block read off the part | under a second |
+| where five blocks' ribs would go, drawn, once the part is open | about 1 s |
+| Go: 12 designs of five blocks placed | about 50 s |
+| a preview design from the study: the five blocks, 28 ribs, once the part is open | about 1 minute |
 | a zone's exact distance, once per zone | about 11 minutes |
 | a design, formations across a zone | 1.5 to 8 minutes, of which the checks are 1 to 7 |
 
@@ -248,8 +316,8 @@ Formation designs, from the zone code no longer in the interface, showed these d
   find rather than dropped.
 - **Checks are slow** - most of a design's time.
 
-Placement from the card - ribs as spans between supports, height following them, no trimming on
-the grid - does not have the first two. Mould release is still as strict.
+Placement - ribs as spans between supports, height following them, no trimming on the grid - does
+not have the first two. Mould release is still as strict.
 
 ## Next
 
@@ -257,7 +325,7 @@ The steps in [build-plan.md](build-plan.md), each keeping every earlier study re
 designs:
 
 1. The study - the document, entities by fingerprint, constraints with strength and source,
-   interfaces closed by default, the card as the editor of one block
+   interfaces closed by default, the study card as its view
 2. Candidates and conflicts
 3. Choosing (CP-SAT), sizing (Sobol), screening, and the archive with kill counts
 4. The model on the study, and the requirement suite
@@ -286,13 +354,14 @@ Alongside, on Extract:
 | What a project holds | the engineer's CAD - no ribs - and drawings. No reference part, ever |
 | `project.json` | decisions only: the baseline, which spec is active, approvals. Proposed by the system, confirmed by a person; no facts |
 | Who it is for | CAE teams (variants and decks for a study), surrogate-data teams, design engineers (ribs suggested and modelled), foundries (reinforcement that casts) |
-| The study | the source of truth, one file per study in `studies/` with every version: blocks (what to add, where, free settings with ranges and sources), constraints (hard, assumed or learned, with their source), preferences, objectives, the pull direction, the target and seed - in named entities bound by fingerprint, citing the engineer's words and selections; a rule nothing enforces yet is kept and listed. Written from the card today; generation reads only it. The agent still writes specs, the study's first form |
+| The study | the source of truth, one file per study in `studies/` with every version: blocks (what to add, where, free settings with ranges and sources), constraints (hard, assumed or learned, with their source), preferences, objectives, the pull direction, the target and seed - in named entities bound by fingerprint, citing the engineer's words and selections; a rule nothing enforces yet is kept and listed. Written only when the engineer accepts the draft the agent wrote from their words; generation reads only it |
 | What is unstated | explored within ranges read from the part and the drawing, and listed as assumed; asked first only when every design would otherwise be invalid |
 | Where ribs go | where the study says - faces to stand on, anchors, regions to keep away from; the system proposes named regions when the client does not point |
 | A rib | a web between two or more anchors, a floor optional; section, plane and pull direction from the study |
 | Layouts | proposers - parallel, grids, spokes, a free proposer - never limits unless the engineer says so; designs described by properties, not by proposer |
-| The rib card | the hand editor of one Add: ribs block: fixed slots filled from the part, set by value, face or words; works with no model; words it cannot read are flagged, never guessed |
-| The model | writes the study from words and clicks, asks what blocks everything, explains failures, turns objections into rules; never makes geometry, never a call per design, never scripted to an example; sees names and numbers, never CAD files; provider is a setting |
+| The study card | the one structured view of the study - the draft of its next version, read back from it: block by block, what its ribs stand on, end on and keep clear of, each entity a chip, then its settings and rules, each with what the study makes of it and whose it is; entities added as the engineer says more; marked where the draft changes; nothing written until accepted |
+| The model | writes the study's draft from words and clicks - its only way to change the study - composing a few general tools as skills say, never a tool made for one kind of request; asks what blocks everything, explains failures, turns objections into rules; says only what needs the engineer's attention, never what the card shows; never makes geometry, never a call per design, never scripted to an example; sees names and numbers, never CAD files; provider is a setting |
+| Saying it once | the card shows what the study holds; the rail only what the card does not - the conversation, the words the study rests on, its versions |
 | Objections | a stated reason becomes a rule the engineer confirms; a reason-less rejection only makes similar designs rarer, visibly |
 | Variety | every free setting has a step; the designs shown are spread across their properties; the count of different designs is reported, not forced |
 | Learning | within a study; within a client only if it opts in; never across clients |

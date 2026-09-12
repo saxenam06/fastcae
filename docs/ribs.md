@@ -26,8 +26,9 @@ engineer's part.
 1. **Extract** names what the part holds - faces, planar groups, holes, bosses, bores, walls,
    fillets - and what the drawing controls.
 2. **Say what you want**, in words, clicks on the part, or both: *"ribs between the bearing boss and
-   the outer wall, clear of the holes, no taller than the boss"*. A model writes it into the
-   **study**, in the part's named entities, and asks only what blocks every design.
+   the outer wall, clear of the holes, no taller than the boss"*. A model writes it into the draft
+   of the **study**, in the part's named entities, shown on the study card; it asks only what blocks
+   every design, and the engineer accepts what it wrote.
 3. **Screen.** Proposers lay out candidate designs across what the study leaves free; each is
    placed and checked against the rules in seconds.
 4. **Build and review.** A varied set is built and shown; the rest build in the background.
@@ -212,11 +213,68 @@ that client. Never across clients.
 - **Never** the model computing geometry, and never a model call per design: four thousand designs
   are a workflow with a handful of model decisions in it.
 
-It is one agent with tools over the study, and its edits show as marked changes the engineer accepts
-or undoes. It quotes the engineer's words exactly, every number it gives comes from a tool that
-measured it, and it is never scripted to an example sentence. It sees the study and summaries of
-named entities - names and numbers - never CAD files or meshes, and the provider can be changed: a
-client's approved one, or a local model.
+It is one agent with **a few general tools**, each doing one job, and it composes them:
+
+- **find** entities - by kind, by what they touch, by which way they face, by the axis they turn
+  about - or the part's axes and what is on each;
+- **describe** entities - what each is, and how several stand to each other;
+- **relate** an entity to the part - what it stands on, what rises round a floor, what is round a
+  face, what shares its axis, what lies across the open space in front of it - or several
+  together: what lies between them, under and over;
+- **measure** an entity - how far it reaches along a direction, how thick the metal is under it;
+- **search the drawing** for its words;
+- **read and edit the study** - the only way to change it. An edit comes back with where each
+  block's ribs would go, counted, so the agent sees its reading makes ribs before the engineer does.
+
+**Skills** say how to compose them for a kind of request - ribs round a round thing, on a face,
+between things; keeping clear of anything; rules from words; sections; naming things; refining turn
+by turn. The agent reads one when a request is of its kind. Skills, like the prompt, hold no ids, no
+numbers and no example sentences. No tool is made for one kind of request: a new kind is a new
+skill composing the same tools, or a new general tool if a job is missing. A decision the part can
+settle - whether anything lies under the space between two things - belongs in a tool that
+computes it, not in a skill that tells the model how to guess it.
+
+What the agent changes shows on the study card, marked, for the engineer to accept or undo. Its own
+words are the few lines it asks the engineer to look at - a question that blocks, an assumption
+that matters, a rule nothing enforces yet - never what the card already shows; they stand until it
+gives them again or clears them, and every edit shows them back to it to check they still hold. It
+quotes the engineer's words exactly, every number it gives comes from a tool that measured it, and
+it is never scripted to an example sentence. It sees the study and summaries of named entities -
+names and numbers - never CAD files or meshes, and the provider can be changed: a client's approved
+one, or a local model.
+
+**Where words are worth more than a form.** A request that names what it means by id - a face, a
+number - is better as a click or a stepper on the card: faster, exact, the same every time. Words
+earn their place where no form reaches:
+
+- **documents** - drawings, requirement specs, load cases, standards - read into cited rules,
+  objectives and loads, which code then checks;
+- **objections** at review - *"too close to the bolt bosses"*, *"nothing over the drain"* - read
+  into candidate rules, each with its kill count;
+- **explanation** over hundreds of designs - why a block makes one rib, why designs fail a check,
+  what the best of them share;
+- **a brief** - *"a tenth less mass, bearings as stiff, thinner side panels, ribs on the covers,
+  cast iron or ductile iron"* - read into a study of several kinds of feature, materials and
+  objectives, for the engineer to edit;
+- **things named by what they are for** - *"every bearing boss of the intermediate stage"*.
+
+**What the model must know.** It can reason only about what its tools answer, and today they
+answer geometry: which wall a word means is several questions and minutes of reasoning, afresh each
+time. Two bodies of knowledge would make the answers engineering:
+
+- **A model of the part's regions and what they are for**: bearing seats by shaft and stage, the
+  plates that carry them, outer and inner walls, split and mounting flanges, covers, compartments,
+  bolt patterns, sealing faces and clearance envelopes - with their relations worked out once: what
+  stands on what, what faces what across open space, what has nothing under it. Computed from the
+  geometry and the drawing's labels, proposed by the model where they cannot be computed, and
+  approved by the engineer, its names are the ones the study, the card, the agent and the
+  simulation's result regions all use. With it, *"the wall"* is looked up, not searched for.
+- **Design knowledge as data**: casting and rib rules, a materials catalogue, and each kind of
+  feature's ranges, each with its source - read by the code that fills a block, cited by the agent,
+  changed by the engineer.
+
+With them go the loads, operating points and targets in the project's documents, and what earlier
+studies decided.
 
 ## Objectives, physics and learning
 
@@ -252,65 +310,124 @@ them must build, mesh and solve, so what keeps a design robust is a hard rule, n
   written from it is right and every design it yields follows every rule. The suite runs on every
   change; nothing is fixed for one case.
 
-## The card
+## The study card
 
-The rib card is how one **Add: ribs** block is edited by hand, and it needs no model: what is typed
-into a slot is read by code, and what code cannot read is kept exactly as typed and flagged, never
-guessed. Started from the faces selected, it fills every slot a group of ribs needs - from the
-selection, the part and the drawing, or with a default that says it is one:
+The study card is the one structured view of the study: the draft of its next version, read back
+from the study when the project opens. It is written from the engineer's words by the agent; the
+engineer accepts it or undoes it.
 
-| slot | the engineer sets | otherwise |
-|---|---|---|
-| where ribs stand | faces, selected | the flat area the rest of the selection rises from, with every other selected flat face in its plane - not merely the largest |
-| what they run between | faces, selected or named | the other faces selected that stand up from the host; with none, what stands up round the host, past any fillet or chamfer at its foot, on the side ribs stand |
-| keep clear of | the faces whose holes to avoid, a clearance - or none | every hole through where ribs stand, 5 mm clear, listed |
-| pattern | parallel, square grid, triangle grid, spokes - and for spokes, what they turn about, picked from the bosses and bores standing round the host, largest first, and whether they fan across where ribs stand or go all the way round | spokes about the largest boss or bore standing in the host with the host round more than half of it; else a square grid. Asked for spokes, the largest boss or bore there is. Spokes fan across the host, so a count is ribs there - unless turned by an angle or a face, which needs them all the way round |
-| orientation | an angle - or a face to run along or square to, or for spokes, to point the first one toward | set out from the longest wall round the host: a grid along it, parallel ribs square to it, running out from it; spokes fan, needing none. With no wall, the host's longest direction, and a number says which way 0° points |
-| how many | a count, or a spacing | 8 spokes, or a pitch of 8 thicknesses |
-| how tall | a height, faces to stay below, and whether the top slopes or is level | each end as tall as what it meets, the top sloping between |
-| thickness | a value | 0.8 of the plate they stand on, measured through it |
-| root fillet | a radius | half the thickness, not below the smallest radius |
-| edge round | a radius, or none | the smallest radius |
-| draft | an angle | 1° |
-| smallest radius | a radius | the drawing's note, cited by page and text |
+**Each block is its entities.** What its ribs **stand on** - a floor, as faces or features in one
+plane, or nothing, for webs that hang between what they join. What they **end on** - named, or read
+off the part: what rises round the floor. What they **keep clear of** - any entity: a face, a boss,
+the holes found, each one listed; the ribs of another block, named like any entity as `ribs:` and
+the block. Each is a chip that shows it on the part, and each says whose it is - the engineer's
+words, the part's suggestion, the drawing. As the engineer says more, entities are added to a block,
+or a new block is started: "without interfering with the ribs already there" adds every earlier
+block's ribs to what the new one keeps clear of, and a design places those blocks first. Another
+block's ribs are in the way only where they stand at the same height: ribs on a ceiling are no
+obstacle to webs far below it.
 
-**Every slot says where its value came from** - *you*, *selected*, *drawing*, *measured*, *default*
-or *needed* - and each is set in place:
+A rule about the ribs of one block belongs to that block - "these ribs must not cross face:1417" -
+and a rule about every rib belongs to the study, after the blocks - the drawing's smallest radius.
 
-- **faces** are chips, one per face, by the name the hover card shows. A click shows it on the part;
-  its cross takes it out. The faces selected now can be added, or put in place of them. A slot the
-  engineer has not set shows what the part gave, and editing starts from that.
-- **numbers** have steppers and their unit; **choices** - the pattern, radii from a standard series,
-  draft angles, a rib's top, how spokes spread, what they turn about - are lists. A face picked
-  from a list is shown on the part as it is picked. Blank clears a value that may be left out.
-- **words** can be typed into any slot, starting from what it holds, with the faces selected put in
-  where the cursor is: *"holes on face:1201, 8 mm clear"*, *"spokes about face:1453"*, *"no taller
-  than face:1453"*. Faces show as chips in the words too.
-- **reset** forgets what the engineer set in a slot, and the part and the drawing fill it again.
+Then the block's **settings** - pattern, what spokes turn about, angle, how many, thickness, radii,
+draft, height, section - each fixed, or what it may vary over and who suggested that; and its
+**rules**, each hard, assumed or learned, and whether anything enforces it yet. What a block still
+needs from the engineer, and what cannot be built yet, stays on it. After the blocks: rules for every
+block, what makes a design better, the pull direction, how many designs, and the part's interfaces,
+closed by the platform.
 
-**The card draws where ribs would go before anything is made.** "Show paths" draws every line its
-layout lays across where ribs stand - never past it - cut into pieces by holes and gaps, each piece
-coloured by what becomes of it: a rib, stopped by something to keep clear of, ending at an edge with
-nothing to meet, ending on something not named (which it names, to be added), too short, or no room
-for its height. The words count lines, pieces and what each piece became, so the numbers add up:
-*"18 lines cross where ribs stand, cut into 37 pieces: 13 ribs, 16 stopped by something to keep
-clear of, …"*. It redraws as the card changes, in seconds once the part is open at the preview grid.
+**What the draft changes is marked**; **Accept** writes it as the next version, checked as any
+version is, and **Undo** reads it back as the study has it. Nothing is written until then. A design
+is made from the study, never from the draft: making one accepts the draft first.
 
-**The card says what is wrong, as it goes.** A face that is not on the part, a host that is not one
-plane, a face both stood on and run between, a face to run between that does not stand up from the
-host, spokes with nothing to turn about, ribs closer than their own thickness, a height limit - a
-number, or a face to stay below - that leaves no room for a rib taller than its root fillet, a radius
-below the smallest the part allows, an edge round more than half the rib, words it could not read.
-The card is **ready** when nothing is needed and nothing is wrong, and only then makes designs.
+**It draws where ribs would go before anything is made.** "Show paths" draws every line each block's
+layout lays across its floor - never past it - or across the open space between what its webs join,
+cut into pieces by what it keeps clear of and by gaps, each piece coloured by what becomes of it: a
+rib, stopped by something to keep clear of, ending at an edge with nothing to meet, ending on
+something not named (which it names), ending on one thing at both ends, too close to another of its
+spokes, too short, or no room for its height. The words count lines, pieces and what each piece
+became, so the numbers add up.
 
-**What the engineer set is kept in their terms.** Each slot they set is one line - their words as
-typed, or the value they picked - and those lines and the faces they selected are what the study
-quotes and cites. What the part, the drawing or a default filled goes in as measured references,
-unconfirmed.
+**Go** makes many designs at once: the draft accepted if it differs, then points spread over what
+every block leaves free - the suggested point first - each placed on the part and counted in
+seconds, listed as it is done; designs whose ribs all fall in the same places are made once. A click
+draws one on the part; Make builds it and checks it.
+
+## What is read off the part for ribs on a floor
+
+For a block standing on a floor, everything the words leave open is read off the part, round what
+they gave - or a default that says it is one:
+
+| what | read off the part as |
+|---|---|
+| what they end on | what stands up round the floor, past any fillet or chamfer at its foot, on the side ribs stand - each wall, boss or bore once |
+| keep clear of | every hole through the floor, 5 mm clear, listed and suggested; the engineer's own distance replaces it |
+| pattern | every pattern the floor allows - parallel, square grid, triangle grid, spokes - suggesting spokes about the largest boss or bore the floor goes round more than halfway, else a square grid |
+| what spokes turn about | the bosses and bores standing round the floor, largest first |
+| orientation | set out from the longest wall round the floor: a grid along it, parallel ribs square to it; spokes fan across the floor, or go all the way round |
+| how many | 4 to 16 ribs, or 5 to 16 thicknesses apart |
+| how tall | each end as tall as what it meets, the top sloping between; half to all of that |
+| thickness | 0.6 to 1.0 of the plate they stand on, measured through it |
+| root fillet, edge round | from the smallest radius the part allows up to half the thickness |
+| draft | half a degree to three |
+| section | flat, unless the words ask for a T; a T's flange 2 to 4 times the web wide |
+| smallest radius | the drawing's note, cited by page and text |
+
+## What is read off the part for webs with nothing under them
+
+For a block that stands on nothing, the webs join what it ends on - two things or more - and the
+rest is read off what they join:
+
+| what | read off the part as |
+|---|---|
+| which way they stand | the direction the most of what they join runs along - the axis of a round one, the line two flat ones meet along, else one of the part's own axes - the pull first among equals |
+| from where to where | from the level where the most of them are present, up to where the first of those stops: every web meets all of them; the others take no part, and the card says so |
+| where they may go | the open space between them at those heights - where the part is not, in the pieces of open space that reach two of them or more |
+| pattern | spokes about the round thing among them - a boss before a bore - or straight webs; both stay open |
+| orientation | spokes fanned across the others than what they turn about; straight webs square to the largest flat one, laid across where two of them face each other |
+| how many | 2 to 12 webs, or 5 to 16 thicknesses apart |
+| how tall | level with the lower end, or sloping; half to all of it; never into what stands over them |
+| thickness | 0.6 to 1.0 of the thinnest of what they join, measured through it |
+| root fillet, edge round, draft | as for ribs on a floor |
+
+Each web runs from one of them to another - never from one to itself - and is buried in both. Spokes
+may meet at their roots, but one that would run into another past them is left out.
+
+## Beyond ribs
+
+The recipe that makes ribs makes other variations: a kind of block - where it goes, what may vary,
+its rules - a way to build it on the distance field, its checks, and what is read off the part for
+it. The kinds after ribs:
+
+| kind | where | what varies | built as | checked for |
+|---|---|---|---|---|
+| wall offset | a panel of faces | how far it moves along its normal, how it blends into what is round it | the selection's weight in the field, times the offset | the wall left thick enough; protected faces unchanged |
+| bulge or crown | a panel | how high, where, how wide | the same weight, times a smooth bump | draft; clearance envelopes kept |
+| boss transition | a boss and the floor it rises from | the transition radius, the boss's wall | a local growth and fillet at its foot | the bore unchanged; thick spots |
+| hole pattern | a plate or web | count, diameter, spacing, edge distance | cylinders cut away | ligaments wide enough; clear of ribs and bolts |
+| existing rib | a rib the part already has | its height and thickness, scaled | its region offset | as for ribs |
+| material | the study | a choice among those permitted | not geometry: a property of every design | castability; allowables |
+
+Blocks are built in one order - what changes the shape (offsets, bulges, transitions), then what
+adds to it (ribs, webs), then what cuts it (holes), then fillets - and rules run across kinds: holes
+keep clear of ribs, ribs are sized from the wall as offset. A customer's own part, ribs and all, is
+a baseline to vary like any other - never a reference to match.
+
+**Three generations of variation.** Same-shape changes to what the part already has - offsets,
+bulges, transitions, existing ribs - are the most often valid, and come first. Features from
+templates - ribs, webs, holes - change the part's topology within rules. Free exploration on the
+field changes it further, and a design found there is rebuilt as features only when it is worth it.
+
+**How variants are made.** The study holds every block. Go samples them together - continuous
+settings spread evenly, choices balanced - checks each design cheapest first, makes alike designs
+once, keeps the most spread out, and records every margin, so a proposed rule shows its kill count
+before it is confirmed. A chosen few are then meshed and solved, a surrogate learns from them, the
+search runs on the surrogate, and the best are solved for real before anyone calls them good.
 
 ## Reading the part
 
-Everything the card and the proposers start from is read off the part by code, in one pass:
+Everything a block and the proposers start from is read off the part by code, in one pass:
 
 - **Holes go round.** A hole is a small concave cylinder or cone - with the cones that chamfer or
   countersink it - whose faces go more than 200° round their axis. A fillet in a square corner is a
@@ -323,19 +440,27 @@ Everything the card and the proposers start from is read off the part by code, i
 - **What spokes turn about** is a boss or a bore: something round standing square to the host that
   goes a good way round its axis, with the rest of it if the CAD split it in pieces - a corner
   fillet or a rounded wall corner never does. It is looked for among everything standing round the
-  host, named to run between or not. The card chooses spokes by itself only when the host goes round
+  host, named to run between or not. Spokes are suggested by themselves only when the host goes round
   more than half of one; asked for spokes, it takes the largest, and lists the rest.
 - **Which wall straight ribs are set out from** is the longest flat face standing round the host,
   measured along it.
 - **How tall a rib can stand at an end** is measured on the metal its end is buried in, at every
   depth it could be buried to, so a wall with draft is met as tall as it stands.
 - **The plate's thickness** is measured by a ray through it, from the largest facet of the host.
+- **What lies across the open space from an entity** is found by rays from points spread over its
+  faces, straight out of its metal: the first things they meet, each with the share of the entity
+  that looks at it and the gap - the wall a web from it would reach.
+- **What lies between things** is found from points halfway across the space where they face each
+  other, at the heights they share: rays straight down and up say what is under and over that
+  space and how far past where they begin or end - a floor at their foot to stand on, or open
+  space, and webs with nothing under them. When metal fills the space - two faces of one piece -
+  it says so.
 - **The smallest radius** is the drawing's own note, found by its text and cited with it.
 
 ## Seeing, naming and selecting faces
 
-Hovering a face on any 3D tab shows a small card with its one name, `face:N` - which the study and
-the card take wherever they take a feature - and its type, area, which way it faces or its axis,
+Hovering a face on any 3D tab shows a small card with its one name, `face:N` - which the study takes
+wherever it takes a feature - and its type, area, which way it faces or its axis,
 diameter, height, and whether a drawing controls it. Clicking pins the card.
 
 **Selecting is how faces get into the study.** A click selects a face; a Ctrl-click adds one or

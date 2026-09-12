@@ -13,13 +13,15 @@ for, simulate them, learn from the results, and optimise - which steers what is 
 
 Two of the six stages run. **Extract** reads a folder of artifacts and produces an understood
 model, with every claim traceable to the file, page and literal text it came from. **Generate** is
-being built around a **study**: the engineer says what they want in words and clicks, a model writes
-it in the part's named entities - what may vary, what must hold, what is preferred - and code makes
-and checks many designs from it, while the engineer's objections become rules - see
-[docs/ribs.md](docs/ribs.md). What runs today is its hand-edited form, the rib card, and the
-geometry under it: the part as a signed distance field on a fixed grid, ribs with true root fillets,
-a closed surface, checks. [docs/status.md](docs/status.md) is the honest account of where that
-stands.
+being built around a **study**: the engineer says what they want in words and clicks, and it is
+written in the part's named entities - what may vary, what must hold, what is preferred - while code
+makes and checks many designs from it and the engineer's objections become rules - see
+[docs/ribs.md](docs/ribs.md). What runs today: a model that writes the study from the engineer's
+words by composing a few general tools, the study card that shows it for them to accept, Go -
+many designs placed at once - and the geometry under it: the part as a signed distance field on a
+fixed grid, ribs on a floor or webs between what they join with nothing under them, with true root
+fillets, flat or T, a closed surface, checks.
+[docs/status.md](docs/status.md) is the honest account of where that stands.
 
 ---
 
@@ -33,8 +35,9 @@ API on `127.0.0.1:8021`, interface on **http://localhost:5183/**. Neither port i
 one, because the machine this was built on already runs something on 8000 and 5173 and a silent
 bind failure is worse than an unusual number.
 
-The rib card needs no model. The agent kept in `agent/` - out of the interface for now - does; its
-settings go in a `.env` at the repository root, which is never committed:
+**Say what you want**, at the top of the Generate tab, is where the study is written: the agent in
+`agent/` reads the request and the part and writes the study, for the engineer to accept or undo on
+the study card. Its settings go in a `.env` at the repository root, which is never committed:
 
 ```
 FASTCAE_AGENT_MODEL=openrouter:deepseek/deepseek-v4-pro
@@ -61,10 +64,10 @@ A project is what an engineer brings: the part to add ribs to, and its drawings.
 finished version to compare against.
 
 `project.json` holds the decisions made about the part, and only those: which CAD file designs grow
-from (the *baseline*, when there is more than one), which spec is active, and what a person
-approved. Specs live in `specs/`, one file each, written from the rib card when a design is made
-from it. The system proposes; a person confirms. A project without either behaves as if nobody had
-decided anything.
+from (the *baseline*, when there is more than one), which study is active, and what a person
+approved. Studies live in `studies/`, one file each with every version, written when the engineer
+accepts the draft on the study card. The system proposes; a person confirms. A project without
+either behaves as if nobody had decided anything.
 
 A folder whose name starts with `_` or `.` is set aside rather than a project.
 
@@ -108,12 +111,19 @@ src/fastcae/
     compose.py    ribs joined into a part's field inside a zone's window
     checks.py     pass, warn or reject, with a reason and the rule it used
     designs.py    a project opened for designing, and a design made from settings
-    placement.py  ribs from a placement: paths on a host, spans between supports
-    intent.py     designs made from a spec, with the two-part verdict
-    slots.py      the rib card: its slots filled from the part, edited by value, face or words
-    session.py    the rib work on an open project: the card, the spec it writes, designs
-  spec.py         the spec: the engineer's words, placements and rules, versioned
-  agent/          a model with tools over the engine; kept, out of the interface for now
+    placement.py  ribs from a placement: paths on a floor, spans between what they end on, clear
+                  of anything by its outline - and of other blocks' ribs
+    intent.py     designs made from placements, with the two-part verdict
+    reading.py    reading the part for the agent: what a feature stands on, what rises round a
+                  floor, the axes and what is on each, how thick the metal is
+    slots.py      ribs on a floor read off the part: every slot filled round what was given
+    blocks.py     a block of the study filled from the part round what the words gave
+    session.py    the rib work on an open project: the study's draft, accepting and undoing it,
+                  where ribs would go, designs, Go
+  study.py        the study: blocks, constraints, preferences, objectives, versioned, in named
+                  entities bound by fingerprint; sampled for Go
+  spec.py         the spec, the study's first form; the words and fingerprints both share
+  agent/          a model with a few general tools over the engine, and skills on composing them
   cli.py          fastcae designs: a seeded list of designs and a summary table
   provenance.py   Evidence, Fact, Conflict - how anything is known
   api/app.py      HTTP surface; routes contain no logic
@@ -121,7 +131,7 @@ src/fastcae/
 ui/src/
   app/            shell, tab definitions, product strings
   stage/          upload, the drawing, the 3D view and the card for the face under the cursor
-  panel/          the per-tab rails, the selection, the rib card, the card vocabulary
+  panel/          the per-tab rails, the selection, the study card, the card vocabulary
   render/         WebGL2 renderer: surfaces, field cells, ID-buffer picking
 ```
 

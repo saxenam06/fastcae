@@ -2,7 +2,7 @@
 
 **Being built.** The stage that produces design variants: how a design is represented, built,
 turned back into a surface and checked. How the engineer's intent decides *what* is built - the
-spec, placements, the rib card, the layout vocabulary - is in [ribs.md](ribs.md).
+study, placements, the study card, the layout vocabulary - is in [ribs.md](ribs.md).
 [status.md](status.md) says how much of it runs.
 
 ---

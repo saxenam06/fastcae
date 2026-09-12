@@ -82,18 +82,24 @@ features.py    generic feature detection. No domain vocabulary anywhere.
 drawing.py     PDF text to callouts. Every one cites its page and literal text.
 extract.py     the deterministic pipeline, and the drawing-to-CAD association.
 provenance.py  Evidence, Fact, Conflict. How anything is known.
-generate/      the part as a distance field; the rib card, filled from the part; ribs placed and
-               composed into the field; the checks.
-spec.py        the spec: the engineer's words, placements and rules, versioned.
-agent/         a model with tools over the engine. Kept, and out of the interface for now.
+study.py       the study: what the engineer wants, as a design space in the part's named
+               entities - blocks, constraints with strength and source, preferences, objectives,
+               the pull, the target - versioned. Generation reads nothing else.
+generate/      the part as a distance field; the part read for ribs - what stands where, what
+               rises round a floor; a block of the study filled round what the words gave; the
+               study's draft; ribs placed and composed into the field; the checks.
+spec.py        the spec, the study's first form; the words and fingerprints both share.
+agent/         a model with a few general tools over the engine, and skills on composing them:
+               it reads the part and writes the study.
 cli.py         batches of designs, run without the interface.
 api/app.py     HTTP surface. Routes contain no logic.
 ```
 
 `project.json` is not configuration in the usual sense: it holds no facts and no settings, only
-decisions - which CAD designs grow from, which spec is active, which protected areas a person
-approved. The system proposes each one; nothing in it is written except through an approval. Specs
-live beside it in `specs/`, one file each, written only from the rib card.
+decisions - which CAD designs grow from, which study is active, which protected areas a person
+approved. The system proposes each one; nothing in it is written except through an approval.
+Studies live beside it in `studies/`, one file each with every version, written only when the
+engineer accepts the draft on the study card.
 
 ## Nothing derived is computed twice
 
@@ -162,7 +168,7 @@ the *subject*, and the left rail holds that subject's own detail:
 | **Drawing** | callout kinds, and the steps that read them, warnings included | every callout beside the literal text it was parsed from |
 | **Geometry** | what the CAD yielded, its steps, axes, feature kinds | the tessellated surface, pickable |
 | **Field** | layers, the field's own statistics, the contour's | the field, its contour and the CAD, as switchable layers |
-| **Generate** | the spec, its levers, and each design's verdict | the design's new surfaces over the part |
+| **Generate** | what the engineer says to the agent; the words and versions the study rests on | the design's new surfaces over the part, and where the study would put ribs |
 
 The pipeline report has no tab of its own because it does not need one: every step belongs to an
 artifact, so it appears in that artifact's rail. Putting the tabs in the rail instead lets a tab and
@@ -181,8 +187,24 @@ uploaded once and drawn conditionally.
 **Two columns, both movable.** The left column carries the current tab's detail and, under it,
 whatever is selected - a selection belongs beside the features it was made from, and it applies to
 two tabs of the three, so a pane that sits empty on the third is a pane in the wrong place. The
-right column is the **rib card**, open by default and closed from its mark in the bar to get the
-width back: where the engineer says what ribs they want, whichever tab is showing.
+right column is the **study card**, open by default and closed from its mark in the bar to get the
+width back: the one structured view of the study, whichever tab is showing. Each block says what
+its ribs stand on, end on and keep clear of - the part's named entities, or another block's ribs -
+then its settings and rules; what the draft changes is marked, and nothing is written until the
+engineer accepts it. Go lists many designs there, each drawn on the part at a click.
+
+**Nothing is said twice.** The study card shows what the study holds; the rail shows only what it
+does not - the conversation, and the words the study rests on. When the agent writes the study, its
+only words are the few lines it asks the engineer to look at.
+
+**The agent composes a few general tools.** It finds entities, describes them, relates them to the
+part - what one stands on, what rises round a floor, what shares an axis, what lies across the open
+space in front of it, what lies between several - measures them, searches the drawing, and reads
+and edits the study. How to compose them for a kind of request is in skills: short recipes it reads
+when needed, holding no ids, numbers or example sentences. No tool is made for one kind of request.
+It knows what those tools answer, and nothing more: the part's regions carry no roles yet, and
+design knowledge is constants in code rather than data it can read - what it lacks is in
+[ribs.md](ribs.md).
 
 **Every face can be named.** Hovering a face on any 3D tab shows its one name, `face:N`, and what it
 is, so an engineer can refer to it - on the card, in words or as a chip.

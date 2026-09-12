@@ -100,17 +100,24 @@ solver can blame. A check that keeps failing for one cause becomes a rule at an 
 
 ## The model's tools
 
-Ground a name to entities · add or change an entry and see its kill count · run a study version ·
-explain why nothing fits · return the representatives · offer readings of an objection · and the
-questions about the part it has today (features, faces, what stands round a face, how far a feature
-reaches, the drawing's text), plus **reach**: what a rib could join from an entity, through air.
+A few general tools, each doing one job, which the model composes - with **skills** that say how,
+for a kind of request. Today: find entities, describe them, relate them to the part - what they
+stand on, what rises round a floor, what is round a face, what shares an axis, what lies across the
+open space in front of them, what lies between several of them - measure them, search the drawing,
+and read and edit the study, each edit coming back with where every block's ribs would go. To
+come: an entry's kill count, running a study version, why nothing fits, the representatives,
+readings of an objection. No tool is made for one kind of request.
+
+What the model knows is what those tools answer, and today they answer geometry. The knowledge that
+would let them answer engineering - a model of the part's regions and what they are for, and
+design knowledge as cited data - is described in [ribs.md](ribs.md) and not built.
 
 ## Steps
 
 Each step names what is built and what shows it done. Every step keeps all tests passing and every
 earlier study reproducing its designs.
 
-**1. The study** - the document, and the card as the editor of one block.
+**1. The study** - the document, and the study card as its one structured view.
 - The study: entities by fingerprint, blocks (what to add, where, span), the pull direction, free
   ranges with steps and sources, constraints with strength and source, preferences, objectives, the
   target (how many, spread how, how different, the seed). Written only through one function that
@@ -120,10 +127,16 @@ earlier study reproducing its designs.
 - Assumptions listed: every range and rule nobody confirmed.
 - Interfaces closed by default, from the part and the drawing: bores, holes, drawing-controlled
   features; the drawing's datums listed for the engineer to point at.
-- The card writes a block: its values become the suggested point, the part's ranges the rest. The
-  block at its suggested point gives exactly the placement the card gives today.
-- The study shown in the interface; Preview and Full make the design at the study's suggested point.
-- *Done when* the card on the housing writes a study, the study reads back the same design, and
+- A block is read off the part round what the words gave - on a floor, or webs between what it
+  joins with nothing under them: its settings ranged round a suggested point, the rules the part
+  suggests for it marked as the part's, and what the words said always winning.
+- The study card is the draft of the study's next version, read back from the study when the
+  project opens: block by block, what its ribs stand on, end on and keep clear of - any entity, each
+  a chip - then its settings and rules, each with what the study makes of it; what the draft
+  changes marked, Accept and Undo. The agent changes the study only through the draft, and says
+  only what needs the engineer's attention.
+- Preview and Full make the design at the study's suggested point, accepting the draft first.
+- *Done when* a request on the housing writes a study, the study reads back the same draft, and
   every refusal and open item is tested.
 
 **2. Candidates and conflicts**
@@ -146,7 +159,8 @@ earlier study reproducing its designs.
 - The tools above over the study and the archive. Words and clicks become entries, each echoed back
   in plain words with its kill count. Blocking questions only.
 - The requirement suite: thirty varied requirements on the housing, drafted here and vetted by the
-  engineer, with the client's own when they come.
+  engineer, with the client's own when they come. The first five are the engineer's own, asked in
+  one conversation, each refining the study the earlier ones wrote.
 - *Done when* the suite's requirements become the right studies, judged by the engineer.
 
 **5. Choosing what to show, and objections**
@@ -173,8 +187,13 @@ earlier study reproducing its designs.
   the surrogate; MAP-Elites; real solves before a design is called good.
 
 **10. The next kinds of feature**
-- Pockets, then local wall changes, through the same recipe: a schema, a way to build it, its checks,
-  its proposers.
+- Same-shape changes to what the part already has, first: wall offsets along the normal, bulges and
+  crowns, bearing-boss transitions, ribs the part already has varied in height and thickness. Then
+  hole patterns, and their combinations with ribs; pockets; material as a choice of the study among
+  those permitted. Each through the same recipe: a kind of block, a way to build it on the field,
+  its checks, what is read off the part for it - in [ribs.md](ribs.md), *Beyond ribs*.
+- *Done when* one study varies several kinds at once, built in their order - shape changes, then
+  additions, then cuts - with rules across kinds, and Go spreads designs over all of them.
 
 ## Always
 
@@ -192,3 +211,20 @@ earlier study reproducing its designs.
 - **The client's solver deck**, when there is one.
 - **Employment and IP terms** to check before any commercial step with driveline suppliers - for a
   lawyer.
+
+**Proposed, not yet decided:**
+
+1. **Where the agent sits.** The card writes the study directly too - a region selected, a kind of
+   block added, its settings set - and the agent becomes the way in for what no form reaches:
+   documents, briefs, objections, explanation over many designs. It is judged on a fixed set of such
+   requests, each with the study it should give, by how often it gives it, how alike repeated runs
+   are, and its time and cost against an engineer doing the same by hand - not on five sentences
+   that name faces by id.
+2. **What comes next: the model of the part's regions and what they are for.** Computed from the
+   geometry and the drawing, proposed by the model where it cannot be computed, approved by the
+   engineer; the names the card, the agent and the simulation's result regions share.
+3. **The baseline.** Keep adding ribs to a part without them, and vary any part as it is - a
+   customer's own ribbed part among them, as the thing to vary, never as a reference.
+4. **The order after that.** The same-shape kinds of step 10 - wall offset, bulge, boss transition -
+   then a thin slice of step 9 - mesh, static and modal - on some twenty designs Go placed, so the
+   loop closes on real numbers; then hole patterns and materials.
