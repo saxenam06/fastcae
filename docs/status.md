@@ -9,8 +9,13 @@
 **Extract** and **Model** run end to end on any part. **Generate** runs end to end in a first form
 of the design in [ribs.md](ribs.md): the engineer selects faces, starts the rib card from them, sets
 what it has wrong, sees where the ribs would go, and makes a design from it - the card is written as
-a new spec version and the design is made from that, with a verdict in two parts. No language model
-is involved. Simulate, Learn and Optimize are visible in the interface and not implemented.
+a new version of the **study**, and the design is made from the study at its suggested point, with a
+verdict in two parts and a list of what nothing checks yet. No language model is involved.
+Simulate, Learn and Optimize are visible in the interface and not implemented.
+
+The steps are in [build-plan.md](build-plan.md). Step 1, the study, runs - but for the model
+writing it from words, which comes with the archive it needs, in step 4. Next is step 2: candidate
+ribs and the conflicts between them.
 
 What runs:
 
@@ -40,10 +45,26 @@ What runs:
   is); what stands up round a host is found across fillets, rounds and chamfers, on the side ribs
   stand on; the card chooses spokes only about a boss or bore the host surrounds; the plate is
   measured by a ray through it; the smallest radius is the drawing's note, cited.
-- **The spec**, one file per spec in `specs/`, every version kept with what changed, written from
-  the card on every design. It cites the engineer's lines and selections, and carries every value
-  nobody set as a measured reference, unconfirmed. It refuses words never said, faces never
-  selected, features the part does not have, and rules that cite nothing.
+- **The study**, one file per study in `studies/`, every version kept with what changed, written
+  from the card on every design:
+  - one block of ribs: the card's values as the suggested point, and everything the engineer left
+    open varying over a range read from the part - every pattern the floor allows, the round
+    things spokes could turn about, the angle, spacing in thicknesses, 4 to 16 spokes, thickness
+    from 0.6 to 1.0 of the plate, radii from the smallest the drawing allows. What the engineer
+    set is fixed.
+  - constraints, each hard, assumed or learned, with its source: the card's rules, the drawing's
+    smallest radius, and the part's interfaces closed - every hole and bore, what the drawing
+    controls, and the datums it names, waiting for someone to point at their faces.
+  - the pull direction, assumed from the floor.
+  - beside it, what nothing enforces yet - here the interfaces, until step 2 - and everything nobody
+    confirmed.
+
+  It refuses words never said, faces never selected, entities the part does not have, a hard rule
+  that cites nothing, a range that holds no value. Entities are kept with their fingerprints and
+  found again by them. The block at its suggested point is exactly the placement the card makes.
+  The Generate tab shows the study; the verdict lists what was not checked.
+- **The spec**, the study's first form, one file per spec in `specs/` - still what the agent reads
+  and writes.
 - **Placement** on a host of faces in one plane: straight families; grids laid as one lattice, so
   their families cross at common points; spokes all the way round or fanned across the host. Ribs
   are spans from one support to another. Each end stands as tall as what it meets there - buried as
@@ -51,12 +72,14 @@ What runs:
   between the ends, or stays level at the lower if asked; a named feature or a given height caps
   both. No rib is shorter than its root fillet. Every piece of every path is accounted for: a rib,
   or why not - a keep-out, an open edge, something not named (and what), too short, no room.
-- **Designs from a spec**, at preview (twice the design grid) or full; the verdict lists the
-  engineer's constraints, verified on the ribs placed and citing their words, then the checks.
+- **Designs from the study**, at its suggested point or at other values, at preview (twice the
+  design grid) or full; the verdict lists the engineer's constraints, verified on the ribs placed and
+  citing their words, then the checks, then what nothing enforces yet.
 - **The agent** - a model with tools over the same card and engine, on LangChain, OpenRouter and
   LangSmith - is kept in the code, tested, and not in the interface.
 
-Not yet: layouts beyond straight families and spokes; hosts that are not flat; a design space;
+Not yet: candidate ribs and a solver choosing among them; many designs from one study; the model
+writing the study; layouts beyond straight families and spokes; ribs with no floor under them;
 re-checking earlier designs against a new version. The zone and formation code from before is still
 in the tree, unused by the interface.
 
@@ -81,6 +104,14 @@ What each pattern draws there with nothing else set, before anything is made:
 
 Spokes about `face:262` make 7 ribs of 8 lines; about the Ø20 bore `face:1536`, 2 - its fan crosses
 the holes and runs off the ceiling's open edges.
+
+**Written as a study**, that card is one block of 12 free settings - every pattern, the four round
+centres (`face:1453`, `face:262`, `face:1262`, `face:1536`), 0-179°, 60-200 mm apart, 4-16 spokes,
+9-15 mm from the 15 mm plate, R3-R12 roots - and 9 constraints: the 12 holes where ribs stand 5 mm
+clear, each end no taller than what it meets and every rib ending on what it runs between (both
+assumed), no radius under 3 mm (the drawing), and the part's 206 holes, 20 bores, `bore:196`,
+`bore:202` and `hole_pattern:2` closed as interfaces - listed as not enforced until step 2. All 289
+entities it names are found again by fingerprint.
 
 Designs made from the first half, `face:1201`, alone (preview):
 
@@ -112,20 +143,8 @@ Opening the housing at a preview grid the first time builds its field: about 2 m
 - **Words** are read with a fixed vocabulary per slot; anything else is flagged for the engineer to
   set another way.
 
-## Open decision: whether a model proposes layouts
-
-Raw settings make a space that is huge and mostly meaningless - a grid at an angle no wall has,
-spokes about a wall corner - and the engineer asked for an agent that applies meaningful
-combinations and proposes meaningful variants. Proposed, not started: a design language whose words
-are relative to the part - along this wall, fanned about that boss between these walls, no taller
-than the bore at that end - in which a model proposes a few meaningful families of variants, each
-built and checked by the system, and from which a campaign samples; judged on many real
-requirements on more than one part, never on one sentence. The card's defaults - set out from the
-longest wall, the largest boss for spokes, a fan, heights that follow each end - are the part of
-that which needs no model. See [ribs.md](ribs.md#where-language-comes-in).
-
-Size: 38 Python files, ~14,200 lines; 18 TypeScript files, ~5,100 lines. Tests are kept locally
-as working checks and are not tracked; all 368 pass.
+Size: 39 Python files, ~15,600 lines; 18 TypeScript files, ~5,200 lines. Tests are kept locally
+as working checks and are not tracked; all 396 pass.
 
 One project in `assets/`: **GRC Gearbox Housing** - the rib-free housing (`housing_baseline.brep`),
 its 4-page drawing, and `project.json`.
@@ -234,20 +253,20 @@ the grid - does not have the first two. Mould release is still as strict.
 
 ## Next
 
-The build order in [ribs.md](ribs.md#build-order):
+The steps in [build-plan.md](build-plan.md), each keeping every earlier study reproducing its
+designs:
 
-1. The card on the housing, used by a person, until it makes good designs there - what it shows
-   decides the order of the rest
-2. The layout vocabulary completed - circles about an axis, offsets from an edge, shortest paths
-   between features, mirrors
-3. The verdict corrected - mould release, root gap near crossings - and checks made faster
-4. The design space - feasible ranges with citations, saved for a campaign; earlier designs
-   re-checked against a new spec version
-5. Hosts that are not flat
-6. Language: a sentence read into the card; the zone and formation code retired
-
-The open decision above may reorder this: if a model is to propose layouts, the design language
-it writes in comes before completing the fixed vocabulary.
+1. The study - the document, entities by fingerprint, constraints with strength and source,
+   interfaces closed by default, the card as the editor of one block
+2. Candidates and conflicts
+3. Choosing (CP-SAT), sizing (Sobol), screening, and the archive with kill counts
+4. The model on the study, and the requirement suite
+5. Choosing what to show - about 20 representatives - and objections that become rules
+6. The general rib - webs between any anchors, the pull direction, taper and T sections
+7. An unseen housing, with no code changed
+8. Speed - 4,000 designs overnight
+9. Simulate and Learn
+10. The next kinds of feature - pockets, local walls
 
 Alongside, on Extract:
 
@@ -266,25 +285,34 @@ Alongside, on Extract:
 | Project | a folder under `assets/`; its name is the folder's name. Folders starting `_` or `.` are set aside |
 | What a project holds | the engineer's CAD - no ribs - and drawings. No reference part, ever |
 | `project.json` | decisions only: the baseline, which spec is active, approvals. Proposed by the system, confirmed by a person; no facts |
-| Where ribs go | from the engineer's intent: host, supports and keep-outs, set on the rib card and named in the spec |
-| The rib card | the engineer's form: fixed slots filled from the part, set by value, face or words; works with no model; words it cannot read are flagged, never guessed |
-| The spec | the source of truth, one file per spec with every version. Written only from the card, carrying the engineer's lines and selections with each rule citing them; generation reads only it |
-| Language | out of the interface until the card makes good designs on real parts; comes in first as one call reading a sentence into the card. Never makes geometry; nothing scripted to an example |
+| Who it is for | CAE teams (variants and decks for a study), surrogate-data teams, design engineers (ribs suggested and modelled), foundries (reinforcement that casts) |
+| The study | the source of truth, one file per study in `studies/` with every version: blocks (what to add, where, free settings with ranges and sources), constraints (hard, assumed or learned, with their source), preferences, objectives, the pull direction, the target and seed - in named entities bound by fingerprint, citing the engineer's words and selections; a rule nothing enforces yet is kept and listed. Written from the card today; generation reads only it. The agent still writes specs, the study's first form |
+| What is unstated | explored within ranges read from the part and the drawing, and listed as assumed; asked first only when every design would otherwise be invalid |
+| Where ribs go | where the study says - faces to stand on, anchors, regions to keep away from; the system proposes named regions when the client does not point |
+| A rib | a web between two or more anchors, a floor optional; section, plane and pull direction from the study |
+| Layouts | proposers - parallel, grids, spokes, a free proposer - never limits unless the engineer says so; designs described by properties, not by proposer |
+| The rib card | the hand editor of one Add: ribs block: fixed slots filled from the part, set by value, face or words; works with no model; words it cannot read are flagged, never guessed |
+| The model | writes the study from words and clicks, asks what blocks everything, explains failures, turns objections into rules; never makes geometry, never a call per design, never scripted to an example; sees names and numbers, never CAD files; provider is a setting |
+| Objections | a stated reason becomes a rule the engineer confirms; a reason-less rejection only makes similar designs rarer, visibly |
+| Variety | every free setting has a step; the designs shown are spread across their properties; the count of different designs is reported, not forced |
+| Learning | within a study; within a client only if it opts in; never across clients |
+| Judged by | the share of shown designs an engineer accepts - 70% by the third round on the housing - and a suite of 30 or more varied requirements plus a second part, run on every change |
+| Simulation | Code_Aster, the same design twice agreeing within 0.1%, and analysis on the distance field; results kept apart, never folded into one number |
 | Agent stack | kept in `agent/`: LangChain agent loop on LangGraph, OpenRouter (DeepSeek by default), LangSmith; conversation and checkpoints in SQLite with the project; credentials from the environment |
-| Layouts | composed from a vocabulary of paths, patterns and trims, held as data. Formations are examples |
 | Constraints and checks | constraints enforced and verified; checks are code, tested against failing parts, thresholds from the spec, basis shown. A model may add constraints, never checks |
 | The part's own rules | rib section, root fillet, edge round, fillet floor: no default; set per part |
 | Fidelity | preview on a coarser grid with nothing else relaxed; accept only at full |
 | Tessellation | OCC `BRepMesh`, chord tolerance derived from the model |
-| `cadquery-ocp` | pinned at 7.9.3.1.1; 8.x ships an unsigned binary Smart App Control blocks |
-| SciPy | `scipy.stats` is blocked by the same policy; anything needing it is written in numpy |
+| `cadquery-ocp` | pinned at 7.9.3.1.1; 8.x ships an unsigned binary Smart App Control blocked. Smart App Control is off on the build machine; 8.x is untested |
+| SciPy | all of it loads, `scipy.stats.qmc` included: Sobol sampling is available |
+| Constraint solver | OR-Tools CP-SAT, to choose rib combinations and to name the assumed rules that make a request impossible |
 | Units | `xstep.cascade.unit` set explicitly to MM; the file's own declaration is read and reported |
 | Scale-dependent tolerances | derived from the bounding diagonal, never absolute |
 | A hole | goes more than 200° round its axis; a small concave cylinder that does not is a fillet |
 | Control | derived from a toleranced drawing dimension matching a detected feature |
 | Conflicts | recorded, never resolved, and not shown until an association is confirmed |
 | Derived results | cached under `<project>/.fastcae/`, keyed on content and on the source that produced them; a miss is never an error |
-| Design representation | a signed distance field on a fixed grid; a design is a spec version and lever values, never stored geometry |
+| Design representation | a signed distance field on a fixed grid; a design is a study version and the values of its free settings, never stored geometry |
 | Contouring | manifold dual contouring; the baseline whole, once; a design re-contours only what it changed, spliced by key. The grid's outermost layer is never solid |
 | Design grid | a quarter of the root fillet unless asked for; voxel sizes offered are round numbers |
 | Ports | API 8021, interface 5183 |

@@ -2,20 +2,24 @@
 
 **ZenryxAI — Generate. Learn. Optimize.**
 
-A platform for generating design variants of any engineered part, running them at scale, learning a
-surrogate from the results, and searching it.
+Generative design in CAD tools gives a handful of optimal shapes per setup, which someone then
+redraws. ZenryxAI gives thousands of near-production variants of the engineer's own part that
+already follow their rules, with solver decks. A surrogate trained on them finds clusters of designs
+that do well on several objectives at once - each a real, castable design - and shows which choices
+matter for the next design.
 
-The loop: generate designs, simulate them, learn from the results, and optimise toward the
-engineer's objectives - which steers what is sampled next.
+The loop: extract what the part and its drawing say, generate designs from what the engineer asks
+for, simulate them, learn from the results, and optimise - which steers what is sampled next.
 
 Two of the six stages run. **Extract** reads a folder of artifacts and produces an understood
 model, with every claim traceable to the file, page and literal text it came from. **Generate** is
-being built around intent: an engineer brings a rib-free structure, selects where ribs may go and
-sets what they must respect on a rib card - faces, values and words - and the card is written as a
-spec that designs follow strictly, each with an auditable verdict - see [docs/ribs.md](docs/ribs.md).
-Its geometry machinery runs: the part as a signed distance field on a fixed grid, ribs with true
-root fillets, a closed surface, checks. [docs/status.md](docs/status.md) is the honest account of
-where that stands.
+being built around a **study**: the engineer says what they want in words and clicks, a model writes
+it in the part's named entities - what may vary, what must hold, what is preferred - and code makes
+and checks many designs from it, while the engineer's objections become rules - see
+[docs/ribs.md](docs/ribs.md). What runs today is its hand-edited form, the rib card, and the
+geometry under it: the part as a signed distance field on a fixed grid, ribs with true root fillets,
+a closed surface, checks. [docs/status.md](docs/status.md) is the honest account of where that
+stands.
 
 ---
 
@@ -126,7 +130,9 @@ ui/src/
 - [architecture.md](docs/architecture.md) — how it is built, and the rule that keeps it general
 - [extract.md](docs/extract.md) — the pipeline, and the limits of associating a drawing with a model
 - [generate.md](docs/generate.md) — how a design variant is represented, and what the field costs
-- [ribs.md](docs/ribs.md) — ribs from intent: the rib card, the spec, placements, the verdict
+- [ribs.md](docs/ribs.md) — the design space from the engineer's words: the study, the rib graph,
+  the solver, objections that become rules, the card
+- [build-plan.md](docs/build-plan.md) — the steps, in order, and what shows each one done
 - [tasks.md](docs/tasks.md) — how the system asks a person for work; designed, not built
 - [verification.md](docs/verification.md) — the human-verification workflow; designed, not built
 - [status.md](docs/status.md) — what is true today, what is unverified, what is next

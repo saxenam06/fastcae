@@ -16,9 +16,16 @@ The arc, in the order it runs:
 and back: what is learned and the objectives set steer which designs are sampled next.
 
 Generate leads because it is the thing a solver cannot do: the campaign, the training set and the
-search all exist to serve designs that had to be generated first. What is generated comes from the
-engineer's intent - faces selected on the part and a rib card of values and words - written as a
-spec that designs follow - see [ribs.md](ribs.md).
+search all exist to serve designs that had to be generated first. Generative design in CAD tools
+gives a handful of optimal shapes per setup; this gives thousands of near-production variants that
+follow the engineer's rules, for a surrogate to find designs good on several objectives at once.
+What is generated comes from a **study** the engineer states in words and clicks - what may vary,
+what must hold, what is preferred, in the part's named entities - written by a model and checked by
+code; designs are made and checked by code alone - see [ribs.md](ribs.md).
+
+**What leaves the engineer's machine** is only what a model is sent: the study and summaries of
+named entities, names and numbers - never CAD files or meshes. The provider is a setting, so a
+client's approved one or a local model can take its place.
 
 Extract and Model are built; Generate is being built. The other three are shown in the interface
 and not yet implemented — a shell that hides its unbuilt stages describes a tool; one that shows
