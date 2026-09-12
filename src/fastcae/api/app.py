@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 
 from .. import cache
 from .. import spec as specs
+from .. import study as studies
 from ..extract import Extraction
 from ..extract import run as run_extract
 from ..features import extent as feature_extent
@@ -44,10 +45,11 @@ from ..generate.primitives import Slab
 from ..generate.session import (
     Session,
     design_from_spec,
+    design_from_study,
     paths_for_card,
     refill,
     verdict,
-    write_from_card,
+    write_study_from_card,
 )
 from ..generate.shading import corner_normals
 from ..generate.slots import CardError
@@ -1377,6 +1379,12 @@ class SpecDesignRequest(BaseModel):
     levers: dict[str, float] = Field(default_factory=dict)
 
 
+class StudyDesignRequest(BaseModel):
+    fidelity: Literal["preview", "full"] = "preview"
+    values: dict[str, Any] = Field(default_factory=dict)
+    """Free settings at other values than suggested, by name: ``{"count": 10}``."""
+
+
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
     selection: list[int] = Field(default_factory=list)
@@ -1416,6 +1424,39 @@ def post_spec_design(request: SpecDesignRequest) -> dict:
     """A design from the active spec, and its verdict."""
     context = _intent()
     reply = design_from_spec(context, request.fidelity, request.levers)
+    if "cannot" in reply:
+        raise HTTPException(409, reply["cannot"])
+    _hold_design(context)
+    return reply
+
+
+@app.get("/api/study")
+def get_study() -> dict:
+    """The active study: its versions, the current one in full, what it holds that nothing
+    enforces yet, and what nobody confirmed."""
+    study = studies.active(_project())
+    if study is None:
+        return {"study": None}
+    current = study.current
+    return {
+        "study": study.name,
+        "versions": [
+            {"version": v.version, "created": v.created, "note": v.note, "changes": v.changes}
+            for v in study.versions
+        ],
+        "current": current.model_dump(),
+        "shown": studies.shown(current),
+        "open": studies.open_items(current),
+        "assumed": studies.assumed(current),
+    }
+
+
+@app.post("/api/study/design")
+def post_study_design(request: StudyDesignRequest) -> dict:
+    """A design from the active study - at its suggested point, or at the values given - and its
+    verdict."""
+    context = _intent()
+    reply = design_from_study(context, request.fidelity, request.values)
     if "cannot" in reply:
         raise HTTPException(409, reply["cannot"])
     _hold_design(context)
@@ -1478,12 +1519,12 @@ def post_card_paths() -> dict:
 
 @app.post("/api/card/design")
 def post_card_design(request: CardDesign) -> dict:
-    """Write the card as a new version of the spec, and make a design from it."""
+    """Write the card as a new version of the study, and make a design from it."""
     context = _intent()
-    written = write_from_card(context)
+    written = write_study_from_card(context)
     if "cannot" in written:
         raise HTTPException(409, written["cannot"])
-    reply = design_from_spec(context, request.fidelity, {})
+    reply = design_from_study(context, request.fidelity)
     if "cannot" in reply:
         raise HTTPException(409, reply["cannot"])
     _hold_design(context)
