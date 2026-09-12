@@ -212,38 +212,9 @@ def write(
     spec = load(project, name) or Spec(name=name)
     previous = spec.versions[-1] if spec.versions else None
 
-    words = list(previous.words) if previous else []
-    known = {w.text for w in words}
-    these: list[str] = []
-    for quote in quotes:
-        quote = quote.strip()
-        if not quote:
-            continue
-        if not any(quote in text for text in said):
-            raise SpecError(f"the engineer never said {quote!r}; quote their words exactly")
-        if quote not in known:
-            said_so_far = sum(1 for w in words if not w.faces)
-            words.append(Words(id=f"w{said_so_far + 1}", text=quote))
-            known.add(quote)
-        these.append(next(w.id for w in words if w.text == quote and not w.faces))
-    if selected:
-        chosen = sorted({int(f) for f in selected})
-        made = {int(f) for selection in selections or [] for f in selection}
-        missing = [f for f in chosen if f not in made]
-        if missing:
-            raise SpecError(
-                f"the engineer never selected {', '.join(f'face:{f}' for f in missing)}"
-            )
-        if not any(w.faces == chosen for w in words):
-            count = sum(1 for w in words if w.faces) + 1
-            words.append(
-                Words(
-                    id=f"s{count}",
-                    text="selected " + ", ".join(f"face:{f}" for f in chosen),
-                    faces=chosen,
-                )
-            )
-        these.append(next(w.id for w in words if w.faces == chosen))
+    words, these = gather_words(
+        previous.words if previous else [], quotes, said, selected, selections
+    )
     word_ids = {w.id for w in words}
     added = [
         w.id for w in words if w.id not in {x.id for x in (previous.words if previous else [])}
@@ -277,6 +248,54 @@ def write(
     path.write_text(spec.model_dump_json(indent=2) + "\n", encoding="utf-8")
     project.write_data("spec", name)
     return version
+
+
+def gather_words(
+    kept: list[Words],
+    quotes: list[str],
+    said: list[str],
+    selected: list[int] | None,
+    selections: list[list[int]] | None,
+) -> tuple[list[Words], list[str]]:
+    """The words a new version holds - those ``kept`` from the last, and the ``quotes`` and the
+    ``selected`` faces it adds - and the ids of the ones it is written from.
+
+    A quote must appear exactly in ``said``, what the engineer typed; selected faces must be among
+    the ``selections`` they made. Anything else is refused: a spec never puts words in their mouth.
+    """
+    words = list(kept)
+    known = {w.text for w in words}
+    these: list[str] = []
+    for quote in quotes:
+        quote = quote.strip()
+        if not quote:
+            continue
+        if not any(quote in text for text in said):
+            raise SpecError(f"the engineer never said {quote!r}; quote their words exactly")
+        if quote not in known:
+            said_so_far = sum(1 for w in words if not w.faces)
+            words.append(Words(id=f"w{said_so_far + 1}", text=quote))
+            known.add(quote)
+        these.append(next(w.id for w in words if w.text == quote and not w.faces))
+    if selected:
+        chosen = sorted({int(f) for f in selected})
+        made = {int(f) for selection in selections or [] for f in selection}
+        missing = [f for f in chosen if f not in made]
+        if missing:
+            raise SpecError(
+                f"the engineer never selected {', '.join(f'face:{f}' for f in missing)}"
+            )
+        if not any(w.faces == chosen for w in words):
+            count = sum(1 for w in words if w.faces) + 1
+            words.append(
+                Words(
+                    id=f"s{count}",
+                    text="selected " + ", ".join(f"face:{f}" for f in chosen),
+                    faces=chosen,
+                )
+            )
+        these.append(next(w.id for w in words if w.faces == chosen))
+    return words, these
 
 
 def _expand(placement: dict[str, Any], stands_for: dict[str, list[str]]) -> dict[str, Any]:
@@ -369,8 +388,9 @@ def fingerprint(features: FeatureSet, feature_id: str) -> dict[str, Any]:
     }
 
 
-def rebind(version: Version, features: FeatureSet) -> list[str]:
-    """Where the spec's features no longer match the part it is read against. Empty: all match."""
+def rebind(version: Any, features: FeatureSet) -> list[str]:
+    """Where the features a version names - by ``version.fingerprints`` - no longer match the part
+    it is read against. Empty: all match."""
     problems = []
     tolerance = max(features.diagonal_mm * 1e-4, 1e-3)
     for ref, expected in version.fingerprints.items():
@@ -390,7 +410,7 @@ def rebind(version: Version, features: FeatureSet) -> list[str]:
 # --- what changed -------------------------------------------------------------------------------
 
 
-def changes(previous: Version | None, version: Version) -> list[str]:
+def changes(previous: BaseModel | None, version: BaseModel) -> list[str]:
     """What this version changes, one line each, as ``path: old -> new``."""
     if previous is None:
         return ["first version"]

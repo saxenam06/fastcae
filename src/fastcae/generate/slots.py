@@ -41,6 +41,7 @@ from ..features import (
     turning_with,
     wrap_deg,
 )
+from ..study import layout_of
 from .placement import _frame, host_of
 
 Pattern = Literal["parallel", "grid", "triangle", "radial"]
@@ -159,6 +160,9 @@ class Slot:
     words: str | None = None
     """Its value, written as words the card reads back - where typing over it starts from. None:
     as shown."""
+    basis: dict[str, Any] = field(default_factory=dict)
+    """What the slot was filled from that a study needs besides the value: the plate measured
+    under a thickness, what spokes could turn about, which of its fields the engineer set."""
 
     def row(self) -> dict:
         return {
@@ -198,33 +202,17 @@ class Slots:
         angle = float(self.get("orientation").value or 0.0)
         density = self.get("density").value
         if pattern == "radial":
-            spread = next(
-                (p["value"] for p in self.get("pattern").parts if p.get("field") == "spread"),
-                "across",
+            layout = layout_of(
+                "radial",
+                angle,
+                count=int(density["count"]),
+                centre=self.get("pattern").refs[0],
+                spread=self._spread(),
             )
-            layout = {
-                "kind": "radial",
-                "centre": self.get("pattern").refs[0],
-                "count": int(density["count"]),
-                "phase_deg": angle,
-                "spread": spread,
-            }
+        elif "count" in density:
+            layout = layout_of(pattern, angle, count=int(density["count"]))
         else:
-            # Each family's angle and where its lines sit between lattice points. A triangle grid's
-            # middle family sits on them where the outer two sit halfway, so all three meet.
-            families = {
-                "parallel": [(0.0, 0.5)],
-                "grid": [(0.0, 0.5), (90.0, 0.5)],
-                "triangle": [(0.0, 0.5), (60.0, 0.0), (120.0, 0.5)],
-            }
-            key = "count" if "count" in density else "spacing_mm"
-            layout = {
-                "kind": "parallel" if pattern == "parallel" else "grid",
-                "families": [
-                    {"angle_deg": angle + a, key: density[key], "offset": offset}
-                    for a, offset in families[pattern]
-                ],
-            }
+            layout = layout_of(pattern, angle, spacing=density["spacing_mm"])
         supports = self.get("supports").refs
         return {
             "id": "p1",
@@ -245,6 +233,260 @@ class Slots:
 
     def rules(self) -> dict:
         return {"fillet_floor_mm": self.get("fillet_floor").value}
+
+    def _spread(self) -> str:
+        return next(
+            (p["value"] for p in self.get("pattern").parts if p.get("field") == "spread"),
+            "across",
+        )
+
+    def study(self, cites: list[str]) -> dict[str, Any]:
+        """These slots as a study's entries: one block of ribs whose suggested point is the card, so
+        the block at that point is the placement the card makes. What the engineer set is fixed;
+        what they left open varies over a range read from the part, marked as nobody's choice; the
+        card's rules become constraints with their strength and source. ``cites`` is what the
+        engineer's settings rest on. Refused while anything is needed or wrong."""
+        if not self.ready():
+            raise ValueError("the card is not ready: " + "; ".join(self.needed() + self.problems()))
+
+        def asked(name: str) -> bool:
+            return self.get(name).source in ("you", "selected")
+
+        def locked(name: str, value: Any, unit: str = "") -> dict[str, Any]:
+            source = self.get(name).source if asked(name) else "you"
+            if isinstance(value, str):
+                return {"options": [value], "suggested": value, "source": source, "cites": cites}
+            return {
+                "low": value,
+                "high": value,
+                "step": 1.0,
+                "unit": unit,
+                "suggested": value,
+                "source": source,
+                "cites": cites,
+            }
+
+        pattern_slot = self.get("pattern")
+        pattern, density = pattern_slot.value, self.get("density").value
+        thickness = float(self.get("thickness").value)
+        floor = self.get("fillet_floor").value or 0.0
+        offered = list(pattern_slot.basis.get("offered", []))
+        free: dict[str, dict[str, Any]] = {}
+
+        # Which patterns - every one the floor allows, unless the engineer chose one.
+        if asked("pattern"):
+            free["generator"] = locked("pattern", pattern)
+        else:
+            kinds = ["parallel", "grid", "triangle", *(["radial"] if offered else [])]
+            if pattern not in kinds:
+                kinds.append(pattern)
+            free["generator"] = {
+                "options": kinds,
+                "weights": [1.0] * len(kinds),
+                "suggested": pattern,
+                "basis": "every pattern this floor allows; the card's first",
+            }
+        spokes_possible = "radial" in free["generator"]["options"]
+        if spokes_possible:
+            centre = pattern_slot.refs[0] if pattern_slot.refs else offered[0]
+            if pattern_slot.basis.get("centre_set"):
+                free["centre"] = locked("pattern", centre)
+            else:
+                free["centre"] = {
+                    "options": list(dict.fromkeys([centre, *offered])),
+                    "suggested": centre,
+                    "source": "measured",
+                    "basis": pattern_slot.note or "round things standing round where ribs stand",
+                }
+            spread = self._spread() if pattern == "radial" else "across"
+            if pattern_slot.basis.get("spread_set"):
+                free["spread"] = locked("pattern", spread)
+            else:
+                free["spread"] = {"options": ["across", "round"], "suggested": spread}
+
+        # Which way, and how many.
+        orientation = self.get("orientation")
+        angle = float(orientation.value or 0.0)
+        if asked("orientation"):
+            free["angle_deg"] = locked("orientation", angle, "°")
+        else:
+            top = 359.0 if pattern == "radial" else 179.0
+            free["angle_deg"] = {
+                "low": min(0.0, angle),
+                "high": max(top, angle),
+                "step": 15.0,
+                "unit": "°",
+                "suggested": angle,
+                "source": "measured" if orientation.source == "measured" else "default",
+                "basis": orientation.note,
+            }
+        pitch = round(8.0 * thickness / 10.0) * 10.0 or 10.0
+        spacing_range = {
+            "low": max(10.0, math.floor(5.0 * thickness / 10.0) * 10.0),
+            "high": math.ceil(16.0 * thickness / 10.0) * 10.0,
+            "step": 10.0,
+            "unit": "mm",
+            "basis": "5 to 16 thicknesses apart",
+        }
+        count_range = {"low": 4, "high": 16, "step": 1, "basis": "4 to 16 ribs"}
+        if "count" in density:
+            count = int(density["count"])
+            if asked("density"):
+                free["count"] = locked("density", count)
+            else:
+                free["count"] = {**count_range, "suggested": count}
+                free["spacing_mm"] = {**spacing_range, "suggested": pitch}
+        else:
+            spacing = float(density["spacing_mm"])
+            if asked("density"):
+                free["spacing_mm"] = locked("density", spacing, "mm")
+            else:
+                free["spacing_mm"] = {**spacing_range, "suggested": spacing}
+            if spokes_possible:
+                free["count"] = {**count_range, "suggested": DEFAULT_SPOKES}
+
+        # The section, and how tall.
+        plate = self.get("thickness").basis.get("plate_mm")
+        if asked("thickness"):
+            free["thickness_mm"] = locked("thickness", thickness, "mm")
+        elif plate:
+            free["thickness_mm"] = {
+                "low": min(thickness, round(0.6 * plate * 2.0) / 2.0),
+                "high": max(thickness, round(1.0 * plate * 2.0) / 2.0),
+                "step": 1.0,
+                "unit": "mm",
+                "suggested": thickness,
+                "source": "measured",
+                "basis": f"0.6 to 1.0 of the {plate:.1f} mm plate it stands on",
+            }
+        else:
+            free["thickness_mm"] = {
+                "low": 0.5 * thickness,
+                "high": 1.25 * thickness,
+                "step": 0.5,
+                "unit": "mm",
+                "suggested": thickness,
+            }
+        for name, slot, most in (
+            ("root_fillet_mm", "root_fillet", thickness),
+            ("edge_round_mm", "edge_round", thickness / 2.0),
+        ):
+            value = float(self.get(slot).value)
+            if asked(slot):
+                free[name] = locked(slot, value, "mm")
+                continue
+            radii = sorted({*(r for r in RADII_MM if floor <= r <= most), value})
+            free[name] = {
+                "options": radii,
+                "suggested": value,
+                "unit": "mm",
+                "source": "drawing" if self.get(slot).source == "drawing" else "default",
+                "basis": f"from the smallest radius the part allows to {most:g} mm",
+            }
+        draft = float(self.get("draft").value)
+        free["draft_deg"] = (
+            locked("draft", draft, "°")
+            if asked("draft")
+            else {
+                "options": sorted({0.5, 1.0, 1.5, 2.0, 3.0, draft}),
+                "suggested": draft,
+                "unit": "°",
+                "basis": self.get("draft").note,
+            }
+        )
+        height = self.get("height")
+        top_kind = height.value.get("top", "slope")
+        free["top"] = (
+            locked("height", top_kind)
+            if height.basis.get("top_set")
+            else {"options": ["slope", "level"], "suggested": top_kind}
+        )
+        free["height_fraction"] = {
+            "low": 0.5,
+            "high": 1.0,
+            "step": 0.1,
+            "suggested": 1.0,
+            "basis": "from half to all of what each end meets",
+        }
+
+        constraints: list[dict[str, Any]] = []
+        keep = self.get("keep_out")
+        for kept in keep.value or []:
+            chosen = asked("keep_out")
+            constraints.append(
+                {
+                    "kind": "keep_clear_of",
+                    "refs": list(kept["features"]),
+                    "params": {"clearance_mm": kept["clearance_mm"]},
+                    "strength": "hard" if chosen else "assumed",
+                    "source": keep.source if chosen else "default",
+                    "text": keep.shown,
+                    "basis": keep.note,
+                    "cites": cites if chosen else [],
+                }
+            )
+        said_by = height.source if asked("height") else "you"
+        if height.value.get("not_above"):
+            constraints.append(
+                {
+                    "kind": "not_above",
+                    "refs": list(height.value["not_above"]),
+                    "source": said_by,
+                    "cites": cites,
+                }
+            )
+        if height.value.get("max_mm"):
+            constraints.append(
+                {
+                    "kind": "height_at_most",
+                    "params": {"mm": height.value["max_mm"]},
+                    "source": said_by,
+                    "cites": cites,
+                }
+            )
+        constraints.append({"kind": "within_what_it_meets", "strength": "assumed"})
+        if self.get("supports").refs:
+            constraints.append({"kind": "ends_on", "strength": "assumed"})
+        reference = orientation.basis.get("from")
+        if reference and not orientation.basis.get("spokes"):
+            constraints.append(
+                {
+                    "kind": "square_to" if orientation.basis.get("across") else "along",
+                    "refs": [reference],
+                    "source": orientation.source if asked("orientation") else "you",
+                    "cites": cites,
+                }
+            )
+        smallest = self.get("fillet_floor")
+        if smallest.value is not None:
+            from_drawing = smallest.source == "drawing"
+            constraints.append(
+                {
+                    "kind": "smallest_radius",
+                    "params": {"radius_mm": smallest.value},
+                    "source": "drawing" if from_drawing else "you",
+                    "basis": smallest.note if from_drawing else "",
+                    "cites": [] if from_drawing else cites,
+                }
+            )
+        host = self.get("host").refs
+        return {
+            "blocks": [
+                {
+                    "id": "b1",
+                    "add": "ribs",
+                    "where": {"support": list(host), "anchors": list(self.get("supports").refs)},
+                    "free": free,
+                    "cites": cites,
+                }
+            ],
+            "constraints": constraints,
+            "pull": {
+                "along": host[0],
+                "basis": "the normal of where ribs stand, which the card stands them along",
+            },
+            "measured": self.measured(),
+        }
 
     def measured(self) -> list[dict]:
         """The numbers the part, the drawing or a default settled - not the engineer - each marked
@@ -462,7 +704,7 @@ def infer(
 
     # --- the section: thickness first, the rest follow from it ------------------------------
     floor, floor_source, floor_note = _fillet_floor(extraction, given)
-    thickness, thickness_source, thickness_note = _thickness(
+    thickness, thickness_source, thickness_note, plate = _thickness(
         extraction, host, normal, given, exit_along
     )
     root = given.root_fillet_mm or (
@@ -537,6 +779,11 @@ def infer(
             pattern_parts,
             problems,
             described,
+            basis={
+                "offered": [ref for ref, _ in offered],
+                "centre_set": given.centre is not None,
+                "spread_set": given.spread is not None,
+            },
         )
     )
 
@@ -608,6 +855,7 @@ def infer(
             orientation_parts,
             problems,
             words=angle_words or f"{round(angle, 1):g}°",
+            basis={"from": given.angle_from, "across": bool(across), "spokes": spokes},
         )
     )
 
@@ -699,6 +947,7 @@ def infer(
             ],
             problems,
             " and ".join(bits),
+            basis={"top_set": given.height_top is not None},
         )
     )
 
@@ -712,6 +961,7 @@ def infer(
             [],
             thickness_note,
             [_number("thickness_mm", "", thickness, "mm", 0.5, 0.5)],
+            basis={"plate_mm": plate} if plate else {},
         )
     )
     problems = []
@@ -1631,10 +1881,22 @@ def _long_axis_deg(extraction: Extraction, host: Feature) -> float:
 
 
 def _thickness(extraction, host, normal, given, exit_along):
+    """The rib's thickness, where it came from, why - and the plate measured under it, if any."""
+    through = _plate(extraction, host, normal, exit_along)
     if given.thickness_mm is not None:
-        return given.thickness_mm, "you", ""
+        return given.thickness_mm, "you", "", through
     if host is None or normal is None or exit_along is None:
-        return None, "needed", "how thick"
+        return None, "needed", "how thick", None
+    if through is None:
+        return None, "needed", "how thick - the plate under it could not be measured", None
+    rib = round(RIB_TO_PLATE * through * 2.0) / 2.0
+    return rib, "default", f"{RIB_TO_PLATE:g} × the {through:.1f} mm plate it stands on", through
+
+
+def _plate(extraction, host, normal, exit_along) -> float | None:
+    """How thick the plate where ribs stand is, by a ray through it from its largest facet."""
+    if host is None or normal is None or exit_along is None:
+        return None
     tess = extraction.tess
     mine = np.flatnonzero(np.isin(tess.face_id, list(host.face_ids)))
     corners = tess.vertices[tess.triangles[mine]]
@@ -1644,10 +1906,7 @@ def _thickness(extraction, host, normal, given, exit_along):
     # On the face, not at its centroid: the middle of an annulus is its hole.
     start = corners[int(np.argmax(areas))].mean(axis=0) - normal * 0.05
     through = exit_along(start, -normal)
-    if not through:
-        return None, "needed", "how thick - the plate under it could not be measured"
-    rib = round(RIB_TO_PLATE * through * 2.0) / 2.0
-    return rib, "default", f"{RIB_TO_PLATE:g} × the {through:.1f} mm plate it stands on"
+    return float(through) if through else None
 
 
 RADII = re.compile(r"RADII\s*R\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
