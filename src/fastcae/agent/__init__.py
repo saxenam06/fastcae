@@ -1,5 +1,5 @@
 """The agent: a language model with tools over the platform, which turns what an engineer asks
-for into a spec and designs made from it.
+for into a proposed version of the study, for them to accept.
 
 Credentials come from the environment. A ``.env`` at the repository root is read first, before
 anything from LangChain is imported, so tracing and keys are set when those libraries look.

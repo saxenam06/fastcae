@@ -7,7 +7,7 @@ and every call is refused. OpenRouter speaks chat completions, not the Responses
 stays off. Reasoning effort and a pinned upstream provider ride in the request body.
 
 **The conversation** is kept with the project, in SQLite under ``.fastcae/agent/``, one thread at a
-time. What the engineer typed is also kept as text, because a spec may quote only that.
+time. What the engineer typed is also kept as text, because a study may quote only that.
 """
 
 from __future__ import annotations
@@ -174,9 +174,9 @@ class Runtime:
                 for call in message.tool_calls or []:
                     out.append({"role": "tool", "name": call["name"], "args": call.get("args", {})})
             elif isinstance(message, ToolMessage):
-                card = _card(message)
-                if card is not None:
-                    out.append({"role": "proposal", "proposal": card})
+                filled = _draft(message)
+                if filled is not None:
+                    out.append({"role": "draft", **filled})
         return out
 
     # --- a turn ---------------------------------------------------------------------------------
@@ -185,15 +185,16 @@ class Runtime:
         self, message: str, selection: list[int] | None = None, role: str = "auto"
     ) -> Iterator[dict]:
         """Send one message - with the faces selected on the part, if any, and what the engineer
-        said they are for - and yield what happens: text as it comes, tools as they run, cards as
-        they are shown."""
+        said they are for - and yield what happens: text as it comes, tools as they run, the card
+        as it is filled. The selection goes to the agent with the words; only the agent puts it
+        on the card, so a question about a face changes nothing."""
         self.context.said.append(message)
         self._said_path().write_text(json.dumps(self.context.said, indent=1), encoding="utf-8")
+        self.context.questions = 0
         text = message
         if selection:
             chosen = sorted({int(f) for f in selection})
             self.context.selections.append(chosen)
-            self.context.card.use(chosen, role if role in ROLES else "auto")
             self._selections_path().write_text(
                 json.dumps(self.context.selections), encoding="utf-8"
             )
@@ -229,13 +230,11 @@ class Runtime:
                                     "name": call["name"],
                                     "args": call.get("args", {}),
                                 }
-                                if call["name"] == "show_proposal":
-                                    yield {"type": "proposal", "proposal": call.get("args", {})}
                             streamed = False
                         elif isinstance(m, ToolMessage):
-                            card = _card(m)
-                            if card is not None:
-                                yield {"type": "proposal", "proposal": card}
+                            filled = _draft(m)
+                            if filled is not None:
+                                yield {"type": "draft", **filled}
                             yield {
                                 "type": "tool_result",
                                 "id": m.tool_call_id,
@@ -259,14 +258,19 @@ def _text(message: Any) -> str:
     return ""
 
 
-def _card(message: ToolMessage) -> dict | None:
-    """The slot card a tool returned, for the pane to show."""
-    if message.name != "fill_slots":
+def _draft(message: ToolMessage) -> dict | None:
+    """The study, changed by the agent and let through by the checks: what the pane says of it -
+    only what the agent asked the engineer to look at. The study card shows the rest."""
+    if message.name != "edit_study":
         return None
     try:
-        return json.loads(_text(message)).get("card")
-    except (ValueError, TypeError, AttributeError):
+        data = json.loads(_text(message))
+    except (ValueError, TypeError):
         return None
+    if not isinstance(data, dict) or "refused" in data:
+        return None
+    needed = [f"{b['id']}: {n}" for b in data.get("blocks", []) for n in b.get("needed", [])]
+    return {"attention": list(data.get("attention", [])), "needed": needed}
 
 
 def _summary(message: ToolMessage) -> str:
@@ -275,35 +279,44 @@ def _summary(message: ToolMessage) -> str:
         data = json.loads(_text(message))
     except (ValueError, TypeError):
         return _text(message)[:120]
+    if isinstance(data, dict) and "answer" in data and "note" in data:
+        data = data["answer"]
     if isinstance(data, list):
         return f"{len(data)} described"
     if not isinstance(data, dict):
         return str(data)[:120]
-    for key in ("refused", "cannot", "error"):
+    for key in ("refused", "error"):
         if key in data:
             return f"{key}: {data[key]}"[:240]
-    if "outcome" in data:
-        return f"{data['outcome']} - {data.get('ribs', 0)} ribs, {data.get('fidelity')}"
-    if "version" in data:
-        return f"spec version {data['version']}"
-    if isinstance(data.get("card"), dict):
-        needed = data["card"].get("needed") or []
-        return "card shown" + (f", {len(needed)} needed" if needed else ", nothing needed")
-    if "design" in data and isinstance(data["design"], dict):
-        design = data["design"]
-        outcome, ribs = design.get("outcome"), design.get("ribs", 0)
-        return f"spec v{data.get('version')}, preview {outcome} - {ribs} ribs"
-    if "shown" in data:
-        needed = data.get("needed") or []
-        return "card shown" + (f", {len(needed)} needed" if needed else "")
-    if "around" in data:
-        return f"{len(data['around'])} faces around {data.get('face', '')}"
-    if "pairs" in data:
-        return f"{len(data.get('faces', []))} faces, {len(data['pairs'])} pairs"
+    if "accepted_version" in data:
+        if data.get("cannot"):
+            return f"the study cannot be written: {data['cannot']}"[:240]
+        placed = data.get("where_ribs_go")
+        if isinstance(placed, dict) and placed:
+            return "ribs at the suggested point - " + "; ".join(
+                f"{block}: {found['ribs']}" for block, found in placed.items()
+            )
+        changes = len(data.get("changes", []))
+        return f"the study: {changes} changes" if changes else "the study, as accepted"
+    if "entities" in data:
+        return f"{len(data['entities'])} described"
+    if "axes" in data:
+        return f"{len(data['axes'])} axes"
+    if "found" in data:
+        return f"{data.get('total', len(data['found']))} found"
+    if "round" in data and "floor" in data:
+        return f"{len(data['round'])} things rise round {', '.join(data['floor'])}"
+    if "between" in data:
+        return f"between {', '.join(data['between'])}: {data.get('says', '')}"[:240]
+    if isinstance(data, dict) and all(isinstance(v, dict) and "across" in v for v in data.values()):
+        return "; ".join(
+            f"across from {ref}: {v['across'][0]['ref']}" if v["across"] else f"{ref}: open"
+            for ref, v in data.items()
+        )[:240]
     if "low_mm" in data:
         return f"{data['low_mm']} to {data['high_mm']} mm"
+    if "metal_under_it_mm" in data:
+        return f"{data['metal_under_it_mm']} mm of metal"
     if "total" in data:
         return f"{data['total']} found"
-    if "spec" in data:
-        return "no spec yet" if data["spec"] is None else f"spec {data.get('name', '')}"
     return "done"
