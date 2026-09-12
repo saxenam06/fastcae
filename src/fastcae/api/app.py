@@ -11,7 +11,6 @@ that part.
 
 from __future__ import annotations
 
-import copy
 import json
 import struct
 import time
@@ -44,16 +43,18 @@ from ..generate.formations import FORMATIONS
 from ..generate.primitives import Slab
 from ..generate.session import (
     Session,
+    accept,
     design_from_spec,
     design_from_study,
-    paths_for_card,
-    refill,
+    design_paths,
+    drop_rule,
+    go,
+    paths,
+    undo,
     verdict,
-    write_study_from_card,
+    view,
 )
 from ..generate.shading import corner_normals
-from ..generate.slots import CardError
-from ..generate.slots import Edit as CardEdit
 from ..generate.surface import CODE as SURFACE_CODE
 from ..generate.surface import Surface, contour, surface_for
 from ..project import ASSETS_ROOT, ArtifactKind, Project, classify, discover, open_project
@@ -87,8 +88,9 @@ class State:
     made: design_space.Design | None = None
     made_blob: bytes | None = None
 
-    # The rib work: the card, the spec it writes and designs made from that - one session, shared
-    # with the agent when there is one, so a design made anywhere is the one the Generate tab shows.
+    # The rib work: the card - the draft of the study - the study and designs made from it; one
+    # session, shared with the agent when there is one, so the card the agent fills is the one
+    # the engineer sees, and a design made anywhere is the one the Generate tab shows.
     intent: Any = None
     agent: Any = None
     made_verdict: dict | None = None
@@ -793,6 +795,30 @@ def get_select_feature(feature_id: str) -> dict:
     return _selection(result, set(feature.face_ids), feature.describe())
 
 
+class RefsRequest(BaseModel):
+    refs: list[str] = Field(min_length=1)
+    """Features and faces by name: ``hole:3``, ``face:1453``."""
+
+
+@app.post("/api/select/refs")
+def post_select_refs(request: RefsRequest) -> dict:
+    """Every face of some features and faces at once - to show on the part what a study names,
+    two hundred holes as quickly as one."""
+    result = extracted()
+    assert result.features is not None
+    faces: set[int] = set()
+    missing = []
+    for ref in request.refs:
+        found = result.features.get(ref)
+        if found is None:
+            missing.append(ref)
+        else:
+            faces |= set(found.face_ids)
+    if missing:
+        raise HTTPException(404, f"no {', '.join(missing[:5])} on the part")
+    return _selection(result, faces, f"{len(request.refs)} named")
+
+
 # --- generate ----------------------------------------------------------------------------------
 
 
@@ -1379,12 +1405,6 @@ class SpecDesignRequest(BaseModel):
     levers: dict[str, float] = Field(default_factory=dict)
 
 
-class StudyDesignRequest(BaseModel):
-    fidelity: Literal["preview", "full"] = "preview"
-    values: dict[str, Any] = Field(default_factory=dict)
-    """Free settings at other values than suggested, by name: ``{"count": 10}``."""
-
-
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
     selection: list[int] = Field(default_factory=list)
@@ -1394,7 +1414,8 @@ class ChatRequest(BaseModel):
 
 
 def _intent() -> Session:
-    """The rib work on the open project: the card, and designs made from the spec it writes."""
+    """The rib work on the open project: the study's draft, read back from the study when the
+    project opens, and designs made from the study."""
     project, result = _project(), extracted()
     held = _state.intent
     if held is None or held.project.root != project.root or held.extraction is not result:
@@ -1451,84 +1472,118 @@ def get_study() -> dict:
     }
 
 
-@app.post("/api/study/design")
-def post_study_design(request: StudyDesignRequest) -> dict:
-    """A design from the active study - at its suggested point, or at the values given - and its
-    verdict."""
+class StudyRule(BaseModel):
+    id: str = Field(min_length=2)
+    """A rule, preference or objective of the draft, by the id the study card shows."""
+
+
+class StudyPaths(BaseModel):
+    draft: bool = True
+    """The draft's suggested design, rather than the study's as accepted."""
+    design: int | None = None
+    """One of the designs Go made, by its index, rather than a suggested one."""
+
+
+class StudyGo(BaseModel):
+    n: int = Field(default=24, ge=1, le=400)
+
+
+@app.get("/api/study/draft")
+def get_study_draft() -> dict:
+    """The study card: the draft of the study's next version - every block by what its ribs stand
+    on, end on and keep clear of, its settings and rules, what is needed and what cannot be built
+    yet - each marked where it differs from the study as accepted."""
+    return {"draft": view(_intent())}
+
+
+@app.post("/api/study/accept")
+def post_study_accept() -> dict:
+    """Write the draft as the study's next version, and the draft as read back from it."""
     context = _intent()
-    reply = design_from_study(context, request.fidelity, request.values)
+    reply = accept(context)
     if "cannot" in reply:
         raise HTTPException(409, reply["cannot"])
-    _hold_design(context)
-    return reply
+    return {**reply, "draft": view(context)}
 
 
-# --- the rib card ---------------------------------------------------------------------------------
+@app.post("/api/study/undo")
+def post_study_undo() -> dict:
+    """Forget what was not accepted: the draft as the study has it."""
+    return {"draft": undo(_intent())}
 
 
-class CardStart(BaseModel):
-    selection: list[int] = Field(default_factory=list)
-    """The faces selected on the part: where ribs stand, and what they run between."""
-
-
-class CardEdits(BaseModel):
-    edits: list[CardEdit] = Field(min_length=1)
-
-
-class CardDesign(BaseModel):
-    fidelity: Literal["preview", "full"] = "preview"
-
-
-@app.get("/api/card")
-def get_card() -> dict:
-    """The rib card as it stands: every slot, where its value came from, what is wrong."""
-    return refill(_intent())
-
-
-@app.post("/api/card/start")
-def post_card_start(request: CardStart) -> dict:
-    """Start the card again from faces selected on the part."""
+@app.post("/api/study/rules/drop")
+def post_study_rule_drop(request: StudyRule) -> dict:
+    """Take out a rule the words put in or the part suggested - or a preference, an objective."""
     context = _intent()
-    context.card.begin(request.selection)
-    return refill(context)
-
-
-@app.post("/api/card")
-def post_card(request: CardEdits) -> dict:
-    """Change the card: a value, faces, or words, slot by slot. Nothing is kept if any edit is
-    refused."""
-    context = _intent()
-    before = copy.deepcopy(context.card)
     try:
-        for edit in request.edits:
-            context.card.edit(edit)
-    except CardError as error:
-        context.card = before
-        raise HTTPException(422, str(error)) from error
-    return refill(context)
+        drop_rule(context, request.id)
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+    return {"draft": view(context)}
 
 
-@app.post("/api/card/paths")
-def post_card_paths() -> dict:
-    """Where the card would put ribs, as lines on the part, before any design is made."""
-    reply = paths_for_card(_intent())
+@app.post("/api/study/paths")
+def post_study_paths(request: StudyPaths) -> dict:
+    """Where ribs would go, as lines on the part, before anything is made: the draft's suggested
+    design, the study's, or one of the designs Go made."""
+    context = _intent()
+    if request.design is not None:
+        reply = design_paths(context, request.design)
+    else:
+        reply = paths(context, draft=request.draft)
     if "cannot" in reply:
         raise HTTPException(409, reply["cannot"])
     return reply
 
 
-@app.post("/api/card/design")
-def post_card_design(request: CardDesign) -> dict:
-    """Write the card as a new version of the study, and make a design from it."""
+class StudyDesign(BaseModel):
+    fidelity: Literal["preview", "full"] = "preview"
+    design: int | None = None
+    """One of the designs Go made, by its index; else the study's suggested point."""
+    values: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    """Free settings at other values than suggested, by block and name."""
+
+
+@app.post("/api/study/design")
+def post_study_design(request: StudyDesign) -> dict:
+    """A design from the study - the draft accepted first, if it differs - at its suggested point,
+    at one of the designs Go made, or at the values given; and its verdict."""
     context = _intent()
-    written = write_study_from_card(context)
-    if "cannot" in written:
-        raise HTTPException(409, written["cannot"])
-    reply = design_from_study(context, request.fidelity)
+    draft = view(context)
+    if draft.get("refused"):
+        raise HTTPException(409, draft["cannot"])
+    if draft["differs"]:
+        written = accept(context)
+        if "cannot" in written:
+            raise HTTPException(409, written["cannot"])
+    values = request.values
+    if request.design is not None:
+        if not 0 <= request.design < len(context.designs):
+            raise HTTPException(404, f"there is no design {request.design}")
+        values = context.designs[request.design]["values"]
+    reply = design_from_study(context, request.fidelity, values)
     if "cannot" in reply:
         raise HTTPException(409, reply["cannot"])
     _hold_design(context)
-    return {"version": written["version"], "verdict": reply}
+    return reply
+
+
+@app.post("/api/study/go")
+def post_study_go(request: StudyGo) -> StreamingResponse:
+    """Many designs from the study at once - the draft accepted first, if it differs - each placed
+    and counted as it is done, as a stream of events."""
+    context = _intent()
+
+    def events():
+        for event in go(context, request.n):
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/api/designs/current")
