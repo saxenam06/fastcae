@@ -29,6 +29,7 @@ with what changed. ``project.json`` names the active study.
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from dataclasses import dataclass
@@ -43,12 +44,18 @@ from .spec import Measured, SpecError, Words, changes, fingerprint, gather_words
 
 STUDY_DIR = "studies"
 
-# Who set a free setting, or a direction. The first two mean the engineer asked for it.
-Source = Literal["you", "selected", "drawing", "measured", "default"]
-ASKED = ("you", "selected")
+# Who set a free setting, or a direction. The first three mean the engineer asked for it - by
+# hand, by selecting, or in words the agent read.
+Source = Literal["you", "selected", "words", "drawing", "measured", "default"]
+ASKED = ("you", "selected", "words")
 
 # Where a constraint came from.
-Origin = Literal["you", "selected", "drawing", "cad", "default", "rejection"]
+Origin = Literal["you", "selected", "words", "drawing", "cad", "default", "rejection"]
+
+# Who wrote a constraint into the study: the engineer's words; the part, read for a block - what
+# it stands on, the holes through it, the drawing's smallest radius; the platform, closing the
+# part's interfaces - or, left empty, whoever wrote the version.
+By = Literal["", "words", "part", "platform"]
 
 # What the engine can add. A block asking for anything else is kept, and listed as open.
 ADDS = ("ribs",)
@@ -67,7 +74,13 @@ USED = (
     "root_fillet_mm",
     "edge_round_mm",
     "draft_deg",
+    "section",
+    "flange_width_mm",
+    "flange_thickness_mm",
 )
+
+# The shapes a rib's section may take: a plain web, or a web with a flange along its free edge.
+SECTIONS = ("flat", "T")
 
 # Quantities known without physics. Anything else an objective names waits for simulation.
 GEOMETRIC = ("added_mass", "rib_volume", "rib_count", "rib_length", "coverage")
@@ -167,6 +180,8 @@ class Where(BaseModel):
     support: list[str] = Field(default_factory=list)
     anchors: list[str] = Field(default_factory=list)
     span: Literal["union", "within_one", "must_bridge"] = "union"
+    read_off: list[Literal["support", "anchors"]] = Field(default_factory=list)
+    """Which of these nobody named: read off the part - what rises round the floor, say."""
 
 
 class Block(BaseModel):
@@ -177,6 +192,9 @@ class Block(BaseModel):
     where: Where = Field(default_factory=Where)
     free: dict[str, Domain] = Field(default_factory=dict)
     cites: list[str] = Field(default_factory=list)
+    relaxed: list[dict[str, Any]] = Field(default_factory=list)
+    """Rules the part suggested for this block that the engineer took out, by kind and what they
+    name - so they stay out when the block is read off the part again."""
 
 
 class Constraint(BaseModel):
@@ -195,6 +213,7 @@ class Constraint(BaseModel):
     text: str = ""
     cites: list[str] = Field(default_factory=list)
     confirmed: bool = False
+    by: By = ""
 
     @model_validator(mode="after")
     def _source_follows_strength(self) -> Constraint:
@@ -215,7 +234,7 @@ class Preference(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
     block: str | None = None
     weight: float = Field(default=1.0, gt=0.0)
-    source: Literal["you", "selected", "default"] = "you"
+    source: Literal["you", "selected", "words", "default"] = "you"
     cites: list[str] = Field(default_factory=list)
 
 
@@ -227,7 +246,7 @@ class Objective(BaseModel):
     sense: Literal["min", "max"]
     refs: list[str] = Field(default_factory=list)
     text: str = ""
-    source: Literal["you", "selected", "default"] = "you"
+    source: Literal["you", "selected", "words", "default"] = "you"
     cites: list[str] = Field(default_factory=list)
 
     @property
@@ -398,7 +417,19 @@ def active(project: Project) -> Study | None:
     return load(project, name) if name else None
 
 
-def write(
+def write(project: Project, name: str, **entries: Any) -> StudyVersion:
+    """A new version of the study, checked as :func:`build` checks it, written, and made active."""
+    version = build(project, name, **entries)
+    study = load(project, name) or Study(name=name)
+    study.versions.append(version)
+    path = path_of(project, name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(study.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    project.write_data("study", name)
+    return version
+
+
+def build(
     project: Project,
     name: str,
     *,
@@ -416,7 +447,8 @@ def write(
     selected: list[int] | None = None,
     selections: list[list[int]] | None = None,
 ) -> StudyVersion:
-    """A new version of the study, checked, written, and made active.
+    """The next version of the study, checked, and nothing written - what a proposal is before
+    the engineer accepts it.
 
     ``quotes`` are the engineer's words this version adds, each exactly as it appears in ``said``;
     ``selected`` is a set of faces they selected, among the ``selections`` they made. Cites of
@@ -486,11 +518,6 @@ def write(
 
     version.fingerprints = {ref: fingerprint(features, ref) for ref in sorted(_refs(version))}
     version.changes = changes(previous, version)
-    study.versions.append(version)
-    path = path_of(project, name)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(study.model_dump_json(indent=2) + "\n", encoding="utf-8")
-    project.write_data("study", name)
     return version
 
 
@@ -551,7 +578,17 @@ def _refs(version: StudyVersion) -> set[str]:
     if version.pull is not None and version.pull.along:
         refs.add(version.pull.along)
     refs |= {m.on for m in version.measured}
-    return refs
+    return {r for r in refs if not r.startswith(RIBS)}
+
+
+# The ribs of a block, named like any other entity - ``ribs:b1`` - so any rule that names entities
+# can name them: kept clear of, stayed below.
+RIBS = "ribs:"
+
+
+def ribs_of(ref: str) -> str | None:
+    """The block whose ribs a ref names, or None for an entity of the part."""
+    return ref[len(RIBS) :] if ref.startswith(RIBS) else None
 
 
 def _problems(version: StudyVersion, word_ids: set[str], features: FeatureSet) -> list[str]:
@@ -595,6 +632,13 @@ def _problems(version: StudyVersion, word_ids: set[str], features: FeatureSet) -
         unknown_cites(c.id, c.cites)
         if c.block is not None and c.block not in block_ids:
             problems.append(f"{c.id} applies to {c.block}, which is not a block")
+        for other in (ribs_of(r) for r in c.refs):
+            if other is None:
+                continue
+            if other not in block_ids:
+                problems.append(f"{c.id} names the ribs of {other}, but there is no block {other}")
+            elif other == c.block:
+                problems.append(f"{c.id}: {other} cannot keep clear of its own ribs")
         kind = KINDS.get(c.kind)
         if kind is not None:
             lacking = [p for p in kind.needs if p not in c.params]
@@ -637,6 +681,31 @@ def open_items(version: StudyVersion) -> list[str]:
     if version.pull is None and version.blocks:
         items.append("the pull direction is not given: which way does the part leave its mould?")
     return items
+
+
+def meaning(version: StudyVersion) -> dict[str, Any]:
+    """What a version says about the designs, apart from who wrote it down and when: its entries
+    without their ids, the words they cite, or the card they were filled on - so two versions that
+    make the same designs under the same rules mean the same."""
+
+    def plain(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {k: plain(v) for k, v in value.items() if k not in ("id", "cites", "card")}
+        if isinstance(value, list):
+            return [plain(v) for v in value]
+        return value
+
+    def unordered(items: list[BaseModel]) -> list[str]:
+        return sorted(json.dumps(plain(i.model_dump()), sort_keys=True) for i in items)
+
+    return {
+        "blocks": [plain(b.model_dump()) for b in version.blocks],
+        "constraints": unordered(version.constraints),
+        "prefer": unordered(version.prefer),
+        "objectives": unordered(version.objectives),
+        "pull": plain(version.pull.model_dump()) if version.pull is not None else None,
+        "target": version.target.model_dump(),
+    }
 
 
 def shown(version: StudyVersion) -> dict[str, Any]:
@@ -747,12 +816,19 @@ def point(
     else:
         layout = layout_of(generator, angle, count=chosen.get("count"))
 
-    # What ribs keep clear of: every feature at the largest clearance any rule asks for it.
+    # What ribs keep clear of: every feature at the largest clearance any rule asks for it - and
+    # the ribs of other blocks, which a design places first.
     widest: dict[str, float] = {}
     cited: dict[float, list[str]] = {}
+    clear_of: dict[str, float] = {}
     for c in (c for c in rules if c.kind == "keep_clear_of"):
         clearance = float(c.params["clearance_mm"])
         for ref in c.refs:
+            other = ribs_of(ref)
+            if other is not None:
+                if other != found.id:
+                    clear_of[other] = max(clear_of.get(other, clearance), clearance)
+                continue
             widest[ref] = max(widest.get(ref, clearance), clearance)
         cited.setdefault(clearance, [])
         cited[clearance] += [x for x in c.cites if x not in cited[clearance]]
@@ -784,15 +860,85 @@ def point(
         "keep_out": keep_out,
         "layout": layout,
         "height": height,
-        "section": {
-            "thickness_mm": float(chosen["thickness_mm"]),
-            "root_fillet_mm": float(chosen["root_fillet_mm"]),
-            "edge_round_mm": float(chosen.get("edge_round_mm") or 0.0),
-            "draft_deg": float(chosen.get("draft_deg") or 0.0),
-        },
+        "section": _section(chosen),
         "connection": "supports" if any(c.kind == "ends_on" for c in rules) else "free",
+        "clear_of": list(clear_of),
+        "clear_of_mm": max(clear_of.values(), default=0.0),
         "cites": list(found.cites),
     }
+
+
+def _section(chosen: dict[str, Any]) -> dict[str, Any]:
+    """A rib's section at the values chosen: a flat web, or a T - the web with a flange along its
+    free edge, as wide and as thick as chosen."""
+    thickness = float(chosen["thickness_mm"])
+    section = {
+        "thickness_mm": thickness,
+        "root_fillet_mm": float(chosen["root_fillet_mm"]),
+        "edge_round_mm": float(chosen.get("edge_round_mm") or 0.0),
+        "draft_deg": float(chosen.get("draft_deg") or 0.0),
+        "shape": str(chosen.get("section") or "flat"),
+    }
+    if section["shape"] == "T":
+        section["flange_width_mm"] = float(chosen.get("flange_width_mm") or 3.0 * thickness)
+        section["flange_thickness_mm"] = float(chosen.get("flange_thickness_mm") or thickness)
+    return section
+
+
+def sample(
+    version: StudyVersion, block: str, n: int, seed: int | None = None
+) -> list[dict[str, Any]]:
+    """``n`` points of a block to make designs at: the suggested point first - as ``{}``, every
+    setting at its suggested value - then a scrambled Sobol spread over every setting that is not
+    fixed, each value snapped to its step or drawn by its choices' weights. Points alike are made
+    once. The same version, block and seed give the same points."""
+    from scipy.stats import qmc
+
+    found = next((b for b in version.blocks if b.id == block), None)
+    if found is None:
+        raise StudyError(f"there is no block {block}")
+    varied = {name: d for name, d in sorted(found.free.items()) if not d.fixed}
+    points: list[dict[str, Any]] = [{}]
+    if not varied or n <= 1:
+        return points[:n]
+    engine = qmc.Sobol(
+        d=len(varied), scramble=True, seed=version.target.seed if seed is None else seed
+    )
+    seen = {json.dumps({}, sort_keys=True)}
+    tries = 0
+    while len(points) < n and tries < 8:
+        tries += 1
+        for row in engine.random(2 ** max(1, math.ceil(math.log2(2 * n)))):
+            values = {
+                name: _at(domain, float(u))
+                for (name, domain), u in zip(varied.items(), row, strict=True)
+            }
+            key = json.dumps(values, sort_keys=True)
+            if key in seen:
+                continue
+            seen.add(key)
+            points.append(values)
+            if len(points) == n:
+                break
+    return points
+
+
+def _at(domain: Domain, u: float) -> Any:
+    """A setting's value a fraction ``u`` of the way through what it may take."""
+    if domain.options is not None:
+        weights = domain.weights or [1.0] * len(domain.options)
+        total = sum(weights)
+        edge = 0.0
+        for option, weight in zip(domain.options, weights, strict=True):
+            edge += weight / total
+            if u < edge:
+                return option
+        return domain.options[-1]
+    assert domain.low is not None and domain.high is not None and domain.step is not None
+    steps = int(math.floor((domain.high - domain.low) / domain.step + 1e-9))
+    index = min(int(u * (steps + 1)), steps)
+    value = domain.low + index * domain.step
+    return round(value, 6)
 
 
 def rules_of(version: StudyVersion) -> dict[str, Any]:
@@ -896,6 +1042,8 @@ def interfaces(
                 "basis": f"the drawing names datum {letter}",
             }
         )
+    for rule in out:
+        rule["by"] = "platform"
     return out
 
 

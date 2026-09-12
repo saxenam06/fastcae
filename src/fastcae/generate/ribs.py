@@ -93,13 +93,25 @@ class _Shape:
         return np.divide(grad, length, out=np.zeros_like(grad), where=length > 0.0)
 
 
+def _flange(t: np.ndarray, h: np.ndarray, width: float, thickness: float, height, rho: float):
+    """Signed distance in a flange's cross-section: a bar ``width`` across and ``thickness`` deep,
+    its top at ``height``, its corners rounded by ``rho``."""
+    rho = min(rho, width / 2.0 * 0.999, thickness / 2.0 * 0.999)
+    qx = np.abs(t) - width / 2.0 + rho
+    qy = np.abs(h - (height - thickness / 2.0)) - thickness / 2.0 + rho
+    outside = np.hypot(np.maximum(qx, 0.0), np.maximum(qy, 0.0))
+    return outside + np.minimum(np.maximum(qx, qy), 0.0) - rho
+
+
 @dataclass(frozen=True)
 class Rib(_Shape):
-    """A drafted plate standing on a line.
+    """A drafted plate standing on a line - or, with a flange, a T.
 
     ``start`` and ``end`` are the line's two ends, on the face or level the rib stands on. The rib
     rises from there along ``pull`` by ``height_mm``, ``thickness_mm`` across at its root. With
     ``end_height_mm`` its top slopes, straight, from ``height_mm`` at its start to that at its end.
+    With ``flange_width_mm`` wider than the web, a flange ``flange_thickness_mm`` deep runs along
+    its top, following the slope: the rib is a T.
     """
 
     start: tuple[float, float, float]
@@ -110,6 +122,17 @@ class Rib(_Shape):
     draft_deg: float = 0.0
     edge_round_mm: float = 0.0
     end_height_mm: float | None = None
+    flange_width_mm: float = 0.0
+    flange_thickness_mm: float = 0.0
+
+    @property
+    def tee(self) -> bool:
+        return self.flange_width_mm > self.thickness_mm and self.flange_thickness_mm > 0.0
+
+    @property
+    def width_mm(self) -> float:
+        """How wide it is at its widest: the flange, for a T."""
+        return self.flange_width_mm if self.tee else self.thickness_mm
 
     @property
     def heights(self) -> tuple[float, float]:
@@ -143,15 +166,26 @@ class Rib(_Shape):
         s, t, h = p @ along, p @ across, p @ up
         low, high = self.heights
         rise = (high - low) / length
+        height = self.height_at(s / length) if rise else self.height_mm
         section = _section(
             t,
             h,
             self.thickness_mm,
-            self.height_at(s / length) if rise else self.height_mm,
+            height,
             self.draft_deg,
             self.edge_round_mm,
             top_scale=1.0 / math.sqrt(1.0 + rise * rise),
         )
+        if self.tee:
+            flange = _flange(
+                t,
+                h,
+                self.flange_width_mm,
+                min(self.flange_thickness_mm, float(np.min(height))),
+                height,
+                self.edge_round_mm,
+            )
+            section = np.minimum(section, flange)
         return _extruded(section, np.abs(s - length / 2.0) - length / 2.0)
 
     def plan_near(self, points: np.ndarray, margin_mm: float) -> np.ndarray:
@@ -162,13 +196,13 @@ class Rib(_Shape):
         return (
             (s >= -margin_mm)
             & (s <= length + margin_mm)
-            & (np.abs(t) <= self.thickness_mm / 2.0 + margin_mm)
+            & (np.abs(t) <= self.width_mm / 2.0 + margin_mm)
         )
 
     def bounds(self, margin_mm: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
         """The axis-aligned box holding the rib, grown by ``margin_mm``."""
         origin, along, across, up, length = self.frame()
-        half = self.thickness_mm / 2.0
+        half = self.width_mm / 2.0
         heights = self.heights
         corners = np.array(
             [

@@ -92,29 +92,38 @@ class Height(BaseModel):
 
 
 class Section(BaseModel):
-    """The rib's cross-section."""
+    """The rib's cross-section: a plain web, or a T - the web with a flange along its top."""
 
     thickness_mm: float = Field(gt=0.0)
     root_fillet_mm: float = Field(gt=0.0)
     draft_deg: float = Field(default=0.0, ge=0.0, lt=30.0)
     edge_round_mm: float = Field(default=0.0, ge=0.0)
+    shape: Literal["flat", "T"] = "flat"
+    flange_width_mm: float = Field(default=0.0, ge=0.0)
+    flange_thickness_mm: float = Field(default=0.0, ge=0.0)
     cites: list[str] = Field(default_factory=list)
 
 
 class Placement(BaseModel):
     """One group of ribs: what they stand on, what they run between, what they avoid.
 
-    ``host`` is where they stand: a flat feature, or faces that lie in one plane.
+    ``host`` is where they stand: a flat feature, or faces that lie in one plane - or nothing, for
+    webs that hang between their ``supports`` with nothing under them. ``pull`` is the way the part
+    leaves its mould, which such webs stand along when what they join allows it.
     """
 
     id: str
-    host: list[str] = Field(min_length=1)
+    host: list[str] = Field(default_factory=list)
     supports: list[str] = Field(default_factory=list)
+    pull: list[float] | None = None
     keep_out: list[KeepOut] = Field(default_factory=list)
     layout: Layout
     height: Height = Field(default_factory=Height)
     section: Section
     connection: Literal["supports", "free"] = "supports"
+    clear_of: list[str] = Field(default_factory=list)
+    """Other placements whose ribs these keep clear of - placed first, their ribs keep-outs."""
+    clear_of_mm: float = Field(default=0.0, ge=0.0)
     cites: list[str] = Field(default_factory=list)
 
     @field_validator("host", mode="before")
@@ -260,17 +269,18 @@ def gather_words(
     """The words a new version holds - those ``kept`` from the last, and the ``quotes`` and the
     ``selected`` faces it adds - and the ids of the ones it is written from.
 
-    A quote must appear exactly in ``said``, what the engineer typed; selected faces must be among
-    the ``selections`` they made. Anything else is refused: a spec never puts words in their mouth.
+    A quote must appear exactly in ``said``, what the engineer typed, or be words already kept -
+    checked when they were first written. Selected faces must be among the ``selections`` they
+    made. Anything else is refused: a spec never puts words in their mouth.
     """
     words = list(kept)
-    known = {w.text for w in words}
+    known = {w.text for w in words if not w.faces}
     these: list[str] = []
     for quote in quotes:
         quote = quote.strip()
         if not quote:
             continue
-        if not any(quote in text for text in said):
+        if quote not in known and not any(quote in text for text in said):
             raise SpecError(f"the engineer never said {quote!r}; quote their words exactly")
         if quote not in known:
             said_so_far = sum(1 for w in words if not w.faces)

@@ -30,7 +30,7 @@ from .checks import Finding, Rules, check
 from .compose import CODE_COMPOSE, Composition, compose, margin_for, window_between
 from .designs import Design, _worst
 from .field import Field, field_for
-from .placement import Placed, place
+from .placement import Placed, place_all
 from .surface import Surface, recontour, surface_for
 
 FIDELITIES = ("preview", "full")
@@ -58,12 +58,21 @@ class Opened:
     surface: Surface
 
     @staticmethod
-    def open(project: Project, extraction: Extraction, version: Version, fidelity: str) -> Opened:
+    def open(
+        project: Project,
+        extraction: Extraction,
+        version: Version,
+        fidelity: str,
+        radius: float | None = None,
+    ) -> Opened:
+        """The part opened at the grid ``fidelity`` asks for: set by the smallest root fillet the
+        placements have - or by ``radius``, to open it once for many designs of one study."""
         if fidelity not in FIDELITIES:
             raise IntentError(f"fidelity is one of {', '.join(FIDELITIES)}")
         if extraction.tess is None:
             raise IntentError("no geometry was read")
-        full = min(p.section.root_fillet_mm for p in version.placements) / 4.0
+        smallest = min(p.section.root_fillet_mm for p in version.placements)
+        full = (radius or smallest) / 4.0
         spacing = full if fidelity == "full" else 2.0 * full
         base, _ = field_for(
             project.root, extraction.tess, extraction.cad_digest, spacing_mm=spacing
@@ -93,10 +102,10 @@ def make(opened: Opened, version: Version, levers: dict[str, float] | None = Non
     assert extraction.tess is not None
     rules = _rules(version)
 
-    placed = {
-        p.id: place(opened.base, extraction.features, extraction.atlas, extraction.tess, p)
-        for p in placements
-    }
+    # Each placement after those whose ribs it keeps clear of.
+    placed = place_all(
+        opened.base, extraction.features, extraction.atlas, extraction.tess, placements
+    )
     ribs = [rib for result in placed.values() for rib in result.ribs]
     radius = min(p.section.root_fillet_mm for p in placements)
 
@@ -245,9 +254,15 @@ def _constraints(placement: Placement, placed: Placed) -> list[Finding]:
     spans = placed.spans
     label = f"placement {placement.id}"
 
-    for keep in placement.keep_out:
+    for index, keep in enumerate(placement.keep_out):
         what = ", ".join([*keep.features, *(f"every {k} on the host" for k in keep.kinds)])
-        gaps = [s["clearance_mm"] for s in spans if s["clearance_mm"] is not None]
+        # Each rule against its own keep-outs: a rib near a face kept 0 mm clear of is not held to
+        # the clearance the holes ask for.
+        gaps = [
+            s["clear_by_rule"][index]
+            for s in spans
+            if s.get("clear_by_rule") and s["clear_by_rule"][index] is not None
+        ]
         rule = f"{keep.clearance_mm:g} mm clear of {what}"
         if not spans:
             outcome, reason = "pass", "no rib to check"
@@ -257,10 +272,13 @@ def _constraints(placement: Placement, placed: Placed) -> list[Finding]:
             nearest = min(gaps)
             ok = nearest >= keep.clearance_mm - 1e-6
             outcome = "pass" if ok else "reject"
-            reason = f"nearest {nearest:.1f} mm, {len(placed.keep_outs)} keep-outs on the host"
+            count = sum(1 for row in placed.keep_outs if row.get("rule", index) == index)
+            reason = f"nearest {nearest:.1f} mm, {count} keep-outs on the host"
+        # One finding per rule: the verdict keeps one finding per check name.
+        name = "keep out" if index == 0 else f"keep out {index + 1}"
         out.append(
             Finding(
-                f"keep out ({label})",
+                f"{name} ({label})",
                 outcome,
                 reason,
                 rule,
