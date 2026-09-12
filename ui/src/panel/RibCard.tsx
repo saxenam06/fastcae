@@ -6,7 +6,8 @@
  * from the selection or taken out, numbers stepped, choices picked from a list, or words typed with
  * faces in them as ids. Words the card cannot read are kept and flagged, never guessed at. When
  * nothing is needed and nothing is wrong, make a design: the card is written as a new version of
- * the spec, and the design is made from that.
+ * the study - its values the suggested point, the part's ranges round them - and the design is made
+ * from that.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -159,7 +160,7 @@ export function RibCard({ project, selection, onShow, onDesign, onPaths }: RibCa
     async (fidelity: "preview" | "full") => {
       setBusy(
         fidelity === "preview"
-          ? "Making a preview: writing the spec, placing the ribs, joining them, checking."
+          ? "Making a preview: writing the study, placing the ribs, joining them, checking."
           : "Making the full design. Minutes on a large part the first time.",
       );
       setProblem(null);
@@ -251,7 +252,7 @@ export function RibCard({ project, selection, onShow, onDesign, onPaths }: RibCa
             <button
               onClick={() => design("preview")}
               disabled={!card.ready || busy !== null}
-              title="Write the card as a new version of the spec and make the design on a coarse grid"
+              title="Write the card as a new version of the study and make the design on a coarse grid"
             >
               Preview
             </button>
@@ -351,7 +352,7 @@ function SlotRow(props: {
           }}
         />
       ) : slot.typed && slot.line && !slot.unread ? (
-        <div className="slot-said" title="Your words, as the spec will quote them">
+        <div className="slot-said" title="Your words, as the study will quote them">
           &ldquo;
           <Said text={said} names={props.names} onShow={props.onShow} />
           &rdquo;
@@ -800,7 +801,8 @@ function VerdictView({ verdict }: { verdict: Verdict }) {
           {verdict.outcome}
         </span>{" "}
         {verdict.ribs} ribs · +{verdict.added_cm3.toLocaleString(undefined, { maximumFractionDigits: 0 })}{" "}
-        cm³ · {verdict.fidelity} · spec v{verdict.spec_version} · {verdict.seconds} s
+        cm³ · {verdict.fidelity} · study v{verdict.study_version ?? verdict.spec_version} ·{" "}
+        {verdict.seconds} s
       </div>
       {notPassed.map((row) => (
         <FindingLine key={row.check} row={row} />

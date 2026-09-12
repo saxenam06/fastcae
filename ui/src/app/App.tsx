@@ -27,7 +27,7 @@ import type {
   Summary,
   SurfaceSummary,
   VoxelCells,
-  SpecInfo,
+  StudyInfo,
   Verdict,
 } from "../api/client";
 import { ModelIndex } from "../panel/ModelIndex";
@@ -94,8 +94,8 @@ export function App() {
   const [calloutFilter, setCalloutFilter] = useState<string | null>(null);
   const [spacings, setSpacings] = useState<FieldOption[]>([]);
 
-  // Generate: the spec the rib card wrote, and the last design made from it.
-  const [specInfo, setSpecInfo] = useState<SpecInfo | null>(null);
+  // Generate: the study the rib card wrote, and the last design made from it.
+  const [studyInfo, setStudyInfo] = useState<StudyInfo | null>(null);
   const [verdict, setVerdict] = useState<Verdict | null>(null);
   const [madeMesh, setMadeMesh] = useState<Mesh | null>(null);
   const [designBusy, setDesignBusy] = useState<string | null>(null);
@@ -222,7 +222,7 @@ export function App() {
 
   useEffect(() => {
     if (view !== "generate" || model === null) return;
-    api.spec().then(setSpecInfo).catch((caught) => setDesignError(String(caught)));
+    api.study().then(setStudyInfo).catch((caught) => setDesignError(String(caught)));
   }, [view, model]);
 
   const showDesign = useCallback(async (made: Verdict) => {
@@ -236,15 +236,15 @@ export function App() {
         fidelity === "preview"
           ? "Making a preview: placing the ribs, joining them, checking. Seconds to minutes."
           : "Making the full design. Minutes on a large part the first time.",
-        async () => showDesign(await api.specDesign(fidelity)),
+        async () => showDesign(await api.studyDesign(fidelity)),
       ),
     [act, showDesign],
   );
 
-  // The rib card wrote the spec and made a design: show it where designs are looked at.
+  // The rib card wrote the study and made a design: show it where designs are looked at.
   const cardDesigned = useCallback(
     async (made: Verdict) => {
-      api.spec().then(setSpecInfo).catch(() => undefined);
+      api.study().then(setStudyInfo).catch(() => undefined);
       setView("generate");
       await showDesign(made);
     },
@@ -279,7 +279,7 @@ export function App() {
     setFieldSurface(null);
     setFieldMesh(null);
     setVoxels(null);
-    setSpecInfo(null);
+    setStudyInfo(null);
     setVerdict(null);
     setMadeMesh(null);
     setView("drawing");
@@ -532,7 +532,7 @@ export function App() {
             <GenerateIndex
               layers={generateLayers}
               onLayers={setGenerateLayers}
-              spec={specInfo}
+              study={studyInfo}
               verdict={verdict}
               onDesign={makeDesign}
               busy={designBusy}

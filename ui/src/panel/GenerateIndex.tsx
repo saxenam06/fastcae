@@ -1,14 +1,17 @@
 /**
- * The rail for the Generate tab: the spec the rib card wrote from what the engineer set, the design
+ * The rail for the Generate tab: the study the rib card wrote from what the engineer set, the design
  * made from it, and that design's verdict.
  *
- * Nothing here decides anything. The spec is written from the card, in the engineer's words and
- * selections; this shows it and makes designs from it. Every verdict lists the engineer's
- * constraints first, each citing the words it came from, then the checks the platform holds every
- * rib to - with any threshold nobody confirmed marked assumed.
+ * Nothing here decides anything. The study is written from the card, in the engineer's words and
+ * selections: what may vary and over what range, what must hold - how firmly, and where each rule
+ * came from - what nothing enforces yet, and what nobody confirmed. This shows it and makes designs
+ * from it. Every verdict lists the engineer's constraints first, each citing the words it came
+ * from, then the checks the platform holds every rib to.
  */
 
-import type { SpecInfo, Verdict, VerdictRow } from "../api/client";
+import { Fragment } from "react";
+
+import type { StudyBlock, StudyConstraint, StudyInfo, Verdict, VerdictRow } from "../api/client";
 
 export interface GenerateLayers {
   /** The part as its CAD describes it. */
@@ -30,7 +33,7 @@ const GENERATE_LABELS: Record<keyof GenerateLayers, string> = {
 interface GenerateIndexProps {
   layers: GenerateLayers;
   onLayers: (layers: GenerateLayers) => void;
-  spec: SpecInfo | null;
+  study: StudyInfo | null;
   verdict: Verdict | null;
   onDesign: (fidelity: "preview" | "full") => void;
   busy: string | null;
@@ -38,9 +41,9 @@ interface GenerateIndexProps {
 }
 
 export function GenerateIndex(props: GenerateIndexProps) {
-  const { spec, verdict } = props;
+  const { study, verdict } = props;
   const working = props.busy !== null;
-  const current = spec?.current;
+  const current = study?.current;
 
   return (
     <nav className="index">
@@ -62,19 +65,19 @@ export function GenerateIndex(props: GenerateIndexProps) {
 
       <section className="section">
         <header>
-          The spec
+          The study
           {current ? (
             <span className="detail">
               {" "}
-              {spec?.spec} · version {current.version}
+              {study?.study} · version {current.version}
             </span>
           ) : null}
         </header>
         <div className="body">
           {!current ? (
             <div className="card-note">
-              No spec yet. Start the rib card from faces on the part and make a design from it:
-              the card is written as the spec first, and designs are made only from that.
+              No study yet. Start the rib card from faces on the part and make a design from it:
+              the card is written as the study first, and designs are made only from that.
             </div>
           ) : (
             <>
@@ -85,17 +88,21 @@ export function GenerateIndex(props: GenerateIndexProps) {
                   </p>
                 ))}
               </div>
-              {current.placements.map((placement) => (
-                <PlacementCard key={String(placement.id)} placement={placement} />
+              {current.blocks.map((block) => (
+                <BlockCard key={block.id} block={block} said={study?.shown?.free[block.id] ?? {}} />
               ))}
-              {current.levers.length ? (
-                <div className="card-note">
-                  Levers:{" "}
-                  {current.levers
-                    .map((lever) => `${lever.path} ${lever.low}–${lever.high}`)
-                    .join(", ")}
-                </div>
-              ) : null}
+              <div className="verdict-part">Must hold</div>
+              <div className="study-rules">
+                {current.constraints.map((constraint) => (
+                  <ConstraintRow
+                    key={constraint.id}
+                    constraint={constraint}
+                    said={study?.shown?.constraints[constraint.id] ?? constraint.kind}
+                  />
+                ))}
+              </div>
+              <Lines title="Not enforced yet" lines={study?.open ?? []} />
+              <Lines title="Assumed - confirm, lock or narrow" lines={study?.assumed ?? []} />
               {current.note ? <div className="card-note">{current.note}</div> : null}
             </>
           )}
@@ -127,64 +134,81 @@ export function GenerateIndex(props: GenerateIndexProps) {
   );
 }
 
-function PlacementCard({ placement }: { placement: Record<string, unknown> }) {
-  const layout = placement.layout as Record<string, unknown> | undefined;
-  const section = placement.section as Record<string, unknown> | undefined;
-  const host = (placement.host as string[] | undefined) ?? [];
-  const supports = (placement.supports as string[] | undefined) ?? [];
-  const keep = (placement.keep_out as Record<string, unknown>[] | undefined) ?? [];
-  const cites = (placement.cites as string[] | undefined) ?? [];
+// The free settings of a block of ribs, as the engineer would name them.
+const SETTING: Record<string, string> = {
+  generator: "patterns",
+  centre: "spokes about",
+  spread: "spokes",
+  angle_deg: "angle",
+  spacing_mm: "spacing",
+  count: "count",
+  thickness_mm: "thickness",
+  root_fillet_mm: "root fillet",
+  edge_round_mm: "edge round",
+  draft_deg: "draft",
+  top: "top",
+  height_fraction: "height",
+};
+
+/** One group of features to add: where, and each setting with what it may take and who said so. */
+function BlockCard({ block, said }: { block: StudyBlock; said: Record<string, string> }) {
+  const anchors = block.where.anchors;
   return (
     <div className="approval">
       <div className="card-head">
-        <span className="card-title">Placement {String(placement.id)}</span>
-        <span className="mono dim">{cites.join(" ")}</span>
+        <span className="card-title">
+          Add {block.add} · {block.id}
+        </span>
+        <span className="mono dim">{block.cites.join(" ")}</span>
       </div>
       <dl className="kv compact">
         <dt>on</dt>
-        <dd className="mono">{host.join(", ")}</dd>
+        <dd className="mono">{block.where.support.join(", ") || "nothing - they hang"}</dd>
         <dt>between</dt>
-        <dd className="mono">{supports.length ? supports.join(", ") : "the host's edges"}</dd>
-        {keep.length ? (
-          <>
-            <dt>clear of</dt>
+        <dd>{anchors.length ? `${anchors.length} faces` : "the edges of where they stand"}</dd>
+        {Object.entries(block.free).map(([name, domain]) => (
+          <Fragment key={name}>
+            <dt>{SETTING[name] ?? name}</dt>
             <dd>
-              {keep
-                .map(
-                  (k) =>
-                    `${[...((k.features as string[]) ?? []), ...((k.kinds as string[]) ?? []).map((kind) => `every ${kind}`)].join(", ")}` +
-                    ` by ${k.clearance_mm} mm`,
-                )
-                .join("; ")}
+              {said[name] ?? ""} <span className="dim">· {domain.source}</span>
             </dd>
-          </>
-        ) : null}
-        <dt>layout</dt>
-        <dd>{layout ? describeLayout(layout) : ""}</dd>
-        <dt>section</dt>
-        <dd>
-          {section
-            ? `${section.thickness_mm} mm thick, R${section.root_fillet_mm} root` +
-              (section.edge_round_mm ? `, R${section.edge_round_mm} edges` : "") +
-              (section.draft_deg ? `, ${section.draft_deg}° draft` : "")
-            : ""}
-        </dd>
+          </Fragment>
+        ))}
       </dl>
     </div>
   );
 }
 
-function describeLayout(layout: Record<string, unknown>): string {
-  if (layout.kind === "radial") {
-    return `${layout.count} spokes about ${layout.centre}`;
-  }
-  const families = (layout.families as Record<string, unknown>[] | undefined) ?? [];
-  return families
-    .map(
-      (f) =>
-        `${f.count ? `${f.count} paths` : `every ${f.spacing_mm} mm`} at ${f.angle_deg ?? 0}°`,
-    )
-    .join(" + ");
+/** A rule every design must satisfy: how firmly - hard, assumed, learned - and where it came from. */
+function ConstraintRow({ constraint, said }: { constraint: StudyConstraint; said: string }) {
+  const from = constraint.basis ? `${constraint.source}: ${constraint.basis}` : constraint.source;
+  return (
+    <div className="study-rule" title={from}>
+      <span className="chip" data-strength={constraint.strength}>
+        {constraint.strength}
+      </span>
+      <span className="mono dim">{constraint.id}</span> {said}
+      {constraint.cites.length ? (
+        <span className="mono dim"> · {constraint.cites.join(" ")}</span>
+      ) : (
+        <span className="dim"> · {constraint.source}</span>
+      )}
+    </div>
+  );
+}
+
+function Lines({ title, lines }: { title: string; lines: string[] }) {
+  if (!lines.length) return null;
+  return (
+    <>
+      <div className="verdict-part">{title}</div>
+      <ul className="study-lines">
+        {lines.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+    </>
+  );
 }
 
 function VerdictCard({ verdict }: { verdict: Verdict }) {
@@ -194,7 +218,7 @@ function VerdictCard({ verdict }: { verdict: Verdict }) {
         This design <span className="chip" data-outcome={verdict.outcome}>{verdict.outcome}</span>
         <span className="detail">
           {" "}
-          {verdict.fidelity} · spec v{verdict.spec_version}
+          {verdict.fidelity} · study v{verdict.study_version ?? verdict.spec_version}
         </span>
       </header>
       <div className="body">
@@ -212,6 +236,7 @@ function VerdictCard({ verdict }: { verdict: Verdict }) {
             <Row key={row.check} row={row} />
           ))}
         </div>
+        <Lines title="Not checked - nothing enforces these yet" lines={verdict.open ?? []} />
         <div className="verdict-part">Checks</div>
         <div className="findings">
           {verdict.checks.map((row) => (

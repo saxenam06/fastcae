@@ -1106,6 +1106,46 @@ button.quiet:hover {
   border-color: var(--conflict);
 }
 
+/* How firmly a study's rule holds: hard - the engineer or the drawing said it; assumed - a default
+   the system took, to confirm or relax; learned - from a rejection the engineer confirmed. */
+.study-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.study-rule {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.study-rule .chip {
+  margin: 0 5px 0 0;
+}
+
+.chip[data-strength="hard"] {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.chip[data-strength="assumed"] {
+  color: var(--running);
+  border-color: var(--running);
+}
+
+.chip[data-strength="learned"] {
+  color: var(--measured);
+  border-color: var(--measured);
+}
+
+.study-lines {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
 .section > header .chip {
   margin-left: 8px;
 }

@@ -358,6 +358,67 @@ export interface SpecInfo {
   current?: SpecVersion;
 }
 
+/** What one free setting of a study may take: a range with a step, or choices. */
+export interface StudyDomain {
+  low: number | null;
+  high: number | null;
+  step: number | null;
+  options: (string | number)[] | null;
+  weights: number[] | null;
+  unit: string;
+  suggested: string | number | null;
+  source: string;
+  basis: string;
+  cites: string[];
+  confirmed: boolean;
+}
+
+export interface StudyBlock {
+  id: string;
+  add: string;
+  where: { support: string[]; anchors: string[]; span: string };
+  free: Record<string, StudyDomain>;
+  cites: string[];
+}
+
+/** Something every design must satisfy, how firmly, and where it came from. */
+export interface StudyConstraint {
+  id: string;
+  kind: string;
+  refs: string[];
+  params: Record<string, unknown>;
+  block: string | null;
+  strength: "hard" | "assumed" | "learned";
+  source: string;
+  basis: string;
+  text: string;
+  cites: string[];
+  confirmed: boolean;
+}
+
+export interface StudyVersion {
+  version: number;
+  created: string;
+  words: SpecWords[];
+  blocks: StudyBlock[];
+  constraints: StudyConstraint[];
+  pull: { direction: number[] | null; along: string | null; source: string; basis: string } | null;
+  target: { n: number; stratify: string; differ_by: number; seed: number };
+  note: string;
+  changes: string[];
+}
+
+/** The active study: the current version, what nothing enforces yet, what nobody confirmed. */
+export interface StudyInfo {
+  study: string | null;
+  versions?: { version: number; created: string; note: string; changes: string[] }[];
+  current?: StudyVersion;
+  /** Every free setting and constraint in words: ``free[block][setting]``, ``constraints[id]``. */
+  shown?: { free: Record<string, Record<string, string>>; constraints: Record<string, string> };
+  open?: string[];
+  assumed?: string[];
+}
+
 export interface VerdictRow {
   check: string;
   outcome: Outcome;
@@ -367,9 +428,12 @@ export interface VerdictRow {
   cites?: string[];
 }
 
-/** A design's verdict: the engineer's constraints first, then the checks. */
+/** A design's verdict: the engineer's constraints first, then the checks - and, for a design made
+ * from a study, what the study holds that nothing enforces yet. */
 export interface Verdict {
   spec_version: number;
+  study?: string;
+  study_version?: number;
   fidelity: "preview" | "full";
   outcome: Outcome;
   ribs: number;
@@ -377,6 +441,8 @@ export interface Verdict {
   seconds: number;
   constraints: VerdictRow[];
   checks: VerdictRow[];
+  open?: string[];
+  assumed?: string[];
 }
 
 /** Where a slot's value came from. */
@@ -511,6 +577,9 @@ export const api = {
   spec: () => getJson<SpecInfo>("/api/spec"),
   specDesign: (fidelity: "preview" | "full", levers: Record<string, number> = {}) =>
     postJson<Verdict>("/api/spec/design", { fidelity, levers }),
+  study: () => getJson<StudyInfo>("/api/study"),
+  studyDesign: (fidelity: "preview" | "full", values: Record<string, unknown> = {}) =>
+    postJson<Verdict>("/api/study/design", { fidelity, values }),
   currentDesign: () => getJson<Verdict>("/api/designs/current"),
   state: () => getJson<SessionState>("/api/state"),
   projects: () => getJson<ProjectRow[]>("/api/projects"),
