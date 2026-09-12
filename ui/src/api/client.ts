@@ -394,6 +394,8 @@ export interface StudyConstraint {
   text: string;
   cites: string[];
   confirmed: boolean;
+  /** Who wrote it into the study: the card, the agent from the engineer's words, the platform. */
+  by: "" | "card" | "words" | "platform";
 }
 
 export interface StudyVersion {
@@ -417,6 +419,58 @@ export interface StudyInfo {
   shown?: { free: Record<string, Record<string, string>>; constraints: Record<string, string> };
   open?: string[];
   assumed?: string[];
+}
+
+/** What happens during one message to the agent, as it happens. ``draft``: the agent filled the
+ * card - the card shows what changed; this carries only what it asked the engineer to look at. */
+export type AgentEvent =
+  | { type: "token"; text: string }
+  | { type: "tool_start"; id?: string; name: string; args?: unknown }
+  | { type: "tool_result"; id?: string; name: string; summary: string }
+  | { type: "draft"; attention: string[]; needed: string[] }
+  | { type: "error"; message: string }
+  | { type: "changed"; what: string[] }
+  | { type: "done" };
+
+/** One entry of the conversation, as the pane shows it. */
+export type AgentMessage =
+  | { role: "engineer"; text: string }
+  | { role: "agent"; text: string }
+  | { role: "tool"; name: string; args: unknown }
+  | { role: "draft"; attention: string[]; needed: string[] };
+
+/** One message to the agent, with the faces selected; each event is handed on as it arrives. */
+async function chat(
+  message: string,
+  selection: number[],
+  onEvent: (event: AgentEvent) => void,
+): Promise<void> {
+  const response = await fetch("/api/agent/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message, selection }),
+  });
+  if (!response.ok || !response.body) {
+    const text = await response.text();
+    throw new Error(text || `the agent answered ${response.status}`);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let cut = buffer.indexOf("\n\n");
+    while (cut >= 0) {
+      const chunk = buffer.slice(0, cut);
+      buffer = buffer.slice(cut + 2);
+      for (const line of chunk.split("\n")) {
+        if (line.startsWith("data: ")) onEvent(JSON.parse(line.slice(6)) as AgentEvent);
+      }
+      cut = buffer.indexOf("\n\n");
+    }
+  }
 }
 
 export interface VerdictRow {
@@ -445,85 +499,104 @@ export interface Verdict {
   assumed?: string[];
 }
 
-/** Where a slot's value came from. */
-export type Source = "you" | "selected" | "drawing" | "measured" | "default" | "needed";
+/** Who a setting or a rule came from: the engineer - by hand, by selecting, or in words the agent
+ * read - the drawing, the part measured, a default. */
+export type Source = "you" | "selected" | "words" | "drawing" | "measured" | "default" | "cad";
 
-/** One control a slot is drawn with: faces, a number, a choice, a switch, or what it holds. */
-export type CardPart =
-  | {
-      type: "faces";
-      field: string;
-      label: string;
-      refs: string[];
-      /** What the part gave when the engineer set nothing - shown, and edited from. */
-      shown?: string[];
-      single?: boolean;
-      /** For a single face, what it could be, with a few words each - picked from a list. */
-      options?: { value: string; label: string }[];
-    }
-  | { type: "list"; label: string; refs: string[] }
-  | {
-      type: "number";
-      field: string;
-      label: string;
-      value: number | null;
-      unit: string;
-      step: number;
-      min: number | null;
-      active: boolean;
-    }
-  | {
-      type: "choice";
-      field: string;
-      label: string;
-      value: string | number | null;
-      options: { value: string | number; label: string }[];
-    }
-  | { type: "toggle"; field: string; label: string; value: boolean };
-
-export interface CardSlot {
-  key: string;
+/** What the study says of one setting of a block: fixed, or what it may take, and who said so. */
+export interface StudySetting {
+  name: string;
   label: string;
-  shown: string;
-  source: Source;
-  refs: string[];
-  note: string;
-  parts: CardPart[];
-  problems: string[];
-  /** What the engineer set in this slot, as they said it. */
-  line: string;
-  /** Whether that line is words they typed, rather than a value they picked. */
-  typed: boolean;
-  /** Its value, written as words the card reads back: where typing over it starts from. */
-  words: string;
-  /** Words typed into this slot that could not be read. */
-  unread: string | null;
+  says: string;
+  source: string;
+  fixed: boolean;
+  basis: string;
+  changed?: boolean;
 }
 
-/** The rib card: every slot a group of ribs needs, and whether it is ready to make ribs from. */
-export interface RibCardData {
-  started: boolean;
-  slots: CardSlot[];
+/** A rule as the study card shows it: in words, how firmly, from where and by whom, and whether
+ * anything enforces it yet - and if not, until when. */
+export interface StudyRule {
+  id: string;
+  kind: string;
+  says: string;
+  strength: "hard" | "assumed" | "learned";
+  source: string;
+  by: "" | "words" | "part" | "platform";
+  refs: string[];
+  params: Record<string, unknown>;
+  basis: string;
+  enforced: boolean;
+  until: string;
+  changed?: boolean;
+}
+
+/** Entities a block's ribs stand on or end on - named, or read off the part. */
+export interface StudyEntities {
+  refs: string[];
+  read_off: boolean;
+  changed?: boolean;
+}
+
+/** One block of the study: what it adds, what its ribs stand on, end on and keep clear of, its
+ * settings and rules, and what it still needs or cannot be built for. */
+export interface StudyBlockView {
+  id: string;
+  add: string;
+  stand_on: StudyEntities;
+  end_on: StudyEntities;
+  keep_clear: StudyRule[];
+  settings: StudySetting[];
+  rules: StudyRule[];
   needed: string[];
   problems: string[];
-  ready: boolean;
-  /** A few words for every face and feature the card names. */
+  cannot: string | null;
+  note: Record<string, string>;
+  changed: boolean;
+}
+
+/** The study card: the draft of the study's next version, against the version last accepted. */
+export interface StudyDraft {
+  accepted: number | null;
+  /** Null when the draft cannot be a version: a check refused it. */
+  differs: boolean | null;
+  changes: string[];
+  cannot: string | null;
+  refused: boolean;
+  blocks: StudyBlockView[];
+  /** Rules for the whole study. */
+  rules: StudyRule[];
+  /** The part's interfaces, closed by the platform. */
+  interfaces: StudyRule[];
+  rest: {
+    prefer: { id: string; says: string; weight: number }[];
+    objectives: { id: string; says: string; physical: boolean }[];
+    pull: { says: string; source: string; basis: string } | null;
+    target: { says: string };
+  } | null;
+  open: string[];
+  assumed: string[];
+  attention: string[];
+  /** A few words for every face and feature the draft names. */
   names: Record<string, string>;
 }
 
-/** One change to one slot. */
-export interface CardEdit {
-  slot: string;
-  field?: string;
-  value?: number | string | boolean | null;
-  add?: string[];
-  remove?: string[];
-  replace?: string[];
-  words?: string;
-  reset?: boolean;
-  /** The faces came from a selection on the part. */
-  selected?: boolean;
+/** One design Go made: its values, block by block, and what became of each block's paths. */
+export interface GoDesign {
+  index: number;
+  values: Record<string, Record<string, unknown>>;
+  ribs: number;
+  blocks: Record<string, { ribs: number; says: string }>;
+  about: Record<string, string>;
 }
+
+/** What happens while Go makes designs, as it happens. */
+export type GoEvent =
+  | { type: "accepted"; version: number }
+  | { type: "started"; version: number; n: number; waiting: string[] }
+  | ({ type: "design" } & GoDesign)
+  | { type: "done"; made: number }
+  | { type: "error"; message: string };
 
 /** One stretch of path the card's layout tried, just off the part, and what became of it. */
 export interface PathLine {
@@ -566,20 +639,55 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+/** Go: many designs from the study, each handed on as it is placed. */
+async function go(n: number, onEvent: (event: GoEvent) => void): Promise<void> {
+  const response = await fetch("/api/study/go", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ n }),
+  });
+  if (!response.ok || !response.body) {
+    const text = await response.text();
+    throw new Error(text || `go answered ${response.status}`);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let cut = buffer.indexOf("\n\n");
+    while (cut >= 0) {
+      const chunk = buffer.slice(0, cut);
+      buffer = buffer.slice(cut + 2);
+      for (const line of chunk.split("\n")) {
+        if (line.startsWith("data: ")) onEvent(JSON.parse(line.slice(6)) as GoEvent);
+      }
+      cut = buffer.indexOf("\n\n");
+    }
+  }
+}
+
 export const api = {
-  card: () => getJson<{ card: RibCardData }>("/api/card"),
-  startCard: (selection: number[]) =>
-    postJson<{ card: RibCardData }>("/api/card/start", { selection }),
-  editCard: (edits: CardEdit[]) => postJson<{ card: RibCardData }>("/api/card", { edits }),
-  cardDesign: (fidelity: "preview" | "full") =>
-    postJson<{ version: number; verdict: Verdict }>("/api/card/design", { fidelity }),
-  cardPaths: () => postJson<CardPaths>("/api/card/paths", {}),
+  studyDraft: () => getJson<{ draft: StudyDraft }>("/api/study/draft"),
+  acceptStudy: () => postJson<{ version: number; draft: StudyDraft }>("/api/study/accept", {}),
+  undoStudy: () => postJson<{ draft: StudyDraft }>("/api/study/undo", {}),
+  dropRule: (id: string) => postJson<{ draft: StudyDraft }>("/api/study/rules/drop", { id }),
+  studyPaths: (which: { draft?: boolean; design?: number } = {}) =>
+    postJson<CardPaths>("/api/study/paths", which),
+  studyDesign: (fidelity: "preview" | "full", design?: number) =>
+    postJson<Verdict>("/api/study/design", { fidelity, design: design ?? null }),
+  go,
   spec: () => getJson<SpecInfo>("/api/spec"),
   specDesign: (fidelity: "preview" | "full", levers: Record<string, number> = {}) =>
     postJson<Verdict>("/api/spec/design", { fidelity, levers }),
   study: () => getJson<StudyInfo>("/api/study"),
-  studyDesign: (fidelity: "preview" | "full", values: Record<string, unknown> = {}) =>
-    postJson<Verdict>("/api/study/design", { fidelity, values }),
+  chat,
+  newChat: () => postJson<{ thread: string }>("/api/agent/new", {}),
+  agentHistory: () =>
+    getJson<{ thread: string; messages: AgentMessage[] }>("/api/agent/history"),
+  selectRefs: (refs: string[]) => postJson<Selection>("/api/select/refs", { refs }),
   currentDesign: () => getJson<Verdict>("/api/designs/current"),
   state: () => getJson<SessionState>("/api/state"),
   projects: () => getJson<ProjectRow[]>("/api/projects"),

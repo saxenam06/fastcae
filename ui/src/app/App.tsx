@@ -37,7 +37,7 @@ import { FieldIndex } from "../panel/FieldIndex";
 import type { GenerateLayers } from "../panel/GenerateIndex";
 import { GenerateIndex } from "../panel/GenerateIndex";
 import { Inspector } from "../panel/Inspector";
-import { RibCard } from "../panel/RibCard";
+import { StudyCard } from "../panel/StudyCard";
 import { Splitter } from "../panel/Splitter";
 import { DrawingStage } from "../stage/DrawingStage";
 import { UploadStage } from "../stage/UploadStage";
@@ -94,11 +94,9 @@ export function App() {
   const [calloutFilter, setCalloutFilter] = useState<string | null>(null);
   const [spacings, setSpacings] = useState<FieldOption[]>([]);
 
-  // Generate: the study the rib card wrote, and the last design made from it.
+  // Generate: the study, and the ribs of the last design made from it.
   const [studyInfo, setStudyInfo] = useState<StudyInfo | null>(null);
-  const [verdict, setVerdict] = useState<Verdict | null>(null);
   const [madeMesh, setMadeMesh] = useState<Mesh | null>(null);
-  const [designBusy, setDesignBusy] = useState<string | null>(null);
   const [designError, setDesignError] = useState<string | null>(null);
   const [generateLayers, setGenerateLayers] = useState<GenerateLayers>({
     geometry: true,
@@ -110,7 +108,9 @@ export function App() {
   const [railWidth, setRailWidth] = useState(() => remembered("fastcae.rail", 300));
   const [cardWidth, setCardWidth] = useState(() => remembered("fastcae.card", 360));
   const [cardOpen, setCardOpen] = useState(true);
-  // Where the rib card would put ribs, drawn on the part before anything is made.
+  // Bumped when the agent changes the study, so the study card reads itself again.
+  const [cardRefresh, setCardRefresh] = useState(0);
+  // Where the study would put ribs, drawn on the part before anything is made.
   const [pathLines, setPathLines] = useState<LineSet | null>(null);
 
   useEffect(() => {
@@ -207,44 +207,33 @@ export function App() {
     }
   }, []);
 
-  // Every Generate action runs through here: one thing at a time, and a failure said plainly.
-  const act = useCallback(async (label: string, action: () => Promise<void>) => {
-    setDesignBusy(label);
-    setDesignError(null);
-    try {
-      await action();
-    } catch (caught) {
-      setDesignError(String(caught));
-    } finally {
-      setDesignBusy(null);
-    }
-  }, []);
-
   useEffect(() => {
     if (view !== "generate" || model === null) return;
     api.study().then(setStudyInfo).catch((caught) => setDesignError(String(caught)));
   }, [view, model]);
 
+  // A design made from the card: its ribs, drawn over the part. Its verdict is on the card.
   const showDesign = useCallback(async (made: Verdict) => {
-    setVerdict(made);
     setMadeMesh(made.ribs > 0 ? await api.designMesh() : null);
   }, []);
 
-  const makeDesign = useCallback(
-    (fidelity: "preview" | "full") =>
-      act(
-        fidelity === "preview"
-          ? "Making a preview: placing the ribs, joining them, checking. Seconds to minutes."
-          : "Making the full design. Minutes on a large part the first time.",
-        async () => showDesign(await api.studyDesign(fidelity)),
-      ),
-    [act, showDesign],
-  );
+  // The study has a new version - the card was accepted: read it again for the rail.
+  const readStudy = useCallback(() => {
+    api
+      .study()
+      .then(setStudyInfo)
+      .catch((caught) => setDesignError(String(caught)));
+  }, []);
 
-  // The rib card wrote the study and made a design: show it where designs are looked at.
+  // The agent filled the card: the card reads itself again, and is shown.
+  const cardFilled = useCallback(() => {
+    setCardRefresh((n) => n + 1);
+    setCardOpen(true);
+  }, []);
+
+  // The study card made a design: show it where designs are looked at.
   const cardDesigned = useCallback(
     async (made: Verdict) => {
-      api.study().then(setStudyInfo).catch(() => undefined);
       setView("generate");
       await showDesign(made);
     },
@@ -280,7 +269,6 @@ export function App() {
     setFieldMesh(null);
     setVoxels(null);
     setStudyInfo(null);
-    setVerdict(null);
     setMadeMesh(null);
     setView("drawing");
   }, []);
@@ -422,10 +410,12 @@ export function App() {
     setActiveSeed(null);
   }, []);
 
+  // Show on the part what the card or the study names: every face of them, in one call.
   const selectRefs = useCallback(
     async (refs: string[]) => {
-      const found = await Promise.all(refs.map((ref) => api.selectFeature(ref).catch(() => null)));
-      selectFaces(found.flatMap((s) => s?.face_ids ?? []));
+      if (!refs.length) return;
+      const found = await api.selectRefs(refs).catch(() => null);
+      if (found) selectFaces(found.face_ids);
     },
     [selectFaces],
   );
@@ -485,10 +475,10 @@ export function App() {
               className="pane-toggle"
               data-open={cardOpen}
               onClick={() => setCardOpen((was) => !was)}
-              title={cardOpen ? "Hide the rib card" : "Show the rib card"}
+              title={cardOpen ? "Hide the study card" : "Show the study card"}
             >
               <RibMark />
-              Rib card
+              Study
             </button>
             <button
               onClick={reextract}
@@ -520,6 +510,7 @@ export function App() {
       {open ? (
         <>
           <div className="rail">
+            <div className="rail-scroll">
             {view === "drawing" ? (
               <DrawingIndex
               steps={model.steps}
@@ -533,9 +524,9 @@ export function App() {
               layers={generateLayers}
               onLayers={setGenerateLayers}
               study={studyInfo}
-              verdict={verdict}
-              onDesign={makeDesign}
-              busy={designBusy}
+              selection={selection?.face_ids ?? []}
+              onShow={selectRefs}
+              onCardChanged={cardFilled}
               error={designError}
             />
           ) : view === "field" ? (
@@ -577,6 +568,7 @@ export function App() {
                 onGrowAngle={setActiveAngle}
               />
             ) : null}
+            </div>
 
             <Splitter side="right" onResize={(d) => setRailWidth((w) => clampPane(w + d))} />
           </div>
@@ -741,11 +733,12 @@ export function App() {
           {cardOpen ? (
             <div className="card-pane">
               <Splitter side="left" onResize={(d) => setCardWidth((w) => clampPane(w - d))} />
-              <RibCard
+              <StudyCard
                 project={session.project?.name ?? null}
-                selection={selection?.face_ids ?? []}
+                refresh={cardRefresh}
                 onShow={selectRefs}
                 onDesign={cardDesigned}
+                onStudyChanged={readStudy}
                 onPaths={setPathLines}
               />
             </div>
@@ -794,7 +787,7 @@ function RibMark() {
 }
 
 const MIN_PANE = 220;
-const MAX_PANE = 640;
+const MAX_PANE = 900;
 
 function clampPane(width: number): number {
   return Math.min(Math.max(width, MIN_PANE), MAX_PANE);

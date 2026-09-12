@@ -14,10 +14,18 @@
 .rail {
   grid-area: index;
   position: relative;
-  overflow: auto;
+  overflow: hidden;
   background: var(--sheet);
   border-right: 1px solid var(--hairline);
   min-width: 0;
+  min-height: 0;
+}
+
+/* What scrolls is inside the column, not the column: its edge stays where the splitter can be
+   grabbed, whatever the column has scrolled to, and never under the scrollbar. */
+.rail-scroll {
+  height: 100%;
+  overflow: auto;
 }
 
 /* The rib card's column, opened and closed from the bar above. */
@@ -1146,6 +1154,90 @@ button.quiet:hover {
   color: var(--muted);
 }
 
+/* Say what you want: the engineer's words to the agent, and what it asks them to look at. */
+.say-what header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.say-what header button {
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.say-what textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 54px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.say-what .actions .dim {
+  font-size: 11px;
+}
+
+.said-line {
+  margin-top: 8px;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--muted);
+}
+
+.agent-reply {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+.study-fold {
+  margin-top: 4px;
+}
+
+.study-fold summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* In the Generate rail: a word that does something - show on the part - rather than a button. */
+.index button.link {
+  border: none;
+  background: none;
+  padding: 0 2px;
+  font-size: 11px;
+  color: var(--blue);
+  cursor: pointer;
+}
+
+.index button.link:hover {
+  text-decoration: underline;
+}
+
+.index .ref-inline {
+  cursor: pointer;
+}
+
+/* What the agent wrote, as plain lines and points. */
+.written p {
+  margin: 0 0 4px;
+}
+
+.written-list {
+  margin: 2px 0 6px;
+  padding-left: 16px;
+}
+
 .section > header .chip {
   margin-left: 8px;
 }
@@ -1465,6 +1557,178 @@ button.quiet:hover {
   background: var(--conflict-wash);
   color: var(--conflict);
   border-color: var(--conflict);
+}
+
+.rib-card .chip[data-source="words"] {
+  background: var(--blue-wash);
+  color: var(--blue);
+  border-color: var(--blue);
+}
+
+/* The card is the draft of the study's next version: a row the draft changes is marked until it
+   is accepted or undone. */
+.rib-slot[data-changed="true"] {
+  background: var(--running-wash);
+  box-shadow: inset 3px 0 0 var(--running);
+}
+
+.rib-card-head .draft-chip {
+  margin-left: 0;
+}
+
+.draft-chip[data-differs="true"] {
+  color: var(--running);
+  border-color: var(--running);
+}
+
+.draft-bar {
+  padding: 7px 12px 8px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--running-wash);
+  font-size: 11.5px;
+}
+
+.draft-bar[data-refused="true"] {
+  background: var(--conflict-wash);
+  color: var(--conflict);
+}
+
+.draft-bar .actions {
+  margin-top: 5px;
+}
+
+/* What the study makes of a row: fixed, or what it may vary over - and the rules it holds. */
+.slot-study {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.slot-study .study-rule,
+.study-extra .study-rule {
+  font-size: 11px;
+  color: var(--ink);
+}
+
+.study-setting .tag,
+.slot-study .tag {
+  display: inline-block;
+  margin-right: 5px;
+  padding: 0 4px;
+  border-radius: 2px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--blue);
+  background: var(--blue-wash);
+}
+
+.study-setting .tag[data-fixed="true"] {
+  color: var(--muted);
+  background: var(--hairline);
+}
+
+.study-rule[data-enforced="false"] > .chip {
+  border-style: dashed;
+}
+
+.rule-until {
+  padding-left: 2px;
+  color: var(--faint);
+  font-size: 10.5px;
+}
+
+.slot-said.heard {
+  padding-left: 6px;
+  border-left: 2px solid var(--blue-wash);
+  font-style: italic;
+}
+
+.study-extra .kv {
+  margin: 2px 0 0;
+}
+
+/* The study card: a block by the entities its ribs stand on, end on and keep clear of, then its
+   settings and rules. What the draft changes is marked until it is accepted or undone. */
+.study-block[data-changed="true"] {
+  box-shadow: inset 3px 0 0 var(--running);
+}
+
+.block-where dd[data-changed="true"],
+.keep-clear[data-changed="true"],
+.study-setting[data-changed="true"],
+.study-rule[data-changed="true"] {
+  background: var(--running-wash);
+}
+
+.block-where dd {
+  margin-bottom: 3px;
+}
+
+.keep-clear {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  margin-bottom: 2px;
+}
+
+.keep-clear .chip {
+  margin: 0 3px 0 0;
+}
+
+.ribs-chip {
+  border-style: dashed;
+  padding: 0 4px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.refs .tag,
+.slot-study .tag {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 2px;
+  font-size: 9.5px;
+  color: var(--muted);
+  background: var(--hairline);
+}
+
+.setting-label {
+  color: var(--ink);
+}
+
+.slot-note.waits {
+  margin-top: 4px;
+  padding: 2px 6px;
+  border-left: 2px solid var(--running);
+  background: var(--running-wash);
+  color: var(--ink);
+}
+
+.go-designs .go-design {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  padding: 2px 0;
+  font-size: 11px;
+  border-bottom: 1px dotted var(--hairline);
+}
+
+.go-design[data-drawn="true"] {
+  background: var(--blue-wash);
+}
+
+.go-design .icon {
+  margin-left: auto;
 }
 
 .slot-parts {
