@@ -158,6 +158,16 @@ SETTING_LABELS = {
     "section": "section",
     "flange_width_mm": "flange width",
     "flange_thickness_mm": "flange thickness",
+    "pads": "pads",
+    "layout": "free layout",
+    "offset_mm": "moved by",
+    "blend_mm": "blended over",
+    "min_wall_mm": "least wall",
+    "pattern": "pattern",
+    "diameter_mm": "diameter",
+    "pitch_mm": "pitch",
+    "edge_mm": "from the edge",
+    "ligament_mm": "ligament",
 }
 # The part's interfaces, which the platform closes on every study.
 CLOSED = ("interface", "datum")
@@ -223,18 +233,26 @@ class Slots:
         pattern = self.get("pattern").value
         angle = float(self.get("orientation").value or 0.0)
         density = self.get("density").value
+        # How many and how far apart, both, as the block's suggested point has them: what was
+        # given, and for the other what the part suggests.
+        thickness = float(self.get("thickness").value)
+        count = int(density["count"]) if "count" in density else DEFAULT_SPOKES
+        spacing = (
+            float(density["spacing_mm"])
+            if "spacing_mm" in density
+            else round(8.0 * thickness / 10.0) * 10.0 or 10.0
+        )
         if pattern == "radial":
             layout = layout_of(
                 "radial",
                 angle,
-                count=int(density["count"]),
+                count=count,
+                spacing=spacing,
                 centre=self.get("pattern").refs[0],
                 spread=self._spread(),
             )
-        elif "count" in density:
-            layout = layout_of(pattern, angle, count=int(density["count"]))
         else:
-            layout = layout_of(pattern, angle, spacing=density["spacing_mm"])
+            layout = layout_of(pattern, angle, count=count, spacing=spacing)
         supports = self.get("supports").refs
         return {
             "id": "p1",
@@ -350,22 +368,28 @@ class Slots:
             "unit": "mm",
             "basis": "5 to 16 thicknesses apart",
         }
-        count_range = {"low": 4, "high": 16, "step": 1, "basis": "4 to 16 ribs"}
+        # How many and how far apart, both, whatever the pattern: the most lines each way or
+        # spokes, and the spacing between them.
+        count_range = {
+            "low": 4,
+            "high": 16,
+            "step": 1,
+            "basis": "4 to 16 lines each way, or spokes",
+        }
         if "count" in density:
             count = int(density["count"])
             if asked("density"):
                 free["count"] = locked("density", count)
             else:
                 free["count"] = {**count_range, "suggested": count}
-                free["spacing_mm"] = {**spacing_range, "suggested": pitch}
+            free["spacing_mm"] = {**spacing_range, "suggested": pitch}
         else:
             spacing = float(density["spacing_mm"])
             if asked("density"):
                 free["spacing_mm"] = locked("density", spacing, "mm")
             else:
                 free["spacing_mm"] = {**spacing_range, "suggested": spacing}
-            if spokes_possible:
-                free["count"] = {**count_range, "suggested": DEFAULT_SPOKES}
+            free["count"] = {**count_range, "suggested": DEFAULT_SPOKES}
 
         # The section, and how tall.
         plate = self.get("thickness").basis.get("plate_mm")

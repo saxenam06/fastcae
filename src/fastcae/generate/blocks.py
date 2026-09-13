@@ -62,8 +62,11 @@ FLANGE_THICKNESS = (0.5, 0.75, 1.0)
 
 # How far faces may move when nothing says: thinned by at most this much - and never below the
 # least a wall may be - or thickened by up to this much.
-THIN_MOST = 4.0
+THIN_MOST = 5.0
 THICK_MOST = 10.0
+
+# What webs with fewer than two things to join need.
+WEBS_JOIN = "what the webs join: two things or more"
 
 
 def described() -> list[dict]:
@@ -100,7 +103,118 @@ def fill(
     ``floor_radius`` is the smallest radius the part allows when the words said it. Returns the
     block's ``where``, its ``free`` settings, the ``rules`` the part suggests for it, ``measured``
     values, the ``pull``, what is ``needed`` and wrong (``problems``), and why nothing can build
-    it yet (``cannot``) - with a ``note`` on where each reading came from."""
+    it yet (``cannot``) - with a ``note`` on where each reading came from.
+
+    Every range the part suggests steps by five in its unit, its ends on fives - a height by five
+    percent - and ribs may take the free pattern among the rest: see :func:`_levers`."""
+    filled = _fill(extraction, exit_along, block, floor_radius)
+    if filled.get("free") is not None:
+        _levers(filled["free"], block.get("add") or "ribs", block.get("given") or {})
+    return filled
+
+
+def start(free: dict[str, dict], kind: str, given: dict[str, Any]) -> None:
+    """Where a variant starts on the card: every choice as likely as the next; and, for ribs, as
+    the knowledge says - how thick, how far apart, how tall, how many - for every setting nobody
+    gave, over what the part read, with a root fillet, edge round and draft each of a few choices -
+    the smallest, the middle and the largest the part offers - the middle one suggested."""
+    # Drawn at random, every choice as likely as the next - no pattern weighted over another.
+    for domain in free.values():
+        domain.pop("weights", None)
+    if kind != "ribs":
+        return
+    start = knowledge.rib_start()
+    basis = str(start["source"])
+    for name in ("thickness_mm", "spacing_mm", "height_fraction"):
+        if name in free and name not in given and name in start:
+            value = float(start[name])
+            free[name] = {**free[name], "low": value, "high": value, "suggested": value}
+            free[name].update(source="default", basis=basis)
+    if "count" in free and "count" not in given and "count" in start:
+        count = start["count"]
+        free["count"] = {
+            **free["count"],
+            **{k: count[k] for k in ("low", "high", "step", "suggested")},
+            "source": "default",
+            "basis": basis,
+        }
+    most = int(start.get("choices") or 3)
+    for name in ("root_fillet_mm", "edge_round_mm", "draft_deg"):
+        domain = free.get(name)
+        if domain is None or name in given or not domain.get("options"):
+            continue
+        options = sorted(domain["options"])
+        if len(options) > most:
+            options = [options[round(k * (len(options) - 1) / (most - 1))] for k in range(most)]
+        free[name] = {**domain, "options": options, "suggested": options[len(options) // 2]}
+        free[name].pop("weights", None)
+
+
+# How far apart what a range takes is, when the part suggests it: five in its own unit - a height,
+# five percent of what its ends meet.
+STEP = 5.0
+HEIGHT_STEP = 0.05
+# The most free layouts a block of ribs draws from: seeds, each the same lines every time.
+LAYOUTS = 9999
+
+
+def _levers(free: dict[str, dict], kind: str, given: dict[str, dict]) -> None:
+    """What a block may vary, as a person would state it: every range the part suggests stepping by
+    five, its ends rounded inward onto fives - kept as they are when that would leave nothing -
+    and, for ribs whose patterns nobody chose, free lines among them: a count of lines, each at an
+    angle of the range and a place across what they stand on, drawn from a layout seed."""
+    if kind == "ribs" and "generator" in free and "generator" not in given:
+        generator = free["generator"]
+        options = list(generator.get("options") or [])
+        if options and "free" not in options:
+            generator["options"] = [*options, "free"]
+            if generator.get("weights") is not None:
+                generator["weights"] = [*generator["weights"], 1.0]
+        if "count" not in free:
+            free["count"] = {"low": 5, "high": 15, "step": 1, "suggested": 10, "basis": "lines"}
+        if "angle_deg" not in free:
+            free["angle_deg"] = {
+                "low": 0.0,
+                "high": 175.0,
+                "step": 5.0,
+                "unit": "°",
+                "suggested": 0.0,
+            }
+        free.setdefault(
+            "layout",
+            {
+                "low": 0,
+                "high": LAYOUTS,
+                "step": 1,
+                "suggested": 0,
+                "basis": "which free layout - the same seed, the same lines",
+            },
+        )
+    for name, domain in free.items():
+        if name in given or name == "layout" or domain.get("options") is not None:
+            continue
+        low, high = domain.get("low"), domain.get("high")
+        if low is None or high is None or low == high:
+            continue
+        step = HEIGHT_STEP if name == "height_fraction" else STEP
+        inner_low = math.ceil(round(float(low) / step, 9)) * step
+        inner_high = math.floor(round(float(high) / step, 9)) * step
+        if inner_low > inner_high:
+            continue
+        domain.update(low=round(inner_low, 6), high=round(inner_high, 6), step=step)
+        suggested = domain.get("suggested")
+        if isinstance(suggested, int | float):
+            snapped = round(float(suggested) / step) * step
+            domain["suggested"] = round(min(max(snapped, inner_low), inner_high), 6)
+
+
+def _fill(
+    extraction: Extraction,
+    exit_along,
+    block: dict[str, Any],
+    floor_radius: float | None = None,
+) -> dict[str, Any]:
+    """Everything ``block`` needs, read off the part - before its ranges are stepped."""
     support = list(block.get("support") or [])
     anchors = list(block.get("anchors") or [])
     given: dict[str, dict] = dict(block.get("given") or {})
@@ -112,7 +226,10 @@ def fill(
     if kind == "material":
         return _material(given)
     if not support:
-        return _pads(_hanging(extraction, exit_along, anchors, given, floor_radius), given)
+        other_side = list(block.get("other_side") or [])
+        return _pads(
+            _hanging(extraction, exit_along, anchors, given, floor_radius, other_side), given
+        )
 
     values: dict[str, Any] = {"host": support}
     if anchors:
@@ -186,6 +303,20 @@ def _pads(filled: dict[str, Any], given: dict[str, dict]) -> dict[str, Any]:
                 "strength": "assumed",
                 "by": "part",
                 "basis": source,
+            },
+        ]
+    # Room for the sand between its ribs and any other: the rule of thumb, the block's own to
+    # change or take out.
+    gap, gap_source = knowledge.rule("root_gap")
+    if not any(rule["kind"] == "root_gap" for rule in filled.get("rules", [])):
+        filled["rules"] = [
+            *filled.get("rules", []),
+            {
+                "kind": "root_gap",
+                "params": {"ratio": gap},
+                "strength": "assumed",
+                "by": "part",
+                "basis": gap_source,
             },
         ]
     if "pads" not in given:
@@ -497,17 +628,19 @@ def _hanging(
     anchors: list[str],
     given: dict[str, dict],
     floor_radius: float | None,
+    other_side: list[str] | None = None,
 ) -> dict[str, Any]:
     """A block with nothing under it: webs between what it joins, filled round what the words gave.
-    They stand along the one direction everything they join runs along, from where the last of it
-    begins; spokes about the round thing among them, largest first, or straight webs square to the
-    largest flat one; as thick as the thinnest of them allows; their tops level with the lower end
-    unless the words say otherwise."""
+    They stand as placing stands them - along the axis of what they run from when that is round,
+    ``other_side`` naming what they run to; else along the one direction everything they join runs
+    along - from where the last of it begins; spokes about the round thing among them, largest
+    first, or straight webs square to the largest flat one; as thick as the thinnest of them
+    allows; their tops level with the lower end unless the words say otherwise."""
     features, tess = extraction.features, extraction.tess
     assert features is not None and tess is not None
     if len(anchors) < 2:
-        return _unfilled([], anchors, given, [], ["what the webs join: two things or more"])
-    hang, problem = hang_frame(features, tess, anchors)
+        return _unfilled([], anchors, given, [], [WEBS_JOIN])
+    hang, problem = hang_frame(features, tess, anchors, other_side=other_side or ())
     if hang is None:
         return _unfilled([], anchors, given, [problem])
     frame, band = hang.frame, hang.band

@@ -40,3 +40,9 @@ def rule(name: str) -> tuple[float, str]:
     """A platform rule's value and where it comes from."""
     entry = _catalogue()["rules"][name]
     return float(entry["value"]), str(entry["source"])
+
+
+def rib_start() -> dict[str, Any]:
+    """Where a new variant of ribs starts, with its source: how thick, how far apart, how tall,
+    how many, and how many choices of each radius and draft."""
+    return dict(_catalogue()["rib_start"])

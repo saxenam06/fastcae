@@ -110,16 +110,18 @@ def check(
     faces a rib is filleted to where they now are."""
     owners = owners or {}
     radii = {r: float(rules.of("root_fillet_mm", owners.get(r))) for r in ribs}
+    ratios = {r: float(rules.of("root_gap", owners.get(r))) for r in ribs}
+    # Mould release waits for the pull: with no direction the part leaves its mould along, and no
+    # cores forming the pockets inside, it has nothing true to say.
     return [
         _protected(base, window, design),
         _grid_edge(window, design),
         _floating(base, design),
         _thickness(ribs, base.grid.spacing_mm, rules, owners),
-        _gaps(base, ribs, rules, radii),
+        _gaps(base, ribs, rules, radii, ratios),
         _fillet(window, design, ribs, surface, rules, radii, shift),
         _bridging(window, design, rules),
         _clipped(window, design),
-        _release(base, design, ribs, rules, owners),
         _ends(base, design, ribs, rules),
         *_sections(base, window, design, ribs, rules),
         _surface(surface),
@@ -130,7 +132,6 @@ def described(rules: Rules | None = None) -> list[dict[str, str]]:
     """Every check a built design goes through and what it holds the design to, in words - as the
     pipeline shows them."""
     r = rules or Rules()
-    low, high = r.draft_deg
     return [
         {"name": "protected areas unchanged", "rule": "every protected cell exactly as it was"},
         {"name": "within the grid", "rule": "no rib runs off the grid the part was sampled on"},
@@ -141,7 +142,8 @@ def described(rules: Rules | None = None) -> list[dict[str, str]]:
         },
         {
             "name": "root gap",
-            "rule": f"a clear gap of {r.root_gap:g} x the thinner rib between ribs in the open",
+            "rule": f"a clear gap of {r.root_gap:g} x the thinner rib between rib footprints in "
+            "the open - each variant's own where it says - and no wedge of sand where two meet",
         },
         {
             "name": "root fillet",
@@ -155,11 +157,6 @@ def described(rules: Rules | None = None) -> list[dict[str, str]]:
         },
         {"name": "blend bridging", "rule": "fillet material only where a rib meets the part"},
         {"name": "blend clipped", "rule": "no fillet cut short by a protected area"},
-        {
-            "name": "mould release",
-            "rule": f"each rib's draft within what its block allows - {low:g}-{high:g} deg where "
-            "it says nothing - and every rib tip open along the pull",
-        },
         {
             "name": "thick spots",
             "rule": f"the section at a junction at most {r.thick_spot:g} x the wall beside it",
@@ -274,44 +271,252 @@ def _thickness(ribs: list, spacing: float, rules: Rules, owners: dict | None = N
     return Finding("rib thickness", "pass", f"{len(ribs)} ribs inside the window", rule, assumed)
 
 
-def _gaps(base: Field, ribs: list, rules: Rules, radii: dict | None = None) -> Finding:
-    """``radii``, when given, is each rib's own root fillet; else the rules'."""
+def _gaps(
+    base: Field,
+    ribs: list,
+    rules: Rules,
+    radii: dict | None = None,
+    ratios: dict | None = None,
+) -> Finding:
+    """Room for the sand between ribs, measured between their footprints, and no narrow wedge of
+    it where two meet. ``radii``, when given, is each rib's own root fillet; ``ratios`` each rib's
+    own root gap; else the rules'."""
     ribs = _ribs_only(ribs)
     text, assumed = rules.source("root_gap")
-    rule = f"clear gap between ribs >= {rules.root_gap:g} x thickness ({text})"
+    rule = (
+        f"clear gap between rib footprints >= {rules.root_gap:g} x the thinner rib, and no wedge "
+        f"of sand longer than that where two meet ({text})"
+    )
     if len(ribs) < 2:
         return Finding("root gap", "pass", "one rib", rule, assumed)
-    # Only where a rib stands in the open: the stretch that runs into a wall or boss is trimmed
-    # away, and spokes converging inside a boss are not a gap anybody casts - nor are they in the
-    # junction at either end, a fillet and a thickness long, where ribs meet what they end on.
-    pieces = [_exposed(base, r, _junction(r, rules, (radii or {}).get(r))) for r in ribs]
-    worst, where = math.inf, None
-    for i in range(len(ribs)):
-        for j in range(i + 1, len(ribs)):
-            reach = (ribs[i].thickness_mm + ribs[j].thickness_mm) / 2.0
-            for line_i in pieces[i]:
-                for line_j in pieces[j]:
-                    distance, point = _polyline_distance(line_i, line_j)
-                    if distance <= reach:
-                        continue  # they cross: a junction, filleted, not a gap
-                    gap = distance - reach
-                    if gap < worst:
-                        worst, where = gap, point
-    thinnest = min(r.thickness_mm for r in ribs)
-    if worst < rules.root_gap * thinnest:
+    meetings, _ = meetings_of(base, ribs, rules, radii, ratios)
+    wedges = [m for m in meetings if m.kind == "wedge"]
+    if wedges:
+        worst = min(wedges, key=lambda m: m.value)
         return Finding(
             "root gap",
             "reject",
-            f"a {worst:.1f} mm gap between ribs",
+            f"two ribs meet {worst.value:.0f}° apart - a wedge of sand too narrow to cast",
             rule,
             assumed,
-            tuple(where),
-            worst,
+            tuple(worst.where),
+            worst.value,
         )
-    reason = "no ribs face each other" if math.isinf(worst) else f"narrowest gap {worst:.0f} mm"
-    return Finding(
-        "root gap", "pass", reason, rule, assumed, value=None if math.isinf(worst) else worst
+    gaps = [m for m in meetings if m.kind == "gap"]
+    if gaps:
+        worst = min(gaps, key=lambda m: m.value)
+        return Finding(
+            "root gap",
+            "reject",
+            f"a {worst.value:.1f} mm gap between rib footprints",
+            rule,
+            assumed,
+            tuple(worst.where),
+            worst.value,
+        )
+    return Finding("root gap", "pass", "every pair of ribs leaves room for the sand", rule, assumed)
+
+
+@dataclass(frozen=True)
+class Meeting:
+    """Two ribs, by their place among the ribs, that break the root gap between them: too close
+    side by side (``gap``, the gap in mm), or meeting at an angle too shallow for the sand between
+    them (``wedge``, the angle in degrees)."""
+
+    i: int
+    j: int
+    kind: str
+    value: float
+    where: np.ndarray = field(compare=False, default_factory=lambda: np.zeros(3))
+
+
+@dataclass
+class Junction:
+    """Where ribs meet or cross, and how many arms each rib gives there: two for one passing
+    through, one for one ending there."""
+
+    where: np.ndarray
+    arms: dict[int, int] = field(default_factory=dict)
+
+    @property
+    def count(self) -> int:
+        return sum(self.arms.values())
+
+
+def meetings_of(
+    base: Field,
+    ribs: list,
+    rules: Rules,
+    radii: dict | None = None,
+    ratios: dict | None = None,
+) -> tuple[list[Meeting], list[Junction]]:
+    """Every pair of ribs that breaks the root gap, and every point where ribs meet.
+
+    Only where a rib stands in the open: the stretch that runs into a wall or boss is trimmed away,
+    and spokes converging inside a boss are not a gap anybody casts - nor are they in the junction
+    at either end, a fillet and a thickness long, where ribs meet what they end on.
+
+    Two ribs whose footprints do not touch need the root gap between them. Two whose footprints
+    touch meet: the sand between two of their arms is a wedge, rounded at its tip by the fillet,
+    widening from there; where it is narrower than the root gap for longer than the root gap is
+    wide, it is a finger of sand too thin to stand - the pair is a wedge.
+    """
+    pieces = [_exposed(base, r, _junction(r, rules, (radii or {}).get(r))) for r in ribs]
+    plans = [_plan(r) for r in ribs]
+    meetings: list[Meeting] = []
+    junctions: list[Junction] = []
+    for i in range(len(ribs)):
+        for j in range(i + 1, len(ribs)):
+            # Where their bodies cross or touch - sides, not fillets - they meet; where only their
+            # fillets overlap, the sand between them is a slot, and it is a gap like any other.
+            sides = (ribs[i].thickness_mm + ribs[j].thickness_mm) / 2.0
+            reach = _half(ribs[i]) + _half(ribs[j])
+            ratio = max(
+                (ratios or {}).get(ribs[i], rules.root_gap),
+                (ratios or {}).get(ribs[j], rules.root_gap),
+            )
+            room = ratio * min(ribs[i].thickness_mm, ribs[j].thickness_mm)
+            whole, _ = _polyline_distance(plans[i], plans[j])
+            met = _met(plans[i], plans[j], reach) if whole <= sides else None
+            fillet = min(_fillet_of(ribs[i], radii), _fillet_of(ribs[j], radii))
+            # Meeting in the open only: spokes whose lines cross inside the boss they turn about
+            # meet in metal, and are held apart where they stand in the open.
+            if met is not None and _in_open(base, met[0], ribs[i], ribs[j]):
+                apex, arms_i, arms_j, angle = met
+                _join(junctions, apex, i, len(arms_i), reach)
+                _join(junctions, apex, j, len(arms_j), reach)
+                if _wedged(angle, room, fillet):
+                    meetings.append(Meeting(i, j, "wedge", angle, apex))
+                continue
+            touching = None
+            for line_i in pieces[i]:
+                for line_j in pieces[j]:
+                    distance, point = _polyline_distance(line_i, line_j)
+                    if distance <= sides:
+                        touching = touching or (line_i, line_j, point)
+                        continue
+                    if distance - reach < room:
+                        meetings.append(Meeting(i, j, "gap", distance - reach, point))
+            if touching is not None:
+                # Their bodies touch in the open, though their lines cross in metal - or not at
+                # all: they meet there, at the angle between them.
+                line_i, line_j, point = touching
+                angle = _angle_between(line_i, line_j, point)
+                if _wedged(angle, room, fillet):
+                    meetings.append(Meeting(i, j, "wedge", angle, point))
+    return meetings, junctions
+
+
+def _wedged(angle_deg: float, room: float, fillet: float) -> bool:
+    """Whether two ribs meeting ``angle_deg`` apart are too close for too long: a finger of sand
+    narrower than the root gap for longer than the root gap is wide - or, where the fillets round
+    their corner fill it, a lump of metal that long, two ribs run into one."""
+    return _finger(angle_deg, room, fillet) > room or _merged(angle_deg, fillet) > room
+
+
+def _merged(angle_deg: float, fillet: float) -> float:
+    """How far from where two arms meet ``angle_deg`` apart the fillet rounding their corner fills
+    between them: the further, the shallower the angle."""
+    half = math.radians(max(angle_deg, 0.0) / 2.0)
+    if half < 1e-6:
+        return math.inf
+    return fillet / math.tan(half)
+
+
+def _angle_between(p: np.ndarray, q: np.ndarray, near: np.ndarray) -> float:
+    """The least angle between two stretches of rib, by their pieces nearest ``near``."""
+
+    def way(line: np.ndarray) -> np.ndarray:
+        if len(line) < 2:
+            return np.array([1.0, 0.0])
+        middles = (line[:-1] + line[1:]) / 2.0
+        k = int(np.argmin(np.linalg.norm(middles - np.asarray(near)[: line.shape[1]], axis=1)))
+        step = line[k + 1] - line[k]
+        return step / max(float(np.linalg.norm(step)), 1e-12)
+
+    cosine = abs(float(np.clip(way(p) @ way(q), -1.0, 1.0)))
+    return math.degrees(math.acos(cosine))
+
+
+def _in_open(base: Field, apex: np.ndarray, a, b) -> bool:
+    """Whether two ribs meeting at ``apex`` meet in open air - halfway up the lower of them - not
+    inside the part."""
+    up = np.asarray(a.pull, dtype=float)
+    up = up / np.linalg.norm(up)
+    height = 0.5 * min(
+        max(a.height_at(np.array([0.0, 1.0]))), max(b.height_at(np.array([0.0, 1.0])))
     )
+    return bool(base.sample((np.asarray(apex, dtype=float) + height * up).reshape(1, 3))[0] > 0.0)
+
+
+def _half(rib) -> float:
+    """Half a rib's footprint: its metal where it stands, fillet and all."""
+    return float(getattr(rib, "footprint_mm", rib.thickness_mm / 2.0))
+
+
+def _fillet_of(rib, radii: dict | None) -> float:
+    own = (radii or {}).get(rib)
+    return float(own if own is not None else getattr(rib, "root_fillet_mm", 0.0))
+
+
+def _met(p: np.ndarray, q: np.ndarray, reach: float):
+    """Where two straight stretches of rib meet - the point their lines cross - the directions of
+    each one's arms from there, and the least angle between an arm of one and an arm of the other.
+    None for curved stretches, or lines that run side by side without crossing."""
+    if len(p) != 2 or len(q) != 2:
+        return None
+    u, v = p[1] - p[0], q[1] - q[0]
+    lu, lv = float(np.linalg.norm(u)), float(np.linalg.norm(v))
+    if lu < 1e-9 or lv < 1e-9:
+        return None
+    u, v = u / lu, v / lv
+    # Solve p0 + s u = q0 + t v in the plane the two span.
+    a = np.stack([u, -v], axis=1)
+    solution, *_ = np.linalg.lstsq(a, q[0] - p[0], rcond=None)
+    if abs(float(u @ v)) > math.cos(math.radians(1.0)):
+        # Side by side, overlapping: one wedge of no angle at all.
+        apex = (p[0] + p[1] + q[0] + q[1]) / 4.0
+        return apex, [u], [v], 0.0
+    apex = p[0] + float(solution[0]) * u
+
+    def arms(line: np.ndarray) -> list[np.ndarray]:
+        out = []
+        for end in line:
+            away = end - apex
+            if float(np.linalg.norm(away)) > reach:
+                out.append(away / float(np.linalg.norm(away)))
+        return out
+
+    arms_p, arms_q = arms(p), arms(q)
+    if not arms_p or not arms_q:
+        return None
+    angle = min(
+        math.degrees(math.acos(float(np.clip(a_ @ b_, -1.0, 1.0))))
+        for a_ in arms_p
+        for b_ in arms_q
+    )
+    return apex, arms_p, arms_q, angle
+
+
+def _finger(angle_deg: float, room: float, fillet: float) -> float:
+    """How long the sand between two arms meeting at ``angle_deg`` stays narrower than ``room``:
+    from where the fillet rounding their corner ends, two fillets wide, to where it is ``room``
+    wide. Nothing when a fillet that big already fills it."""
+    if room <= 2.0 * fillet:
+        return 0.0
+    half = math.radians(max(angle_deg, 0.0) / 2.0)
+    if half < 1e-6:
+        return math.inf
+    return (room - 2.0 * fillet) / (2.0 * math.tan(half))
+
+
+def _join(junctions: list[Junction], where: np.ndarray, rib: int, arms: int, reach: float) -> None:
+    """A rib's arms at a point where ribs meet - the junction already there, or a new one."""
+    for junction in junctions:
+        if float(np.linalg.norm(junction.where - where)) <= reach:
+            junction.arms[rib] = max(junction.arms.get(rib, 0), arms)
+            return
+    junctions.append(Junction(where=np.asarray(where, dtype=float), arms={rib: arms}))
 
 
 def _fillet(

@@ -33,7 +33,7 @@ from ..features import FeatureSet
 from ..spec import HoleSet, MaterialChoice, Offset, Placement
 from .checks import Rules, _gaps
 from .field import Field
-from .placement import Drilled, Placed
+from .placement import Drilled, Placed, root_gap_of
 from .ribs import Rib
 
 # Every check screening makes, what it holds a design to, and where the rule comes from - for the
@@ -53,7 +53,8 @@ CHECKS = (
     ),
     (
         "root gap",
-        "a clear gap of twice the thinner rib between ribs in the open, within a block and between",
+        "a clear gap of twice the thinner rib - or what its variant says - between rib footprints "
+        "in the open, within a variant and between, and no wedge of sand where two meet",
         "room for the sand between them (assumed)",
     ),
     (
@@ -223,20 +224,25 @@ def screen(
 
     # Room for the mould between ribs: within each block - its own spacing against its own
     # thickness, which the block alone decides - then between blocks, which only together do.
+    # Every rib is checked, as repair counts them: two blocks may lay equal ribs, one on the other.
+    every = [rib for placement in placements for rib in placed[placement.id].ribs]
     radii = {
         rib: placement.section.root_fillet_mm
         for placement in placements
         for rib in placed[placement.id].ribs
     }
+    ratios = {
+        rib: root_gap_of(placement) for placement in placements for rib in placed[placement.id].ribs
+    }
     failed = False
     for placement in placements:
         own = placed[placement.id].ribs
         if len(own) > 1:
-            gap = _gaps(base, list(own), Rules(), radii)
+            gap = _gaps(base, list(own), Rules(), radii, ratios)
             say("root gap", gap.outcome, f"{placement.id}: {gap.reason}", gap.rule, placement.id)
             failed |= gap.outcome == "reject"
     if not failed and len({p.id for p in placements if placed[p.id].ribs}) > 1:
-        gap = _gaps(base, list(radii), Rules(), radii)
+        gap = _gaps(base, every, Rules(), radii, ratios)
         say("root gap", gap.outcome, f"between blocks: {gap.reason}", gap.rule)
 
     # No wall thinned below the least it may be.

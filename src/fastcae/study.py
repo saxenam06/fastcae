@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
 
+import numpy as np
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from .features import FeatureKind, FeatureSet
@@ -71,6 +72,7 @@ USED = (
     "angle_deg",
     "count",
     "spacing_mm",
+    "layout",
     "thickness_mm",
     "height_fraction",
     "top",
@@ -191,6 +193,9 @@ class Where(BaseModel):
 
     support: list[str] = Field(default_factory=list)
     anchors: list[str] = Field(default_factory=list)
+    other_side: list[str] = Field(default_factory=list)
+    """What the features run to from what they end on: named, every one runs from one side to the
+    other, never within either. None: between any two of what they end on."""
     span: Literal["union", "within_one", "must_bridge"] = "union"
     read_off: list[Literal["support", "anchors"]] = Field(default_factory=list)
     """Which of these nobody named: read off the part - what rises round the floor, say."""
@@ -318,6 +323,8 @@ class StudyVersion(BaseModel):
 class Study(BaseModel):
     name: str
     versions: list[StudyVersion] = Field(default_factory=list)
+    label: str = ""
+    """What the engineer calls it - a variant's name, which says what it changes and where."""
 
     @property
     def current(self) -> StudyVersion:
@@ -343,17 +350,17 @@ class Kind:
 
 KINDS: dict[str, Kind] = {
     "keep_clear_of": Kind("{clearance_mm:g} mm clear of {refs}", ("clearance_mm",), names=True),
-    # Kept clear anywhere on the part, not only where ribs stand: that needs candidate ribs tested
-    # in three dimensions. Until then the holes where ribs stand are kept clear of by keep_clear_of.
-    "interface": Kind("{refs} left as they are", names=True, enforced=False),
+    # Kept clear anywhere on the part, in three dimensions, by every rib and pad placed - what they
+    # run between aside - and never moved by a thickening; checked again on the built design.
+    "interface": Kind("{refs} left as they are", names=True),
     # A datum the drawing names: an interface whose face is not known until someone points at it.
     "datum": Kind("datum {letter} left as it is", ("letter",), enforced=False),
     "not_above": Kind("no taller than {refs}", names=True),
     "height_at_most": Kind("at most {mm:g} mm tall", ("mm",)),
     "within_what_it_meets": Kind("each end no taller than what it meets"),
     "ends_on": Kind("every rib ends on what it runs between"),
-    "along": Kind("along {refs}", names=True),
-    "square_to": Kind("square to {refs}", names=True),
+    "along": Kind("along {refs}", names=True, enforced=False),
+    "square_to": Kind("square to {refs}", names=True, enforced=False),
     "not_ends_on": Kind("no rib ends on {refs}", names=True, enforced=False),
     "parallel_to_plane": Kind("parallel to the {plane} plane", ("plane",), enforced=False),
     "plane_contains_pull": Kind("each rib's plane contains the pull direction", enforced=False),
@@ -372,7 +379,12 @@ KINDS: dict[str, Kind] = {
     "spacing_at_least": Kind(
         "at least {mm:g} mm apart", ("mm",), stage="combinations", enforced=False
     ),
-    "no_x_junctions": Kind("no X-crossings", stage="combinations", enforced=False),
+    "no_x_junctions": Kind("no X crossings", stage="combinations"),
+    "root_gap": Kind(
+        "room for the sand: {ratio:g} x the thinner rib between ribs",
+        ("ratio",),
+        stage="combinations",
+    ),
     "junction_angle_at_least": Kind(
         "ribs meeting at least {deg:g}° apart", ("deg",), stage="combinations", enforced=False
     ),
@@ -381,13 +393,29 @@ KINDS: dict[str, Kind] = {
         "symmetric about {refs}", names=True, stage="combinations", enforced=False
     ),
     "smallest_radius": Kind("no radius under {radius_mm:g} mm", ("radius_mm",), stage="sizes"),
-    "draft_at_least": Kind("at least {deg:g}° of draft", ("deg",), stage="sizes"),
+    "draft_at_least": Kind("at least {deg:g}° of draft", ("deg",), stage="sizes", enforced=False),
     "thickness_to_wall": Kind(
-        "{low:g} to {high:g} of the wall met", ("low", "high"), stage="sizes"
+        "{low:g} to {high:g} of the wall met", ("low", "high"), stage="sizes", enforced=False
     ),
-    "wall_at_least": Kind("no wall thinned below {mm:g} mm", ("mm",), stage="sizes"),
+    # A wall thinned is held to its least by the block's own setting, not by this rule.
+    "wall_at_least": Kind(
+        "no wall thinned below {mm:g} mm", ("mm",), stage="sizes", enforced=False
+    ),
     "rib_to_wall": Kind("no rib thicker than {ratio:g} of the wall it meets", ("ratio",)),
 }
+
+# The rules a variant may hold: every kind the pipeline holds a design to, and nothing else - a
+# rule no stage checks is never offered as if one did.
+OFFERED = (
+    "keep_clear_of",
+    "not_above",
+    "height_at_most",
+    "ends_on",
+    "rib_to_wall",
+    "smallest_radius",
+    "root_gap",
+    "no_x_junctions",
+)
 
 # Which step of the build enforces each stage, for a rule whose stage is not built yet.
 UNTIL = {
@@ -414,12 +442,12 @@ def said(constraint: Constraint) -> str:
 # --- reading and writing ------------------------------------------------------------------------
 
 
-def path_of(project: Project, name: str):
-    return project.root / STUDY_DIR / f"{name}.json"
+def path_of(project: Project, name: str, folder: str = STUDY_DIR):
+    return project.root / folder / f"{name}.json"
 
 
-def load(project: Project, name: str) -> Study | None:
-    path = path_of(project, name)
+def load(project: Project, name: str, folder: str = STUDY_DIR) -> Study | None:
+    path = path_of(project, name, folder)
     if not path.is_file():
         return None
     return Study.model_validate_json(path.read_text(encoding="utf-8"))
@@ -431,22 +459,42 @@ def active(project: Project) -> Study | None:
     return load(project, name) if name else None
 
 
-def write(project: Project, name: str, **entries: Any) -> StudyVersion:
-    """A new version of the study, checked as :func:`build` checks it, written, and made active."""
-    version = build(project, name, **entries)
-    study = load(project, name) or Study(name=name)
+def write(
+    project: Project,
+    name: str,
+    *,
+    folder: str = STUDY_DIR,
+    make_active: bool = True,
+    label: str | None = None,
+    **entries: Any,
+) -> StudyVersion:
+    """A new version of the study, checked as :func:`build` checks it, and written - into
+    ``folder``, made the project's study when ``make_active``, called ``label`` when one is
+    given."""
+    version = build(project, name, folder=folder, **entries)
+    study = load(project, name, folder) or Study(name=name)
     study.versions.append(version)
-    path = path_of(project, name)
+    if label is not None:
+        study.label = label
+    save(project, study, folder)
+    if make_active:
+        project.write_data("study", name)
+    return version
+
+
+def save(project: Project, study: Study, folder: str = STUDY_DIR) -> None:
+    """A study written as it stands - its versions and its label."""
+    path = path_of(project, study.name, folder)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(study.model_dump_json(indent=2) + "\n", encoding="utf-8")
-    project.write_data("study", name)
-    return version
 
 
 def build(
     project: Project,
     name: str,
     *,
+    folder: str = STUDY_DIR,
+    known_blocks: dict[str, str] | None = None,
     quotes: list[str],
     said: list[str],
     blocks: list[dict[str, Any]],
@@ -468,11 +516,12 @@ def build(
     ``selected`` is a set of faces they selected, among the ``selections`` they made. Cites of
     ``new`` stand for every word and selection this version adds, ``these`` for every one it rests
     on. Entries without an id are numbered: blocks ``b1``, constraints ``c1``, preferences ``p1``,
-    objectives ``o1``.
+    objectives ``o1``. ``known_blocks`` are blocks kept elsewhere - other variants, by id and what
+    they add - whose ribs or holes a rule here may name.
     """
     if not name or any(c in name for c in "/\\:"):
         raise StudyError(f"{name!r} is not a study name")
-    study = load(project, name) or Study(name=name)
+    study = load(project, name, folder) or Study(name=name)
     previous = study.versions[-1] if study.versions else None
     kept = previous.words if previous else []
     try:
@@ -526,7 +575,7 @@ def build(
         note=note,
         **extras,
     )
-    problems = _problems(version, {w.id for w in words}, features)
+    problems = _problems(version, {w.id for w in words}, features, known_blocks)
     if problems:
         raise StudyError("; ".join(problems))
 
@@ -583,7 +632,7 @@ def _refs(version: StudyVersion) -> set[str]:
     """Every entity of the part the version names."""
     refs: set[str] = set()
     for b in version.blocks:
-        refs |= {*b.where.support, *b.where.anchors}
+        refs |= {*b.where.support, *b.where.anchors, *b.where.other_side}
         for domain in b.free.values():
             values = [*(domain.options or []), domain.suggested]
             refs |= {v for v in values if isinstance(v, str) and _REF.match(v)}
@@ -616,7 +665,12 @@ def made_by(ref: str) -> str | None:
     return ribs_of(ref) or holes_of(ref)
 
 
-def _problems(version: StudyVersion, word_ids: set[str], features: FeatureSet) -> list[str]:
+def _problems(
+    version: StudyVersion,
+    word_ids: set[str],
+    features: FeatureSet,
+    known_blocks: dict[str, str] | None = None,
+) -> list[str]:
     problems = []
     missing = sorted(r for r in _refs(version) if features.get(r) is None)
     if missing:
@@ -691,13 +745,13 @@ def _problems(version: StudyVersion, word_ids: set[str], features: FeatureSet) -
         unknown_cites(c.id, c.cites)
         if c.block is not None and c.block not in block_ids:
             problems.append(f"{c.id} applies to {c.block}, which is not a block")
-        kinds = {b.id: b.add for b in version.blocks}
+        kinds = {**(known_blocks or {}), **{b.id: b.add for b in version.blocks}}
         for ref in c.refs:
             other = made_by(ref)
             if other is None:
                 continue
             what = "ribs" if ribs_of(ref) else "holes"
-            if other not in block_ids:
+            if other not in kinds:
                 problems.append(f"{c.id} names the {what} of {other}: there is no block {other}")
             elif other == c.block:
                 problems.append(f"{c.id}: {other} cannot keep clear of its own {what}")
@@ -823,22 +877,27 @@ def layout_of(
     centre: str | None = None,
     spread: str = "across",
 ) -> dict[str, Any]:
-    """The layout a generator draws: spokes about ``centre``, or straight families at ``angle``,
-    a count or a spacing apart."""
+    """The layout a generator draws: spokes about ``centre``, or straight families at ``angle`` -
+    with how many and how far apart, each as said: spokes that many and no nearer than the
+    spacing at their ends, families that many lines each way that far apart."""
     if generator == "radial":
         return {
             "kind": "radial",
             "centre": centre,
-            "count": int(count or 0),
+            "count": int(count) if count else None,
+            "spacing_mm": spacing,
             "phase_deg": angle,
             "spread": spread,
         }
-    key, value = ("count", int(count or 0)) if spacing is None else ("spacing_mm", spacing)
+    how: dict[str, Any] = {}
+    if count:
+        how["count"] = int(count)
+    if spacing is not None:
+        how["spacing_mm"] = spacing
     return {
         "kind": "parallel" if generator == "parallel" else "grid",
         "families": [
-            {"angle_deg": angle + a, key: value, "offset": offset}
-            for a, offset in FAMILIES[generator]
+            {"angle_deg": angle + a, **how, "offset": offset} for a, offset in FAMILIES[generator]
         ],
     }
 
@@ -882,18 +941,22 @@ def point(
 
     generator = str(chosen["generator"])
     angle = float(chosen.get("angle_deg") or 0.0)
+    # How many, and how far apart: both apply to every pattern.
+    count = chosen.get("count")
+    spacing = float(chosen["spacing_mm"]) if chosen.get("spacing_mm") is not None else None
     if generator == "radial":
         layout = layout_of(
             "radial",
             angle,
-            count=chosen.get("count"),
+            count=count,
+            spacing=spacing,
             centre=chosen.get("centre"),
             spread=str(chosen.get("spread") or "across"),
         )
-    elif "spacing_mm" in found.free or "spacing_mm" in (values or {}):
-        layout = layout_of(generator, angle, spacing=float(chosen["spacing_mm"]))
+    elif generator == "free":
+        layout = _free_layout(found, chosen)
     else:
-        layout = layout_of(generator, angle, count=chosen.get("count"))
+        layout = layout_of(generator, angle, count=count, spacing=spacing)
 
     height: dict[str, Any] = {
         "top": str(chosen.get("top") or "slope"),
@@ -907,10 +970,18 @@ def point(
     if caps:
         height["max_mm"] = min(caps)
     ratios = [float(c.params["ratio"]) for c in rules if c.kind == "rib_to_wall"]
+    gaps = [float(c.params["ratio"]) for c in rules if c.kind == "root_gap"]
+    # Room for the sand as its rule says; the rule of thumb when none does - none at all when the
+    # engineer took the part's out.
+    root_gap = max(gaps) if gaps else (0.0 if _relaxed(found, "root_gap") else None)
+    # What the part keeps closed, which every rib keeps clear of wherever it reaches.
+    shut = [c for c in version.constraints if c.kind == "interface" and c.refs]
     return {
         "id": found.id,
         "host": list(found.where.support),
-        "supports": list(found.where.anchors),
+        # What they run between: both sides, when two are named - from one to the other.
+        "supports": list(dict.fromkeys([*found.where.anchors, *found.where.other_side])),
+        "other_side": list(found.where.other_side),
         "keep_out": keep_out,
         "layout": layout,
         "height": height,
@@ -921,8 +992,107 @@ def point(
         "pads": str(chosen.get("pads") or "off") == "on",
         # Held to the wall it meets only when a rule says how far; the engineer may take it out.
         "rib_to_wall": min(ratios) if ratios else None,
+        "root_gap": root_gap,
+        "no_x": any(c.kind == "no_x_junctions" for c in rules),
+        "closed": list(dict.fromkeys(ref for c in shut for ref in c.refs)),
+        "closed_mm": max(
+            (float(c.params.get("clearance_mm", INTERFACE_CLEARANCE_MM)) for c in shut),
+            default=0.0,
+        ),
         "cites": list(found.cites),
     }
+
+
+def _relaxed(block: Block, kind: str) -> bool:
+    """Whether the engineer took out a rule of this kind the part suggested for the block."""
+    return any(r.get("kind") == kind for r in block.relaxed)
+
+
+def _free_layout(block: Block, chosen: dict[str, Any]) -> dict[str, Any]:
+    """Free lines: as many as the count says, each at an angle the block allows and at a place
+    across what it stands on - the places the spacing apart - drawn from the design's layout
+    seed: the same seed, the same lines."""
+    domain = block.free.get("angle_deg")
+    angles = values_of(domain) if domain is not None else [float(chosen.get("angle_deg") or 0.0)]
+    draw = np.random.default_rng(int(chosen.get("layout") or 0))
+    spacing = chosen.get("spacing_mm")
+    return {
+        "kind": "lines",
+        "spacing_mm": float(spacing) if spacing is not None else None,
+        "lines": [
+            {
+                "angle_deg": float(angles[int(draw.integers(len(angles)))]),
+                "at": round(float(draw.random()), 4),
+            }
+            for _ in range(int(chosen.get("count") or 0))
+        ],
+    }
+
+
+def values_of(domain: Domain) -> list[Any]:
+    """Every value a setting may take: its choices, or each step of its range."""
+    if domain.options is not None:
+        return list(domain.options)
+    assert domain.low is not None and domain.high is not None and domain.step is not None
+    steps = int(math.floor((domain.high - domain.low) / domain.step + 1e-9))
+    return [round(domain.low + k * domain.step, 6) for k in range(steps + 1)]
+
+
+# The settings that make a difference to a block of ribs only for some of its patterns or
+# sections: spokes turn about a centre and spread; free lines take a layout, their angles drawn
+# from the range line by line; a flange only for a T. How many and how far apart apply to every
+# pattern.
+_ONLY_FOR = {
+    "centre": ("radial",),
+    "spread": ("radial",),
+    "layout": ("free",),
+}
+
+
+def effective(block: Block, values: dict[str, Any] | None = None) -> dict[str, Any]:
+    """A point of a block as the settings that make a difference to its design: each at the value
+    given or its suggested one, less those its pattern and section do not use - so two points
+    that make the same design are the same point."""
+    chosen: dict[str, Any] = {name: d.suggested for name, d in block.free.items()}
+    chosen.update(values or {})
+    if block.add != "ribs":
+        return chosen
+    generator = chosen.get("generator")
+    unused = {name for name, only in _ONLY_FOR.items() if generator not in only}
+    if generator == "free":
+        unused.add("angle_deg")
+    if chosen.get("section") != "T":
+        unused |= {"flange_width_mm", "flange_thickness_mm"}
+    return {name: value for name, value in chosen.items() if name not in unused}
+
+
+def combinations(block: Block) -> int | None:
+    """How many distinct points a block allows: for each pattern and section it may take, the
+    values of every other setting that makes a difference, multiplied - summed over them. None
+    when free lines are among its patterns: a free layout has no end."""
+    decided = [n for n in ("generator", "section") if n in block.free]
+    total = 0
+    for picked in _every(block, decided):
+        if picked.get("generator") == "free":
+            return None
+        used = effective(block, picked)
+        product = 1
+        for name, domain in block.free.items():
+            if name in used and name not in decided:
+                product *= len(values_of(domain))
+        total += product
+    return total
+
+
+def _every(block: Block, names: list[str]) -> Iterator[dict[str, Any]]:
+    """Every combination of the values of the settings named."""
+    if not names:
+        yield {}
+        return
+    first, rest = names[0], names[1:]
+    for value in values_of(block.free[first]):
+        for others in _every(block, rest):
+            yield {first: value, **others}
 
 
 def _keeps(found: Block, rules: list[Constraint]) -> tuple[list[dict[str, Any]], dict[str, float]]:
@@ -1125,11 +1295,20 @@ def rules_of(version: StudyVersion) -> dict[str, Any]:
     for block in version.blocks:
         if block.add != "ribs":
             continue
-        own = {}
+        own: dict[str, Any] = {}
         for name in ("thickness_mm", "draft_deg"):
             span = _span(block.free.get(name))
             if span is not None:
                 own[name] = list(span)
+        gaps = [
+            float(c.params["ratio"])
+            for c in version.constraints
+            if c.kind == "root_gap" and c.block in (None, block.id)
+        ]
+        if gaps:
+            own["root_gap"] = max(gaps)
+        elif _relaxed(block, "root_gap"):
+            own["root_gap"] = 0.0
         if own:
             windows[block.id] = own
     if windows:

@@ -56,7 +56,8 @@ class KeepOut(BaseModel):
 
 
 class Family(BaseModel):
-    """Straight paths across the host, all at one angle."""
+    """Straight paths across the host, all at one angle: ``spacing_mm`` apart across it, or
+    ``count`` of them spread evenly - both said, that many that far apart, round its middle."""
 
     angle_deg: float = 0.0
     spacing_mm: float | None = Field(default=None, gt=0.0)
@@ -64,17 +65,30 @@ class Family(BaseModel):
     offset: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
+class Line(BaseModel):
+    """One free line across the host: its angle, and where it crosses - a share of the way across
+    the host, square to it."""
+
+    angle_deg: float = 0.0
+    at: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
 class Layout(BaseModel):
     """How rib paths are drawn on the host.
 
     ``parallel`` and ``grid`` are families of straight paths - one family, or several at angles
-    to each other. ``radial`` is paths out from the axis of a feature, like spokes.
+    to each other. ``radial`` is paths out from the axis of a feature, like spokes. ``lines`` are
+    free lines, each at its own angle and place.
     """
 
-    kind: Literal["parallel", "grid", "radial"]
+    kind: Literal["parallel", "grid", "radial", "lines"]
     families: list[Family] = Field(default_factory=list)
+    lines: list[Line] = Field(default_factory=list)
     centre: str | None = None
     count: int | None = Field(default=None, ge=1)
+    spacing_mm: float | None = Field(default=None, gt=0.0)
+    """How far apart spokes are where they end - no more of them than that leaves room for - and
+    the places free lines may cross, that far apart."""
     phase_deg: float = 0.0
     spread: Literal["round", "across"] = "round"
     """Spokes all the way round from ``phase_deg``, or fanned evenly across where ribs stand."""
@@ -115,6 +129,9 @@ class Placement(BaseModel):
     id: str
     host: list[str] = Field(default_factory=list)
     supports: list[str] = Field(default_factory=list)
+    other_side: list[str] = Field(default_factory=list)
+    """Of what the ribs run between, those on the other side: every rib runs from one of the rest
+    to one of these, never within either side. None: between any two of them."""
     pull: list[float] | None = None
     keep_out: list[KeepOut] = Field(default_factory=list)
     layout: Layout
@@ -129,6 +146,16 @@ class Placement(BaseModel):
     the wall is thickened round the rib's end, enough that it may, rather than the rib dropped."""
     rib_to_wall: float | None = Field(default=0.8, gt=0.0)
     """The most a rib may be of the wall it meets; None: any."""
+    root_gap: float | None = Field(default=None, ge=0.0)
+    """Room for the sand between these ribs and any other, in thicknesses of the thinner; None:
+    the rule of thumb; 0: none asked."""
+    no_x: bool = False
+    """Whether these ribs may be in no X crossing - four arms meeting at a point."""
+    closed: list[str] = Field(default_factory=list)
+    """What the part keeps closed - its holes, its bores, what the drawing controls: every rib and
+    pad stays ``closed_mm`` clear of their faces in three dimensions, ends buried in what they meet
+    and all."""
+    closed_mm: float = Field(default=0.0, ge=0.0)
     cites: list[str] = Field(default_factory=list)
 
     @field_validator("host", mode="before")

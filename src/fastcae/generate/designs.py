@@ -29,7 +29,7 @@ from .checks import Finding, Rules, check
 from .compose import CODE_COMPOSE, Composition, compose
 from .field import Field, field_for
 from .formations import FORMATIONS, build
-from .surface import Surface, recontour, surface_for
+from .surface import SLOTS, Surface, recontour, surface_for
 from .zones import Zone, window_for
 
 CODE = (
@@ -117,29 +117,56 @@ class Design:
     findings: list[Finding]
     stats: dict
     ribs: list = field(default_factory=list)
+    part_surface: Surface | None = None
+    """The part's own surface, contoured from ``base``: what this design's is compared with."""
 
     @property
     def outcome(self) -> str:
         return max((f.outcome for f in self.findings), key=_RANK.__getitem__, default="pass")
 
-    def added_surface(self) -> Surface:
-        """Only the surfaces that are new: ribs and their fillets, not the part they stand on.
+    def changed_surface(self) -> tuple[Surface, np.ndarray]:
+        """The surfaces this design changes, down to where they meet the part, and how far each of
+        their vertices stands off it.
 
-        What the viewer draws over the part it already has. A triangle is new when its middle
-        stands off the baseline's surface; the part's own surface near a rib is re-contoured too,
-        but it lies where it always did.
+        What the viewer draws over the part it already has. A vertex has moved when the part's own
+        surface has none like it - none with its key, or one somewhere else - and every triangle
+        with a moved vertex is drawn. So what is drawn ends exactly on the part's own surface, and
+        a rib's fillet runs all the way down to it instead of stopping short of it.
+
+        ``standing`` is per vertex: 0 on the part, 1 half a cell or more off it. It is how far the
+        field moved around the vertex, read between its cell's eight samples, so it is nothing
+        where no sample changed and rises smoothly up a fillet; the viewer blends the part's colour
+        into the design's by it, and the join reads as a join rather than as a jagged edge.
         """
-        surface = self.surface
-        changed = self.composition.changed
-        if not changed.size:
-            return _subset(surface, np.zeros(surface.n_triangles, dtype=bool))
-        centres = self.base.grid.centres(changed)
-        lo, hi = centres.min(axis=0), centres.max(axis=0)
-        middle = surface.vertices[surface.triangles].mean(axis=1)
-        near = np.all((middle >= lo) & (middle <= hi), axis=1)
-        off = np.zeros(surface.n_triangles, dtype=bool)
-        off[near] = np.abs(self.base.sample(middle[near])) > 0.75 * self.base.grid.spacing_mm
-        return _subset(surface, off)
+        surface, part = self.surface, self.part_surface
+        if part is None or part.vertex_key is None or surface.vertex_key is None:
+            raise ValueError("this design carries no surface of the part to compare with")
+        same = np.clip(np.searchsorted(part.vertex_key, surface.vertex_key), 0, part.n_vertices - 1)
+        moved = (part.vertex_key[same] != surface.vertex_key) | np.any(
+            part.vertices[same] != surface.vertices, axis=1
+        )
+        standing = np.zeros(surface.n_vertices)
+        spacing = self.base.grid.spacing_mm
+        standing[moved] = np.clip(np.abs(self._field_moved(moved)) / (0.5 * spacing), 0.0, 1.0)
+        changed, used = _subset(surface, moved[surface.triangles].any(axis=1))
+        return changed, standing[used]
+
+    def _field_moved(self, which: np.ndarray) -> np.ndarray:
+        """How far the field moved at these vertices of the design's surface: the change at the
+        eight samples of the cell each belongs to, weighted by where in the cell it sits."""
+        grid = self.base.grid
+        shape = np.asarray(grid.shape)
+        cell = np.stack(
+            np.unravel_index(self.surface.vertex_key[which] // SLOTS, tuple(shape - 1)), axis=1
+        )
+        corner_zero = np.asarray(grid.origin) + cell * grid.spacing_mm
+        across = np.clip((self.surface.vertices[which] - corner_zero) / grid.spacing_mm, 0.0, 1.0)
+        out = np.zeros(cell.shape[0])
+        for corner in np.ndindex(2, 2, 2):
+            sample = np.ravel_multi_index((cell + corner).T, tuple(shape))
+            weight = np.prod(np.where(np.asarray(corner) == 1, across, 1.0 - across), axis=1)
+            out += weight * (self.composition.field.at(sample) - self.base.at(sample))
+        return out
 
 
 @dataclass
@@ -292,6 +319,7 @@ class DesignSpace:
             findings=findings,
             stats=stats,
             ribs=all_ribs,
+            part_surface=self.surface,
         )
 
     def digest(self, settings: dict) -> str:
@@ -324,12 +352,14 @@ def _worst(per_zone: list[list[Finding]]) -> list[Finding]:
     return list(out.values())
 
 
-def _subset(surface: Surface, keep: np.ndarray) -> Surface:
+def _subset(surface: Surface, keep: np.ndarray) -> tuple[Surface, np.ndarray]:
+    """The kept triangles as a surface of their own, and which of the whole's vertices it uses."""
     triangles = surface.triangles[keep]
     used, index = np.unique(triangles, return_inverse=True)
-    return Surface(
+    kept = Surface(
         vertices=surface.vertices[used],
         triangles=index.reshape(-1, 3).astype(np.int32),
         face_id=surface.face_id[keep],
         spacing_mm=surface.spacing_mm,
     )
+    return kept, used

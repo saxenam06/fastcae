@@ -83,5 +83,13 @@
       "value": 2.0,
       "source": "clear gap between two ribs standing in the open at least twice the thinner: room for the sand between them (assumed)"
     }
+  },
+  "rib_start": {
+    "thickness_mm": 20,
+    "spacing_mm": 100,
+    "height_fraction": 1.0,
+    "count": {"low": 2, "high": 10, "step": 1, "suggested": 2},
+    "choices": 3,
+    "source": "the engineer's starting point for a new variant of ribs: 20 mm thick, 100 mm apart, as tall as what they meet, two to ten of them; a root fillet, edge round and draft each of three choices, the middle one first"
   }
 }

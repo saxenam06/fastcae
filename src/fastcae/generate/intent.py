@@ -32,7 +32,8 @@ from .compose import CODE_COMPOSE, Composition, compose, margin_for, window_betw
 from .designs import Design, _worst
 from .field import Field, field_for
 from .holes import cut
-from .placement import Drilled, Placed, _Faces, place_all
+from .placement import Drilled, Placed, _Faces, place_all, root_gap_of
+from .repair import repair
 from .screen import face_offsets, measure_walls, raised_floors, screen
 from .surface import Surface, recontour, surface_for
 from .thicken import move_faces, moved_faces
@@ -126,7 +127,9 @@ def make(
     rules = _rules(version) if placements else None
     finder = finder or _Faces(tess)
 
-    # Each block after those it keeps clear of, on the part with its faces moved.
+    # Each block after those it keeps clear of, on the part with its faces moved - then mended as
+    # a campaign mended it, the fewest pieces left out so no rule between them breaks: the design
+    # built is the design screened.
     placed = place_all(
         opened.base,
         features,
@@ -138,6 +141,8 @@ def make(
         finder=finder,
         memo=memo,
     )
+    mended = repair(opened.base, placements, version.holes, placed)
+    placed = mended.placed
     ribs = [rib for p in placements for rib in placed[p.id].ribs]
     pads = [pad for p in placements for pad in placed[p.id].pads]
     holes = [hole for hs in version.holes for hole in placed[hs.id].holes]
@@ -238,8 +243,10 @@ def make(
             "material": (chosen or {}).get("id"),
             "mass_kg": round(surface.volume_mm3 * density * 1e-9, 1),
             "seconds": round(time.perf_counter() - started, 1),
+            "left_out": len(mended.left_out),
         },
         ribs=ribs,
+        part_surface=opened.surface,
     )
     return Made(design, placed, version.version, levers, opened.fidelity)
 
@@ -338,8 +345,15 @@ def _rules(version: Version) -> Rules:
     per_block = {}
     for placement in version.placements:
         spans = windows.get(placement.id, {})
-        own = {name: tuple(map(float, span)) for name, span in spans.items()}
-        per_block[placement.id] = {**own, "root_fillet_mm": placement.section.root_fillet_mm}
+        own = {
+            name: tuple(map(float, span)) if isinstance(span, list | tuple) else float(span)
+            for name, span in spans.items()
+        }
+        per_block[placement.id] = {
+            **own,
+            "root_fillet_mm": placement.section.root_fillet_mm,
+            "root_gap": root_gap_of(placement),
+        }
     rules = Rules(
         thickness_mm=(float(thickness[0]), float(thickness[1])),
         edge_round_mm=first.edge_round_mm,

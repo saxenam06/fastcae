@@ -53,17 +53,24 @@ def properties(
     designs: list[dict], axes: tuple[np.ndarray, np.ndarray] | None = None
 ) -> np.ndarray:
     """Every design as a row of properties, each scaled to the spread the designs cover, each block
-    weighed alike."""
+    weighed alike. A block some designs leave out counts too: whether it is there is one more of
+    its properties, the rest nothing where it is not."""
     if axes is None:
         axes = (np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0]))
-    groups: dict[str, list[list[float]]] = {}
-    for design in designs:
-        for block, row in _described(design, axes).items():
-            groups.setdefault(block, []).append(row)
-    blocks = [b for b, rows in groups.items() if len(rows) == len(designs)]
+    described = [_described(design, axes) for design in designs]
+    widths: dict[str, int] = {}
+    for rows in described:
+        for block, row in rows.items():
+            widths[block] = max(widths.get(block, 0), len(row))
     columns = []
-    for block in sorted(blocks):
-        table = np.asarray(groups[block], dtype=float)
+    for block in sorted(widths):
+        table = np.asarray(
+            [
+                [1.0, *rows[block]] if block in rows else [0.0] * (widths[block] + 1)
+                for rows in described
+            ],
+            dtype=float,
+        )
         spread = table.max(axis=0) - table.min(axis=0)
         varied = spread > 1e-9
         if not varied.any():
@@ -73,6 +80,41 @@ def properties(
     if not columns:
         return np.zeros((len(designs), 1))
     return np.concatenate(columns, axis=1)
+
+
+def separation(
+    designs: list[dict], axes: tuple[np.ndarray, np.ndarray] | None = None
+) -> dict[str, float] | None:
+    """How far each design sits from its nearest neighbour, in the properties designs are compared
+    by: the least of them, one in twenty, and the middle - None for fewer than two designs."""
+    from scipy.spatial import cKDTree
+
+    if len(designs) < 2:
+        return None
+    points = properties(designs, axes)
+    distances, _ = cKDTree(points).query(points, k=2)
+    nearest = distances[:, 1]
+    return {
+        "least": round(float(nearest.min()), 4),
+        "p5": round(float(np.percentile(nearest, 5)), 4),
+        "median": round(float(np.median(nearest)), 4),
+    }
+
+
+def layouts(designs: list[dict], step_mm: float = 5.0) -> int:
+    """How many distinct rib layouts the designs hold: which lines their ribs stand on, to the
+    nearest ``step_mm`` - however thick or tall."""
+    seen = set()
+    for design in designs:
+        lines = []
+        for made in design.get("made_of", {}).values():
+            for rib in made.get("ribs", []) if made.get("kind") == "ribs" else []:
+                ends = sorted(
+                    tuple(round(float(v) / step_mm) for v in rib[key]) for key in ("start", "end")
+                )
+                lines.append(tuple(ends))
+        seen.add(tuple(sorted(lines)))
+    return len(seen)
 
 
 def _described(design: dict, axes: tuple[np.ndarray, np.ndarray]) -> dict[str, list[float]]:

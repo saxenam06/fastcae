@@ -116,6 +116,9 @@ class Rib(_Shape):
     A ``pad`` is the same plate lying along a wall where a rib meets it, half in the wall: the wall
     made thicker round the rib's end. It is metal like any rib, but no rib, and the checks on ribs
     leave it out.
+
+    ``root_fillet_mm`` is the fillet it is joined to what it stands on with - what widens its
+    footprint past its sides, and what anything kept clear of it is measured from.
     """
 
     start: tuple[float, float, float]
@@ -129,6 +132,7 @@ class Rib(_Shape):
     flange_width_mm: float = 0.0
     flange_thickness_mm: float = 0.0
     pad: bool = False
+    root_fillet_mm: float = 0.0
 
     @property
     def tee(self) -> bool:
@@ -138,6 +142,12 @@ class Rib(_Shape):
     def width_mm(self) -> float:
         """How wide it is at its widest: the flange, for a T."""
         return self.flange_width_mm if self.tee else self.thickness_mm
+
+    @property
+    def footprint_mm(self) -> float:
+        """Half how wide its metal is where it stands: half its thickness at the root and its root
+        fillet - or half its flange, where that reaches further."""
+        return max(self.thickness_mm / 2.0 + self.root_fillet_mm, self.width_mm / 2.0)
 
     @property
     def heights(self) -> tuple[float, float]:
@@ -239,6 +249,12 @@ class ArcRib(_Shape):
     pull: tuple[float, float, float] = (0.0, 0.0, 1.0)
     draft_deg: float = 0.0
     edge_round_mm: float = 0.0
+    root_fillet_mm: float = 0.0
+
+    @property
+    def footprint_mm(self) -> float:
+        """Half how wide its metal is where it stands: half its thickness and its root fillet."""
+        return self.thickness_mm / 2.0 + self.root_fillet_mm
 
     def height_at(self, fraction: np.ndarray) -> np.ndarray:
         """How tall it is a fraction of the way along its arc: the same everywhere."""

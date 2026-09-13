@@ -40,9 +40,10 @@ from typing import Any
 import numpy as np
 from pydantic import ValidationError
 
-from .. import knowledge
+from .. import knowledge, variants
 from .. import study as studies
 from ..extract import Extraction
+from ..features import FeatureKind
 from ..project import Project
 from ..spec import (
     HoleSet,
@@ -54,9 +55,10 @@ from ..spec import (
     Words,
     gather_words,
 )
-from .blocks import fill
+from .blocks import WEBS_JOIN, fill, start
 from .intent import IntentError, Made, Opened, make
-from .placement import Drilled, Placed, _Faces, place_all
+from .placement import Drilled, Placed, _Faces, host_of, place_all
+from .repair import repair
 from .screen import Screened, face_offsets, measure_walls, screen
 from .slots import CLOSED, SETTING_LABELS, names
 from .variety import most_varied, outlines, plane_of, planned
@@ -127,6 +129,10 @@ class Session:
     its designs - the last few looked at."""
     changed: set[str] = field(default_factory=set)
     """What changed since the interface last asked - ``draft``, ``study``, ``design``."""
+    variant: str | None = None
+    """The variant being authored on Design a variant - its id, new or kept in the library - whose
+    one block the draft is; or None, and the draft is the study's next version, as the agent
+    writes it."""
 
     def __post_init__(self) -> None:
         load(self)
@@ -135,12 +141,39 @@ class Session:
 # --- the draft, read and written -----------------------------------------------------------------
 
 
-def load(session: Session) -> None:
-    """Read the draft back from the study's current version - forgetting what was not accepted."""
-    session.draft, session.heard, session.attention = _nothing(), [], []
+def _name(session: Session) -> str:
+    """What the draft is written as: the variant being authored, or the study."""
+    return session.variant or STUDY_NAME
+
+
+def _folder(session: Session) -> str:
+    return variants.FOLDER if session.variant else studies.STUDY_DIR
+
+
+def _saved(session: Session) -> studies.StudyVersion | None:
+    """What the draft is read back from: the variant as kept, or the study as accepted."""
+    if session.variant:
+        kept_variant = variants.load(session.project, session.variant)
+        return kept_variant.current if kept_variant is not None else None
     study = studies.active(session.project)
-    if study is not None:
-        version = study.current
+    return study.current if study is not None else None
+
+
+def _build(session: Session, entries: dict[str, Any]) -> studies.StudyVersion:
+    """The version the draft would write, checked - a variant's rules may name the ribs and holes
+    of any other in the library."""
+    known = variants.kinds(session.project, but=session.variant) if session.variant else None
+    return studies.build(
+        session.project, _name(session), folder=_folder(session), known_blocks=known, **entries
+    )
+
+
+def load(session: Session) -> None:
+    """Read the draft back from the study's current version - or the variant's, when one is being
+    authored - forgetting what was not accepted."""
+    session.draft, session.heard, session.attention = _nothing(), [], []
+    version = _saved(session)
+    if version is not None:
         draft = session.draft
         for block in version.blocks:
             where = block.where
@@ -150,6 +183,7 @@ def load(session: Session) -> None:
                     "add": block.add,
                     "support": [] if "support" in where.read_off else list(where.support),
                     "anchors": [] if "anchors" in where.read_off else list(where.anchors),
+                    "other_side": list(where.other_side),
                     "span": where.span,
                     "settings": {
                         name: _as_setting(domain)
@@ -180,7 +214,7 @@ def view(session: Session) -> dict:
     study as accepted; then the rules for the whole study, the part's interfaces and the rest."""
     try:
         entries, reports = _entries(session)
-        version = studies.build(session.project, STUDY_NAME, **entries)
+        version = _build(session, entries)
     except (studies.StudyError, ValueError) as error:
         return _refused(session, str(error))
     return _read(session, version, reports)
@@ -216,8 +250,8 @@ def edit(
     quotes = [q.strip() for q in quotes if q and q.strip()]
     if not quotes:
         return {"refused": "quote the engineer's words this rests on, exactly as they wrote them"}
-    study = studies.active(session.project)
-    kept_words = study.current.words if study else []
+    saved = _saved(session)
+    kept_words = saved.words if saved else []
     try:
         gather_words(kept_words, quotes, list(session.said), None, None)
     except SpecError as error:
@@ -274,6 +308,34 @@ BY_HAND = {"ribs": "ribs", "webs": "ribs", "thicken": "thicken", "holes": "holes
 CARD = "By hand:"
 
 
+def _no_floor(session: Session, refs: list[str]) -> str | None:
+    """Why faces are no floor for ribs to stand on - curved, or flat but not in one plane - in
+    words the engineer can act on; None when they are one."""
+    features = session.extraction.features
+    assert features is not None
+    host, _ = host_of(features, refs)
+    if host is not None:
+        return None
+    curved = [
+        ref
+        for ref in refs
+        if (f := features.get(ref)) is not None
+        and f.kind != FeatureKind.PLANAR_GROUP
+        and not (f.kind == FeatureKind.FACE and f.metrics.get("flat") == 1.0)
+    ]
+    if curved:
+        named = ", ".join(curved[:3]) + (f" and {len(curved) - 3} more" if len(curved) > 3 else "")
+        which = "the face selected" if len(refs) == 1 else f"{len(curved)} of the {len(refs)}"
+        said = f"{which} {'is' if len(curved) == 1 else 'are'} curved ({named})"
+    else:
+        said = "the faces selected are flat, but not in one plane"
+    return (
+        f"ribs stand on flat faces in one plane for now, and {said}. Select a floor or a plate - "
+        "one flat face, or flat faces in one plane - to stand them on; or choose webs between, "
+        "to join faces with nothing under them"
+    )
+
+
 def hand(session: Session, action: dict[str, Any], selected: list[int] | None = None) -> dict:
     """The draft changed by the engineer's hand on Design a variant, as :func:`edit` changes it from
     their words: what was done is said in words - "By hand: ..." - kept among the
@@ -283,6 +345,7 @@ def hand(session: Session, action: dict[str, Any], selected: list[int] | None = 
     ``action`` is one of: ``add`` a block - ``ribs`` standing on what is selected, ``webs``
     between it, faces to ``thicken``, a plate to cut ``holes`` in, or the ``material``;
     ``stand_on`` or ``end_on`` - a block's entities, or none to read them off the part;
+    ``other_side`` - what webs run to from what they end on, never within either side;
     ``setting`` - a ``value``, a ``low`` and ``high`` with a ``step``, some ``options``, or none
     to hand it back to the part; ``keep_clear`` - of entities, or of other blocks' ``ribs:b1`` and
     ``holes:b2``, by ``clearance_mm``; ``remove`` a block; ``confirm`` a rule the part suggested,
@@ -292,15 +355,25 @@ def hand(session: Session, action: dict[str, Any], selected: list[int] | None = 
     refs = [str(r) for r in action["refs"]] if action.get("refs") is not None else faces
     block = action.get("block")
     ids = [b["id"] for b in session.draft["blocks"]]
-    if kind != "add" and kind not in ("confirm", "designs") and block not in ids:
+    if kind != "add" and kind not in ("confirm", "designs", "drop") and block not in ids:
         return {"refused": f"there is no block {block} - blocks: {', '.join(ids) or 'none yet'}"}
     change: dict[str, Any] = {}
     if kind == "add":
         what = str(action.get("add") or "")
         if what not in BY_HAND:
             return {"refused": f"a block adds {', '.join(BY_HAND)} - not {what!r}"}
+        if session.variant and what == "material":
+            return {"refused": "a part is cast in one material, which no variant changes"}
+        if session.variant and ids:
+            return {
+                "refused": "a variant is one change in one place: create this one, then start "
+                "another for the next"
+            }
         if what != "material" and not refs:
             return {"refused": "select the faces on the part first, or name them"}
+        floor = _no_floor(session, refs) if what == "ribs" else None
+        if floor:
+            return {"refused": floor}
         casting = [b["id"] for b in session.draft["blocks"] if b.get("add") == "material"]
         if what == "material" and casting:
             return {
@@ -310,7 +383,7 @@ def hand(session: Session, action: dict[str, Any], selected: list[int] | None = 
         number = 1
         while f"b{number}" in ids:
             number += 1
-        new = f"b{number}"
+        new = session.variant or f"b{number}"
         said = {
             "ribs": f"add {new}, ribs standing on {_and(refs)}",
             "webs": f"add {new}, webs between {_and(refs)} with nothing under them",
@@ -328,6 +401,11 @@ def hand(session: Session, action: dict[str, Any], selected: list[int] | None = 
         where = "stands on" if kind == "stand_on" else "ends on"
         said = f"{block} {where} {_and(refs) if refs else 'what is read off the part'}"
         change["blocks"] = [{"id": block, kind: refs}]
+    elif kind == "other_side":
+        # What the webs run to, from what they end on: from one side to the other.
+        refs = [str(r) for r in action.get("refs") or []]
+        said = f"{block} runs to {_and(refs)}" if refs else f"{block} runs between any of its ends"
+        change["blocks"] = [{"id": block, "other_side": refs}]
     elif kind == "setting":
         name = str(action.get("name") or "")
         if not name:
@@ -344,6 +422,24 @@ def hand(session: Session, action: dict[str, Any], selected: list[int] | None = 
         said = f"{block} keeps {clearance:g} mm clear of {_and(refs)}"
         rule = {"kind": "keep_clear_of", "refs": refs, "params": {"clearance_mm": clearance}}
         change["blocks"] = [{"id": block, "rules": [rule]}]
+    elif kind == "rule":
+        rule_kind = str(action.get("kind") or "")
+        if rule_kind not in studies.OFFERED:
+            return {"refused": f"a variant holds {', '.join(studies.OFFERED)} - not {rule_kind!r}"}
+        needs = studies.KINDS[rule_kind]
+        params = {k: v for k, v in (action.get("params") or {}).items() if v is not None}
+        named = refs if needs.names else []
+        if needs.names and not named:
+            return {"refused": "which faces? Select them on the part, or name them"}
+        lacking = [p for p in needs.needs if p not in params]
+        if lacking:
+            return {"refused": f"{rule_kind.replace('_', ' ')} needs {', '.join(lacking)}"}
+        rule = {"kind": rule_kind, "refs": named, "params": params}
+        said = f"{block} holds: {studies.said(studies.Constraint(**rule))}"
+        change["blocks"] = [{"id": block, "rules": [rule]}]
+    elif kind == "drop":
+        said = f"take out {action.get('rule')}"
+        change["drop"] = [str(action.get("rule"))]
     elif kind == "remove":
         said = f"take out {block}"
         change["blocks"] = [{"id": block, "remove": True}]
@@ -395,7 +491,7 @@ def accept(session: Session) -> dict:
     it. ``{"version": n}``, or ``{"cannot": why}``."""
     try:
         entries, reports = _entries(session)
-        version = studies.build(session.project, STUDY_NAME, **entries)
+        version = _build(session, entries)
         note = "; ".join(_read(session, version, reports)["changes"])
         written = studies.write(session.project, STUDY_NAME, **entries, note=note[:400])
     except (studies.StudyError, ValueError) as error:
@@ -451,13 +547,18 @@ def _entries(session: Session) -> tuple[dict[str, Any], dict[str, dict]]:
     reports: dict[str, dict] = {}
     for block in draft["blocks"]:
         fixed = {n: s for n, s in block["settings"].items() if _single(s) is not None}
+        # Both sides of what webs run between are read off the part together: it is all of them
+        # they stand among.
+        other = list(block.get("other_side") or [])
+        ends = list(dict.fromkeys([*block["anchors"], *other]))
         filled = fill(
             session.extraction,
             exit_along,
             {
                 "add": block.get("add", "ribs"),
                 "support": block["support"],
-                "anchors": block["anchors"],
+                "anchors": ends,
+                "other_side": other,
                 "given": {
                     **{n: _fixed_domain(s) for n, s in fixed.items()},
                     **{n: _provisional(s) for n, s in block["settings"].items() if n not in fixed},
@@ -466,13 +567,46 @@ def _entries(session: Session) -> tuple[dict[str, Any], dict[str, dict]]:
             floor,
         )
         free = filled["free"]
+        if session.variant and free is not None:
+            # A variant authored on the card starts simple, where nothing was set by hand.
+            start(free, block.get("add", "ribs"), block["settings"])
         for name, setting in block["settings"].items():
             free[name] = {"unit": _unit(name), **_domain(setting, free.get(name, {}))}
+        # Every choice the part offers for what the engineer narrowed, so the card can offer them
+        # still: the part read again without those choices.
+        narrowed = [n for n, s in block["settings"].items() if _choices_given(s)]
+        choices: dict[str, list] = {}
+        if narrowed:
+            offered = fill(
+                session.extraction,
+                exit_along,
+                {
+                    "add": block.get("add", "ribs"),
+                    "support": block["support"],
+                    "anchors": ends,
+                    "other_side": other,
+                    "given": {
+                        n: _fixed_domain(s) if n in fixed else _provisional(s)
+                        for n, s in block["settings"].items()
+                        if n not in narrowed
+                    },
+                },
+                floor,
+            )
+            if session.variant and offered.get("free") is not None:
+                start(offered["free"], block.get("add", "ribs"), {})
+            choices = {
+                n: list(offered["free"][n]["options"])
+                for n in narrowed
+                if (offered.get("free") or {}).get(n, {}).get("options")
+            }
+        where = {**filled["where"], "span": block.get("span") or "union", "other_side": other}
+        where["anchors"] = [a for a in where.get("anchors", []) if a not in other]
         blocks.append(
             {
                 "id": block["id"],
                 "add": block.get("add", "ribs"),
-                "where": {**filled["where"], "span": block.get("span") or "union"},
+                "where": where,
                 "free": free,
                 "cites": block.get("cites") or ["these"],
                 "relaxed": list(block.get("relaxed", [])),
@@ -495,7 +629,18 @@ def _entries(session: Session) -> tuple[dict[str, Any], dict[str, dict]]:
             suggested.append(scoped)
         measured += filled["measured"]
         pull = pull or filled["pull"]
-        reports[block["id"]] = {k: filled[k] for k in ("needed", "problems", "cannot", "note")}
+        reports[block["id"]] = {
+            **{k: filled[k] for k in ("needed", "problems", "cannot", "note")},
+            "choices": choices,
+        }
+        webs = block.get("add", "ribs") == "ribs" and not block["support"]
+        if session.variant and webs and not other:
+            # Webs on the card run from one side to another, never within the faces of one: what
+            # they join is both sides - the other still to add, which is all they need said.
+            reports[block["id"]]["needed"] = [
+                *(n for n in reports[block["id"]]["needed"] if n != WEBS_JOIN),
+                "what the webs run to - select those faces and add them as the other side",
+            ]
     suggested += _holes_clear_of_ribs(draft, blocks)
     entries = {
         "quotes": list(session.heard),
@@ -509,10 +654,12 @@ def _entries(session: Session) -> tuple[dict[str, Any], dict[str, dict]]:
             *suggested,
             *closed_interfaces(session.extraction),
         ],
-        "prefer": list(draft["prefer"]),
-        "objectives": list(draft["objectives"]),
-        "pull": draft["pull"] or pull,
-        "target": draft["target"],
+        # A variant is one change and every rule it holds - no pull while mould release waits for
+        # one, nothing preferred, no target: how many designs is the campaign's to say.
+        "prefer": [] if session.variant else list(draft["prefer"]),
+        "objectives": [] if session.variant else list(draft["objectives"]),
+        "pull": None if session.variant else (draft["pull"] or pull),
+        "target": None if session.variant else draft["target"],
         "measured": measured,
     }
     return entries, reports
@@ -608,6 +755,8 @@ def _change_block(draft: dict[str, Any], change: dict[str, Any], by: str = "word
         block["support"] = list(change["stand_on"])
     if change.get("end_on") is not None:
         block["anchors"] = list(change["end_on"])
+    if change.get("other_side") is not None:
+        block["other_side"] = list(change["other_side"])
     if change.get("span"):
         block["span"] = change["span"]
     for name, setting in (change.get("settings") or {}).items():
@@ -627,7 +776,7 @@ def _drop_and_confirm(session: Session, drop: list[str], confirm: list[str], kno
     under. A rule the words put in is taken out of the draft; one the part suggested for a block
     is kept out of that block from now on; the part's interfaces stay closed."""
     entries, _ = _entries(session)
-    version = studies.build(session.project, STUDY_NAME, **entries)
+    version = _build(session, entries)
     by_id = {c.id: c for c in version.constraints}
     draft = session.draft
     words = [c for c in version.constraints if c.by == "words"]
@@ -694,6 +843,11 @@ def _single(setting: dict[str, Any]) -> Any:
     if options is not None and len(options) == 1:
         return options[0]
     return None
+
+
+def _choices_given(setting: dict[str, Any]) -> bool:
+    """Whether a setting given by hand is some of its choices - or one of them - not a number."""
+    return setting.get("options") is not None or isinstance(setting.get("value"), str)
 
 
 def _fixed_domain(setting: dict[str, Any]) -> dict[str, Any]:
@@ -804,8 +958,7 @@ def _kept(item: Any) -> dict[str, Any]:
 
 
 def _read(session: Session, version: studies.StudyVersion, reports: dict[str, dict]) -> dict:
-    study = studies.active(session.project)
-    accepted = study.current if study is not None else None
+    accepted = _saved(session)
     now = _shown(version, reports)
     before = _shown(accepted, {}) if accepted is not None else None
     differs = accepted is None or studies.meaning(version) != studies.meaning(accepted)
@@ -831,18 +984,61 @@ def _read(session: Session, version: studies.StudyVersion, reports: dict[str, di
         "cannot": None,
         "refused": False,
         **now,
-        "open": studies.open_items(version),
+        "open": [line for line in studies.open_items(version) if not _about_pull(line, session)],
         "assumed": studies.assumed(version),
         "attention": list(session.attention),
         "names": names(features, real),
         "runs": runs(session),
+        "variant": _variant_said(session, version),
+        "offered": _offered(),
     }
 
 
-def _refused(session: Session, why: str) -> dict:
-    study = studies.active(session.project)
+def _about_pull(line: str, session: Session) -> bool:
+    """Whether an open item asks for the pull - which a variant does not hold."""
+    return bool(session.variant) and line.startswith("the pull direction")
+
+
+def _variant_said(session: Session, version: studies.StudyVersion) -> dict | None:
+    """The variant being authored: its code, its name - as kept, or suggested from what it adds
+    and where - whether it is kept yet, and how many combinations it allows."""
+    if not session.variant:
+        return None
+    kept = variants.load(session.project, session.variant)
+    block = version.blocks[0] if version.blocks else None
+    label = kept.label if kept is not None and kept.label else None
     return {
-        "accepted": study.current.version if study is not None else None,
+        "id": session.variant,
+        "label": label or (variants.suggested_label(block) if block is not None else ""),
+        "kept": kept is not None,
+        "kind": variants.kind_of(block) if block is not None else None,
+        "combinations": studies.combinations(block) if block is not None else 0,
+        "others": [
+            {"id": v["id"], "label": v["label"], "kind": v["kind"]}
+            for v in (variants.listed(o) for o in variants.library(session.project))
+            if v["id"] != session.variant
+        ],
+    }
+
+
+def _offered() -> list[dict[str, Any]]:
+    """The rules a variant may hold, as the card offers them: each kind, what it reads as, and
+    what it needs."""
+    return [
+        {
+            "kind": kind,
+            "says": studies.KINDS[kind].says,
+            "needs": list(studies.KINDS[kind].needs),
+            "names": studies.KINDS[kind].names,
+        }
+        for kind in studies.OFFERED
+    ]
+
+
+def _refused(session: Session, why: str) -> dict:
+    saved = _saved(session)
+    return {
+        "accepted": saved.version if saved is not None else None,
         "differs": None,
         "changes": [],
         "cannot": why,
@@ -855,7 +1051,13 @@ def _refused(session: Session, why: str) -> dict:
         "assumed": [],
         "attention": list(session.attention),
         "names": {},
+        "variant": _variant_said(session, _nothing_version()) if session.variant else None,
+        "offered": _offered(),
     }
+
+
+def _nothing_version() -> studies.StudyVersion:
+    return studies.StudyVersion(version=0, created="", words=[], blocks=[])
 
 
 def _shown(version: studies.StudyVersion, reports: dict[str, dict]) -> dict:
@@ -876,21 +1078,29 @@ def _shown(version: studies.StudyVersion, reports: dict[str, dict]) -> dict:
                     "refs": list(block.where.anchors),
                     "read_off": "anchors" in block.where.read_off,
                 },
+                "other_side": {"refs": list(block.where.other_side), "read_off": False},
                 "keep_clear": [_rule(c) for c in mine if c.kind == "keep_clear_of"],
                 "settings": [
                     {
                         "name": name,
                         "label": SETTING_LABELS.get(name, name.replace("_", " ")),
-                        "says": d.says(),
+                        "says": _says(name, d),
                         "source": d.source,
                         "fixed": d.fixed,
                         "basis": d.basis,
+                        # A free layout's seed is how designs differ, never what anyone sets.
+                        "hidden": name in HIDDEN,
+                        # A height is a share of what each end meets, shown as a percentage.
+                        "percent": name == "height_fraction",
                         # What it may take, to change by hand on the card.
                         "domain": {
                             "low": d.low,
                             "high": d.high,
                             "step": d.step,
                             "options": d.options,
+                            # Every choice the part offers, some of which the engineer may have
+                            # left out.
+                            "choices": (report.get("choices") or {}).get(name, d.options),
                             "suggested": d.suggested,
                             "unit": d.unit,
                             # What the part may be cast in, to choose the one it is.
@@ -945,6 +1155,26 @@ def _shown(version: studies.StudyVersion, reports: dict[str, dict]) -> dict:
             },
         },
     }
+
+
+# Settings a variant varies over that nobody sets: which free layout a design takes.
+HIDDEN = ("layout",)
+
+
+def _says(name: str, domain: studies.Domain) -> str:
+    """What a setting may take, in words - a height as a percentage of what each end meets."""
+    if name != "height_fraction" or domain.options is not None:
+        return domain.says()
+
+    def percent(value: Any) -> str:
+        return f"{float(value) * 100:g}"
+
+    if domain.low == domain.high:
+        return f"{percent(domain.low)} %"
+    said = f"{percent(domain.low)} to {percent(domain.high)} %"
+    if domain.suggested is not None:
+        said += f", {percent(domain.suggested)} suggested"
+    return said
 
 
 def _rule(constraint: studies.Constraint) -> dict[str, Any]:
@@ -1064,14 +1294,19 @@ class Pieces:
 
 
 def _pieces(
-    version: studies.StudyVersion, values: dict[str, dict[str, Any]] | None = None
+    version: studies.StudyVersion,
+    values: dict[str, dict[str, Any]] | None = None,
+    present: set[str] | None = None,
 ) -> Pieces:
     """Every block that can be built, at the values given for it - or at its suggested point - as
-    what it is made from, and why each other block cannot. Webs with nothing under them stand along
-    the pull when it is a direction and what they join runs along it."""
+    what it is made from, and why each other block cannot; only the blocks ``present``, when a
+    design holds some of them. Webs with nothing under them stand along the pull when it is a
+    direction and what they join runs along it."""
     pieces = Pieces()
     pull = version.pull.direction if version.pull is not None else None
     for block in version.blocks:
+        if present is not None and block.id not in present:
+            continue
         if block.add not in studies.ADDS:
             pieces.cannot.append(f"{block.id}: nothing can add {block.add} yet")
             continue
@@ -1164,9 +1399,11 @@ def _rows(pieces: Pieces, placed: dict) -> dict[str, dict[str, Any]]:
         rows[hole_set.id] = {"holes": len(result.holes), "says": result.tally()}
     for offset in pieces.offsets:
         way = "thickened" if offset.offset_mm > 0 else "thinned" if offset.offset_mm < 0 else "kept"
+        # A few faces by name; more, how many - every face named says nothing a design changes.
+        faces = _and(offset.faces) if len(offset.faces) <= 3 else f"{len(offset.faces)} faces"
         rows[offset.id] = {
             "moved_mm": offset.offset_mm,
-            "says": f"{', '.join(offset.faces)} {way}"
+            "says": f"{faces} {way}"
             + (f" by {abs(offset.offset_mm):g} mm" if offset.offset_mm else " as they are"),
         }
     if pieces.material is not None:
@@ -1191,7 +1428,7 @@ def paths(session: Session, draft: bool = True, values: dict | None = None) -> d
     if draft:
         try:
             entries, _ = _entries(session)
-            version = studies.build(session.project, STUDY_NAME, **entries)
+            version = _build(session, entries)
         except (studies.StudyError, ValueError) as error:
             return {"cannot": str(error)}
     else:
@@ -1216,16 +1453,239 @@ def paths(session: Session, draft: bool = True, values: dict | None = None) -> d
     }
 
 
+# --- variants, authored on the card ---------------------------------------------------------------
+
+# How many points of a variant Show paths tries, at most, to find one that passes.
+SAMPLE_TRIES = 48
+
+
+def new_variant(session: Session) -> dict:
+    """A new variant to author: an id no variant has had, and nothing in it yet."""
+    session.variant = variants.new_id(session.project)
+    session.draft, session.heard, session.attention = _nothing(), [], []
+    session.changed.add("draft")
+    return view(session)
+
+
+def open_variant(session: Session, vid: str) -> dict:
+    """A variant of the library to change: the draft read back from it as kept."""
+    if variants.load(session.project, vid) is None:
+        return {"refused": f"there is no variant {vid}"}
+    session.variant = vid
+    load(session)
+    return view(session)
+
+
+def discard_variant(session: Session) -> dict:
+    """Forget what was not saved: the variant as kept - or, never kept, nothing in it."""
+    load(session)
+    return view(session)
+
+
+def save_variant(session: Session, label: str | None = None) -> dict:
+    """The variant being authored, kept in the library once one of its points passes - created, or
+    saved as changed, called ``label``. ``{"variant": id, "version": n, "label": ...}``, or
+    ``{"cannot": why}``: nothing is kept that no design could be made of."""
+    if not session.variant:
+        return {"cannot": "no variant is being authored"}
+    if not session.draft["blocks"]:
+        return {"cannot": "add ribs, webs, a thickening or holes first: select faces on the part"}
+    card = view(session)
+    if card.get("refused"):
+        return {"cannot": card["cannot"]}
+    kept = variants.load(session.project, session.variant)
+    name = (
+        (label or "").strip()
+        or (kept.label if kept is not None else "")
+        or card["variant"]["label"]
+    )
+    if kept is not None and not card["differs"]:
+        variants.rename(session.project, session.variant, name)
+        session.changed.add("variants")
+        return {"variant": session.variant, "version": kept.current.version, "label": name}
+    sample = variant_sample(session)
+    if "cannot" in sample:
+        return {"cannot": sample["cannot"]}
+    try:
+        entries, _ = _entries(session)
+        written = studies.write(
+            session.project,
+            session.variant,
+            folder=variants.FOLDER,
+            make_active=False,
+            label=name,
+            known_blocks=variants.kinds(session.project, but=session.variant),
+            **entries,
+            note="; ".join(card["changes"])[:400],
+        )
+    except (studies.StudyError, ValueError) as error:
+        return {"cannot": str(error)}
+    load(session)
+    session.changed.add("variants")
+    return {"variant": session.variant, "version": written.version, "label": name}
+
+
+def variant_sample(session: Session, another: bool = False, seed: int | None = None) -> dict:
+    """The variant being authored at a point that passes: its suggested point first - or, for
+    another sample, points drawn at random from what it allows - each placed alone, repaired and
+    screened, until one passes. Its lines, what repair left out, what it made; or why none of the
+    points tried passes, the commonest reasons first."""
+    try:
+        entries, _ = _entries(session)
+        version = _build(session, entries)
+    except (studies.StudyError, ValueError) as error:
+        return {"cannot": str(error)}
+    if not version.blocks:
+        return {"cannot": "add ribs, webs, a thickening or holes first: select faces on the part"}
+    block = version.blocks[0]
+    first = _pieces(version)
+    if not first.any():
+        return {"cannot": "; ".join(first.cannot) or "nothing it asks for can be placed yet"}
+    draw = random.Random(seed)
+    points: list[dict[str, Any]] = [] if another else [{}]
+    while len(points) < SAMPLE_TRIES:
+        points.append(random_point(block, draw))
+    walls = measure_walls(session.extraction, _measure(session).exit_along, first.offsets)
+    why: Counter[str] = Counter()
+    for number, values in enumerate(points, start=1):
+        outcome = _tried(session, version, {block.id: values}, first.radius(), walls)
+        if isinstance(outcome, str):
+            return {"cannot": outcome}
+        pieces, mended, screened = outcome
+        if screened.outcome == "reject":
+            why.update(f["check"] for f in screened.rejected())
+            continue
+        rows = _rows(pieces, mended.placed)
+        return {
+            "lines": [line for result in mended.placed.values() for line in result.tried],
+            **_counted(mended.placed),
+            # A variant is one block: what it made, without its code.
+            "summary": "; ".join(row["says"] for row in rows.values()),
+            "blocks": rows,
+            "values": values,
+            "about": _about(version, {block.id: values}).get(block.id, ""),
+            "left_out": mended.left_out,
+            "left_out_said": left_out_said(mended.left_out),
+            "findings": [f for f in screened.findings if f["outcome"] != "pass"],
+            "tried": number,
+            "drawn": _drawn(block, another, seed, number),
+            "waiting": first.cannot,
+        }
+    reasons = ", ".join(f"{check} {n}" for check, n in why.most_common(3))
+    return {
+        "cannot": f"none of the {len(points)} points tried passes ({reasons}) - change where it "
+        "stands or what it may take"
+    }
+
+
+def _drawn(block: studies.Block, another: bool, seed: int | None, number: int) -> str:
+    """How a sample of a variant was drawn, in a sentence: its suggested point, or a point drawn at
+    random - every choice and every step of a range as likely as the next - and on which try of how
+    many it passed."""
+    if not any(not domain.fixed for domain in block.free.values()):
+        return "Nothing in it varies: every sample is its one design."
+    if not another and number == 1:
+        return "At its suggested point: every setting where it starts."
+    random_ = "every choice, and every step of a range, as likely as the next"
+    tries = f"passed on try {number} of up to {SAMPLE_TRIES}"
+    if not another:
+        return f"Its suggested point did not pass, so drawn at random: {random_}; {tries}."
+    return f"Drawn at random (seed {seed}): {random_}; {tries}."
+
+
+def variant_shown(session: Session, vid: str) -> dict | None:
+    """A variant of the library as a campaign shows it, read only: what it adds and where, what it
+    may vary, every rule it holds - never the one being authored, which stays as it is."""
+    kept = variants.load(session.project, vid)
+    if kept is None:
+        return None
+    shown = _shown(kept.current, {})
+    features = session.extraction.features
+    assert features is not None
+    block = shown["blocks"][0]
+    # A rule said for every block - the drawing's smallest radius - is the variant's own: it has
+    # one block, and a campaign composes the rule onto it.
+    block["rules"] = [*block["rules"], *shown["rules"]]
+    refs = {*block["stand_on"]["refs"], *block["end_on"]["refs"], *block["other_side"]["refs"]}
+    for rule in [*block["keep_clear"], *block["rules"]]:
+        refs |= set(rule["refs"])
+    real = sorted(r for r in refs if features.get(r) is not None)
+    return {
+        **variants.listed(kept),
+        "block": block,
+        "interfaces": len(shown["interfaces"]),
+        "names": names(features, real),
+    }
+
+
+def random_point(block: studies.Block, draw: random.Random) -> dict[str, Any]:
+    """A point of a block drawn at random: each setting that is not fixed at a value it may take,
+    each value as likely as the next - choices by their weights, where a study weighs them; a
+    variant weighs none."""
+    return {
+        name: studies._at(domain, draw.random())
+        for name, domain in sorted(block.free.items())
+        if not domain.fixed
+    }
+
+
+def left_out_said(left_out: list[dict[str, Any]]) -> str:
+    """What repair left out of a design, in a few words: how many ribs and holes, and why."""
+    if not left_out:
+        return ""
+    counted = Counter((x["what"], x["why"]) for x in left_out)
+    parts = [
+        f"{n} {what}{'s' if n != 1 else ''} ({why})" for (what, why), n in sorted(counted.items())
+    ]
+    return "left out so the rest hold: " + ", ".join(parts)
+
+
+def _tried(
+    session: Session,
+    version: studies.StudyVersion,
+    values: dict[str, dict[str, Any]],
+    radius: float,
+    walls: dict[str, float | None],
+    off: frozenset[str] | set[str] = frozenset(),
+):
+    """One design at ``values`` - the blocks it holds, each at the point given - placed on the
+    grid of ``radius``, repaired and screened; or why it cannot be placed."""
+    pieces = _pieces(version, values, present=set(values))
+    if not pieces.any():
+        return "; ".join(pieces.cannot) or "nothing it asks for can be placed yet"
+    placed = _place(session, version, pieces, radius)
+    if "cannot" in placed:
+        return str(placed["cannot"])
+    opened = _opened(session, _spec_of(version, pieces), "preview", radius)
+    features = session.extraction.features
+    assert features is not None
+    mended = repair(opened.base, pieces.placements, pieces.holes, placed)
+    screened = screen(
+        features,
+        opened.base,
+        pieces.placements,
+        pieces.holes,
+        pieces.offsets,
+        pieces.material,
+        mended.placed,
+        walls,
+        opened.surface.volume_mm3,
+        set(off),
+    )
+    return pieces, mended, screened
+
+
 def design_from_study(
     session: Session,
     fidelity: str,
     values: dict[str, dict[str, Any]] | None = None,
     run: str | None = None,
+    present: set[str] | None = None,
 ) -> dict:
     """A design from the active study's current version - or from the study version a kept
     ``run`` of Go was made from - every block at the values given for it, or at its suggested
-    point, and its verdict, with what the study holds that nothing enforces yet and what nobody
-    confirmed. Or why there is none."""
+    point - only the variants ``present``, for a design of a campaign - and its verdict, with what
+    the study holds that nothing enforces yet and what nobody confirmed. Or why there is none."""
     if run is not None:
         found = _run(session, run)
         if isinstance(found, str):
@@ -1241,7 +1701,7 @@ def design_from_study(
     _, lost = studies.resolve(version, session.extraction.features)
     if lost:
         return {"cannot": "the part is not the one the study names: " + "; ".join(lost[:3])}
-    pieces = _pieces(version, values)
+    pieces = _pieces(version, values, present)
     if not pieces.any():
         return {"cannot": "; ".join(pieces.cannot) or "nothing the study asks for can be made yet"}
     point = _spec_of(version, pieces)
@@ -1319,13 +1779,11 @@ def go(
     # a grid per root fillet sampled would build the part's field again and again.
     radius = first.radius()
     try:
-        opened = _opened(session, _spec_of(version, first), "preview", radius)
+        _opened(session, _spec_of(version, first), "preview", radius)
     except IntentError as error:
         yield {"type": "error", "message": str(error)}
         return
     extraction = session.extraction
-    features = extraction.features
-    assert features is not None
     walls = measure_walls(extraction, _measure(session).exit_along, first.offsets)
     campaign = {
         "study": study.name,
@@ -1347,24 +1805,10 @@ def go(
     session.loaded = {}
     started = time.perf_counter()
 
-    def tried_at(values: dict[str, dict[str, Any]]) -> tuple[Pieces, dict, Screened] | str:
-        pieces = _pieces(version, values)
-        placed = _place(session, version, pieces, radius)
-        if "cannot" in placed:
-            return str(placed["cannot"])
-        screened = screen(
-            features,
-            opened.base,
-            pieces.placements,
-            pieces.holes,
-            pieces.offsets,
-            pieces.material,
-            placed,
-            walls,
-            opened.surface.volume_mm3,
-            set(off["checks"]),
-        )
-        return pieces, placed, screened
+    def tried_at(values: dict[str, dict[str, Any]]):
+        # Placed, repaired and screened as a campaign's designs are - and as a design is built -
+        # so the design listed is the design made.
+        return _tried(session, version, values, radius, walls, off["checks"])
 
     yield {
         "type": "started",
@@ -1451,7 +1895,7 @@ def go(
             if isinstance(outcome, str):
                 yield {"type": "error", "message": outcome}
                 return
-            pieces, placed, screened = outcome
+            pieces, mended, screened = outcome
             # A design screened out by one block alone - holes with no room left by these ribs -
             # takes another of that block's points, the rest as they are, a few times.
             for _ in range(REPAIRS):
@@ -1467,7 +1911,7 @@ def go(
                 if isinstance(outcome, str):
                     yield {"type": "error", "message": outcome}
                     return
-                pieces, placed, screened = outcome
+                pieces, mended, screened = outcome
                 if screened.outcome != "reject":
                     repaired += 1
             if screened.outcome == "reject":
@@ -1475,12 +1919,14 @@ def go(
                 if tried % 25 == 0:
                     yield progress()
                 continue
+            placed = mended.placed
             key = _key(pieces, placed)
             if key in seen:
                 rejected["alike"] += 1
                 continue
             seen.add(key)
             design = _design(len(session.designs), version, values, pieces, placed, screened)
+            design["left_out"] = mended.left_out
             archive.write(json.dumps(_archived(design)) + "\n")
             kept_paths.write(json.dumps(_compact(design["lines"])) + "\n")
             session.designs.append(design)
@@ -1718,18 +2164,54 @@ def _spread_of(designs: list[dict]) -> dict[str, Any]:
 
 
 def _about(version: studies.StudyVersion, values: dict[str, dict[str, Any]]) -> dict[str, str]:
-    """A design in a few words per block: what varies in it, at the value it takes."""
+    """A design in a few words per block: what varies in it, at the value it takes - only what
+    makes a difference to its pattern: no spokes for a grid, no free layout but for free lines."""
     out = {}
     for block in version.blocks:
         if block.id not in values:
             continue
         chosen = {n: d.suggested for n, d in block.free.items()}
         chosen.update(values[block.id])
-        varied = [n for n, d in block.free.items() if not d.fixed]
-        out[block.id] = ", ".join(
-            f"{SETTING_LABELS.get(n, n)} {_value(chosen.get(n))}" for n in varied if n in chosen
-        )
+        used = studies.effective(block, chosen)
+        varied = [
+            n
+            for n, d in block.free.items()
+            if not d.fixed and n in used and n in chosen and n not in HIDDEN
+        ]
+        said = [_said_value(n, chosen[n], block.free[n]) for n in varied]
+        if chosen.get("generator") == "free":
+            # Free lines are told apart by their layout, which nobody sets.
+            lines = f"{PATTERNS_SAID['free']} (layout {int(chosen.get('layout') or 0)})"
+            if "generator" in varied:
+                said[varied.index("generator")] = lines
+            else:
+                said.insert(0, lines)
+        out[block.id] = ", ".join(said)
     return out
+
+
+# Patterns as the card names them.
+PATTERNS_SAID = {
+    "parallel": "parallel ribs",
+    "grid": "square grid",
+    "triangle": "triangle grid",
+    "radial": "spokes",
+    "free": "free lines",
+}
+
+
+def _said_value(name: str, value: Any, domain: studies.Domain) -> str:
+    """One setting at a value, as a person says it: a pattern by name, a height in percent, a
+    length in its unit."""
+    if name == "generator":
+        return PATTERNS_SAID.get(str(value), str(value))
+    label = SETTING_LABELS.get(name, name.replace("_", " "))
+    if name == "height_fraction" and isinstance(value, int | float):
+        return f"{label} {float(value) * 100:g}%"
+    unit = domain.unit or _unit(name)
+    if isinstance(value, int | float) and unit:
+        return f"{label} {_value(value)}{'' if unit == '°' else ' '}{unit}"
+    return f"{label} {_value(value)}"
 
 
 def _value(value: Any) -> str:
@@ -1757,7 +2239,7 @@ def design_paths(session: Session, index: int, run: str | None = None) -> dict:
             if study is None:
                 return {"cannot": "there is no study yet"}
             version = study.current
-        pieces = _pieces(version, design["values"])
+        pieces = _pieces(version, design["values"], _present(design))
         placed = _place(session, version, pieces, _pieces(version).radius())
         if "cannot" in placed:
             return placed
@@ -1772,18 +2254,40 @@ def design_paths(session: Session, index: int, run: str | None = None) -> dict:
     }
 
 
+def _present(design: dict) -> set[str] | None:
+    """The variants a design of a campaign holds; None for a design of a study, which holds every
+    block."""
+    held = design.get("variants")
+    return set(held) if held is not None else None
+
+
 # Every design's paths, beside a run's designs: a line of JSON each, in the same order.
 PATHS = "paths.jsonl"
 
 
 def _compact(lines: list[dict]) -> list[list]:
-    """A design's paths as they are kept: each line its two ends and what became of it."""
-    return [[*line["a"], *line["b"], line["outcome"]] for line in lines]
+    """A design's paths as they are kept: each line its two ends and what became of it - and, for
+    what was made, how wide it is and which way it stands."""
+    return [
+        [
+            *line["a"],
+            *line["b"],
+            line["outcome"],
+            *([line["mm"], *line["up"]] if "mm" in line else []),
+        ]
+        for line in lines
+    ]
 
 
 def _expanded(rows: list[list]) -> list[dict]:
     """A design's paths as kept, as the lines drawn."""
-    return [{"a": row[0:3], "b": row[3:6], "outcome": row[6]} for row in rows]
+    out = []
+    for row in rows:
+        line = {"a": row[0:3], "b": row[3:6], "outcome": row[6]}
+        if len(row) >= 11:
+            line.update(mm=row[7], up=row[8:11])
+        out.append(line)
+    return out
 
 
 def _kept_paths(session: Session, run: str) -> list[str] | None:
@@ -1822,6 +2326,7 @@ def runs(session: Session) -> list[dict]:
         out.append(
             {
                 "run": folder.name,
+                "name": chosen.get("name") or folder.name,
                 "study": said.get("study"),
                 "version": said.get("version"),
                 "made": said.get("made"),
@@ -1895,6 +2400,46 @@ STAGES = (
     ("R", "Results", False, "solved: stresses, displacements, frequencies"),
 )
 
+# What each stage takes, and what it gives - the pipeline in the open.
+STAGE_FLOW = {
+    "P": (
+        "the variants a design holds, each at a point of what it allows; the part's faces and "
+        "features; each variant's rules",
+        "where every rib, pad and hole goes, with what repair left out; how it screened; what it "
+        "weighs; its paths, drawn at once - seconds a thousand designs",
+    ),
+    "F": (
+        "a design's paths; the part's distance field at the preview or full grid",
+        "the design's field - ribs joined with their fillets, faces moved, holes cut - its "
+        "surfaces, its new metal as cells, and every field check - minutes a design",
+    ),
+    "M": ("a design's field", "a volume mesh for the solver"),
+    "S": ("the mesh; loads and supports", "the solver deck"),
+    "R": ("the solver deck", "stresses, displacements, frequencies"),
+}
+
+# How designs may be drawn, as the campaign card offers them.
+METHODS = (
+    (
+        "even",
+        "Spread evenly",
+        "a scrambled Sobol sequence: every point of every variant taken "
+        "about as often, choices balanced - the widest spread for the fewest designs",
+    ),  # fmt: skip
+    (
+        "random",
+        "Random",
+        "each design drawn at random from what the variants allow - every "
+        "choice, and every step of a range, as likely as the next",
+    ),  # fmt: skip
+    (
+        "every",
+        "Every combination",
+        "every set of the variants at every point of each - when that "
+        "is no more than the designs asked for",
+    ),  # fmt: skip
+)
+
 
 def campaign_pipeline(session: Session) -> dict:
     """What a campaign runs, all of it: the checks every design is screened by, the rules of thumb
@@ -1912,26 +2457,44 @@ def campaign_pipeline(session: Session) -> dict:
         "checks": [{"name": n, "rule": r, "source": s} for n, r, s in CHECKS],
         "placement": [*placement.described(), *filled.described()],
         "full_checks": checks.described(),
+        "repair": {
+            "says": "a design whose pieces break a rule between them is mended by CP-SAT, which "
+            "leaves out the fewest ribs, pads or holes - holes before ribs where it is a tie - so "
+            "every rule holds; a design repair cannot save is drawn again",
+            "rules": list(REPAIRED),
+        },
         "interfaces_clear_mm": studies.INTERFACE_CLEARANCE_MM,
         "knowledge": rules,
         "materials": [
             {k: m[k] for k in ("id", "name", "density_kg_m3", "min_wall_mm", "source")}
             for m in knowledge.materials()
         ],
+        "methods": [{"key": k, "label": label, "says": says} for k, label, says in METHODS],
         "sampler": {
-            "says": "each block's free settings spread alone by a scrambled Sobol sequence, the "
-            "points that make something kept; then a Sobol spread over which of each block's "
-            "points to combine; a design screened out by one block alone tries other points of "
-            f"that block, {REPAIRS} times",
+            "says": "each variant alone first: points of what it allows placed, repaired and "
+            "screened, those that pass its pool; then designs - a set of the variants, as many "
+            "with one as with two or all, and a pool point of each - placed together, repaired, "
+            "screened; alike designs kept once",
             "pool": {"least": POOL[0], "most": POOL[1], "tries": POOL_TRIES},
             "tries_per_design": TRIES_PER_DESIGN,
         },
         "stages": [
-            {"key": k, "label": label, "built": built, "says": says}
+            {
+                "key": k,
+                "label": label,
+                "built": built,
+                "says": says,
+                "takes": STAGE_FLOW[k][0],
+                "gives": STAGE_FLOW[k][1],
+            }
             for k, label, built, says in STAGES
         ],
         "runs": runs(session),
     }
+
+
+# The rules repair mends by leaving pieces out, in the words the verdict uses.
+REPAIRED = ("root gap", "a wedge of sand", "holes clear of ribs", "an X crossing")
 
 
 BUILT = re.compile(r"(\d+)-(preview|full)\.json")
@@ -1995,9 +2558,11 @@ def run_designs(
     k: int = 30,
     offset: int = 0,
     limit: int = 200,
+    variant: str | None = None,
 ) -> dict:
     """A run's designs, as the list shows them: the ``k`` that differ most, those built, or a page
-    of all of them - each with its stages - and how many are at each stage."""
+    of all of them - only those holding ``variant``, when asked - each with its stages, the
+    variants it holds and what repair left out of it; and how many are at each stage."""
     found = _run(session, run)
     if isinstance(found, str):
         return {"cannot": found}
@@ -2005,12 +2570,18 @@ def run_designs(
     built = _built(session, run)
     varied_order = _order(session, run, version, designs)
     rank = {index: position + 1 for position, index in enumerate(varied_order)}
+    everyone = [b.id for b in version.blocks]
+
+    def holds(i: int) -> bool:
+        return variant is None or variant in (designs[i].get("variants") or everyone)
+
     if show == "varied":
-        order = varied_order[: max(1, min(int(k), MOST_VARIED))]
+        order = [i for i in varied_order if holds(i)][: max(1, min(int(k), MOST_VARIED))]
     elif show == "built":
-        order = sorted(i for i in built if i < len(designs))
+        order = sorted(i for i in built if i < len(designs) and holds(i))
     else:
-        order = list(range(max(0, offset), min(max(0, offset) + limit, len(designs))))
+        matching = [i for i in range(len(designs)) if holds(i)]
+        order = matching[max(0, offset) : max(0, offset) + limit]
     rows = [
         {
             **{key: designs[i][key] for key in ("index", "ribs", "holes", "pads", "mass_kg")},
@@ -2018,6 +2589,8 @@ def run_designs(
             "rank": rank.get(i),
             "stages": _stages(designs[i], built.get(i)),
             "short": _short(version, designs[i]),
+            "variants": designs[i].get("variants") or everyone,
+            "left_out": len(designs[i].get("left_out") or []),
         }
         for i in order
     ]
@@ -2026,6 +2599,8 @@ def run_designs(
         "run": run,
         "version": version.version,
         "of": len(designs),
+        "holding": sum(holds(i) for i in range(len(designs))),
+        "variant": variant,
         "show": show,
         "rows": rows,
         "counts": counts,
@@ -2033,7 +2608,17 @@ def run_designs(
             [i, _stages(designs[i], built[i])["F"]] for i in sorted(built) if i < len(designs)
         ],
         "blocks": {b.id: b.add for b in version.blocks},
+        "labels": _labels(session, run),
     }
+
+
+def _labels(session: Session, run: str) -> dict[str, str]:
+    """What a campaign calls each of its variants, by code; nothing for a run of a study."""
+    manifest = archive_root(session.project) / run / "campaign.json"
+    if not _safe(run) or not manifest.is_file():
+        return {}
+    said = json.loads(manifest.read_text(encoding="utf-8"))
+    return {v["id"]: v.get("label", v["id"]) for v in said.get("variants", [])}
 
 
 def run_design(session: Session, run: str, index: int) -> dict:
@@ -2052,6 +2637,8 @@ def run_design(session: Session, run: str, index: int) -> dict:
         path = archive_root(session.project) / run / "built" / f"{index}-{fidelity}.json"
         verdicts[fidelity] = json.loads(path.read_text(encoding="utf-8"))
     rank = {i: p + 1 for p, i in enumerate(_order(session, run, version, designs))}
+    everyone = [b.id for b in version.blocks]
+    held = design.get("variants") or everyone
     return {
         **_listed(design),
         "run": run,
@@ -2059,6 +2646,13 @@ def run_design(session: Session, run: str, index: int) -> dict:
         "short": _short(version, design),
         "stages": _stages(design, built.get(index)),
         "built": verdicts,
+        "variants": held,
+        "absent": [b for b in everyone if b not in held],
+        "labels": _labels(session, run),
+        "left_out": design.get("left_out") or [],
+        "left_out_said": left_out_said(design.get("left_out") or []),
+        "recipe": design.get("recipe"),
+        "seed": design.get("seed"),
     }
 
 
