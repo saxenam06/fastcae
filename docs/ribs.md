@@ -1,8 +1,9 @@
 # Ribs: a design space from the engineer's words
 
-**Being built.** How an engineer gets thousands of near-production rib designs that satisfy what they
-asked for, with solver decks, and how what they object to narrows the next batch. This file is the
-design as agreed; [status.md](status.md) says how much of it runs.
+**Being built.** How an engineer gets thousands of near-production designs of their own part - ribs,
+webs, faces moved, holes - that follow every rule they set, with solver decks, and how what they
+object to narrows the next campaign. This file is the design as agreed; [build-plan.md](build-plan.md)
+is the order it is built in, and [status.md](status.md) says how much of it runs.
 
 ---
 
@@ -25,80 +26,99 @@ engineer's part.
 
 1. **Extract** names what the part holds - faces, planar groups, holes, bosses, bores, walls,
    fillets - and what the drawing controls.
-2. **Say what you want**, in words, clicks on the part, or both: *"ribs between the bearing boss and
-   the outer wall, clear of the holes, no taller than the boss"*. A model writes it into the draft
-   of the **study**, in the part's named entities, shown on Design a variant; it asks only what blocks
-   every design, and the engineer accepts what it wrote.
-3. **Screen.** Proposers lay out candidate designs across what the study leaves free; each is
-   placed and checked against the rules in seconds.
-4. **Build and review.** A varied set is built and shown; the rest build in the background.
-5. **Object.** The engineer rejects what they do not want and says why; the reason becomes a rule,
-   and the next batch obeys it.
-6. **Simulate and learn.** Every design comes with its deck; the results train a surrogate that
+2. **Author variants.** On the CAD tab the engineer selects faces and says what to add there - ribs
+   on them, webs between them, the faces thickened, holes through a plate. Each **variant** is one
+   change in one place, with what it may vary and every rule it must hold, in the part's named
+   entities. By hand today; from words too when the model returns - *"ribs between the bearing boss
+   and the outer wall, clear of the holes, no taller than the boss"* - written into a variant for
+   the engineer to keep.
+3. **Compose a campaign** on Generate: the variants it takes, how its designs are drawn and how
+   many; a hundred of them screened in seconds before it is launched.
+4. **Place, repair and screen.** Each design is a set of the variants at a point of each, placed on
+   the part, mended by a solver where its pieces break a rule between them, and checked - a
+   fraction of a second a design.
+5. **Build and review.** A design's field is built and checked when asked; the designs that differ
+   most are shown side by side.
+6. **Object.** The engineer rejects what they do not want and says why; the reason becomes a rule of
+   the variant it is about, and the next campaign obeys it.
+7. **Simulate and learn.** Every design comes with its deck; the results train a surrogate that
    searches the same space for designs that do well on several objectives.
 
-## The study is the one source of truth
+## Variants and campaigns are the truth
 
-A study is one document in the part's named entities, written from words and clicks, versioned, and
-citing what the engineer said and selected:
+A **variant** is one change in one place, written in the part's named entities from what the
+engineer selected - and said, when the model returns - citing both:
 
 ```
-Add:        ribs
-Where:      on face:1201, face:1543 · between the walls round them and boss face:1453
-Free:       count 4–16 · any angle · spacing 60–200 mm · thickness 9–15 mm · straight or tapered
-Must:       5 mm clear of holes on face:1201, face:1543 · no taller than the support at each end
-            · R ≥ 3 (drawing p.1) · draft ≥ 1° along +z
-Prefer:     symmetric about the bore axis
-Objective:  least added mass (geometric) · most stiffness at the bearings (once simulated)
-Assumed:    pull +z · ribs may enter the bearing region (nothing said)
+Variant:    k7f3a · Ribs on face:1201
+Adds:       ribs
+Where:      on face:1201 · ending on the walls round it · clear of the holes through it
+Varies:     pattern square grid or free lines · thickness 15–25 mm by 5 · spacing 60–200 mm by 5
+            · height 50–100% of what each end meets, by 5% · root fillet 5 mm
+Holds:      5 mm clear of the holes on face:1201 (assumed) · no taller than what each end meets
+            · R ≥ 3 (drawing p.1) · room for the sand between ribs, 2 thicknesses (assumed)
+            · no X crossings
 ```
 
-- **Add** - which kind of feature, one block per group of them; a study may have several.
-- **Where** - the named entities features may stand on, run between or attach to, and the regions
-  they keep away from.
-- **Free** - what designs vary over, each a range with a step, suggested from the part and the
-  drawing and citing where from. A setting locked to one value is fixed.
-- **Must** - rules every design satisfies: generated to them, verified on the result. Each has a
-  strength and a source: *hard* - the engineer or the drawing said it; *assumed* - a default the
-  system took, the only kind it may offer to relax; *learned* - from a rejection the engineer
-  confirmed. A rule no tool can check yet says so, and is never dropped.
-- **Prefer** - what makes a design better, not required.
-- **Objective** - what "better" means: geometric until designs are simulated, physical after, and
-  never folded into one number.
-- **Assumed** - every freedom taken because nothing was said, with its range, to confirm, lock or
-  narrow.
+- **Adds** - which kind of change: ribs standing on faces, webs between faces with nothing under
+  them, faces made thicker or thinner, holes through a plate. One to a variant; a design takes as
+  many variants as it needs. The part is cast in one material, which no variant changes.
+- **Where** - the named entities it stands on, ends on or moves, and what it keeps clear of: faces,
+  the holes found, the ribs or holes of another variant. Webs have two sides - what they run from
+  and what they run to - and every web runs from one to the other, never between two faces of one.
+- **Varies** - every setting fixed, a range with a step, or some of its choices, suggested from the
+  part and the drawing and citing where from. The patterns ribs may take are choices, so *"only a
+  square grid"* is one choice and anything another. A variant counts the distinct designs it
+  allows.
+- **Holds** - every rule its designs satisfy: placed to them, repaired to them, checked on the
+  result. Only rules the pipeline checks are offered. Each has a strength and a source: *hard* -
+  the engineer or the drawing said it; *assumed* - a default the part suggested, kept or taken out
+  by hand; *learned* - from a rejection the engineer confirmed.
 
-Generation reads only the study, so the same study always gives the same designs and a campaign can
-run again months later. **Every change is a new version**, with what changed and why. Designs made
-under an earlier version are rechecked against the new one; those that now break a rule are hidden
-with the rule named, not deleted.
+A variant holds no pull direction, preferences or objectives: until designs are simulated nothing
+ranks them but their geometry and mass, and the pull comes back with mould release.
+
+A **campaign** is a card - its name, the variants it takes, the screening checks it holds, how its
+designs are drawn, how many, from which seed, and whether to draw more and keep the most different -
+and nothing else decides its designs. Each design is a set of the chosen variants at a point of
+each. A campaign never narrows a variant: to hold a setting fixed, change the variant.
+
+**Variants are edited freely; campaigns keep a copy.** A campaign keeps every variant as it was when
+it was launched, with the part's digest and the code's commit, so the same card and seed give the
+same designs, and its designs can be built again months later whatever has happened to its variants
+since. Every launch is a campaign of its own. A variant's versions exist inside and are never shown;
+the library says which campaigns used a variant and whether it has changed since.
 
 **Features are named by id and fingerprint** - kind, size, position - so that when the CAD is read
-again and numbers shift, the study still finds the right faces, or says plainly that it cannot.
+again and numbers shift, a variant still finds the right faces, or says plainly that it cannot.
 
-**Where it lives.** One file per study, `<project>/studies/<name>.json`, holding every version;
-`project.json` names the active one. Today's spec - the engineer's words, placements, rules and
-levers - is the study's first form: its levers are ranges already, and a design made from a study
-is a spec for one point in it.
+**Where they live.** A variant is a file, `<project>/variants/<code>.json`, called by a short random
+code and words that say what and where: a study of one block - the same schema, checked by the same
+function - with a name. A campaign is a folder, `_archived_designs/<project>/<code>-<name>/` beside
+`assets/`, that composes its variants into one study version; a design is one point in it - the
+variants it holds and the values each took.
 
 ## What the engineer does not say is explored
 
-Anything the study leaves unstated varies within a range read from the part and the drawing, and is
-listed under **Assumed** beside the results: *"height varies from 30% to all of the support at each
-end; say if it should be fixed"*. The engineer locks or narrows it after seeing designs. The system
-asks first only when a gap would make every design invalid or meaningless - the pull direction of a
-casting, words that name no region.
+Anything a variant leaves unstated varies within a range read from the part and the drawing, marked
+assumed where it shows: *"height varies from half to all of the support at each end"*. The engineer
+fixes or narrows it after seeing samples. A variant waits for the engineer only where a gap would
+make every design of it invalid or meaningless - webs with fewer than two things to join, words that
+name no region.
 
 What is selected is the scope. Ribs on `face:1201` alone stay there; select both halves of the
-ceiling and they may go anywhere on both; say *"keep away from the bearing region"* and they do; say
+ceiling and they may go anywhere on both; keep them clear of the bearing region and they are; say
 nothing and they may go there. Whether ribs may span both faces, stay within one, or must bridge
 them is a setting of its own - three different design spaces.
 
 **Interfaces are the exception: closed unless allowed.** Bearing bores, holes with room above them
-for the tool, datums and machined faces are forbidden by default, each citing where it is known
-from - the drawing's toleranced dimensions and notes, or the geometry. A datum the drawing names but
-the system cannot yet place on a face is shown for the engineer to point at. Forbidding a bore
-forbids its bearing surface, not the boss round it.
+for the tool, datums and machined faces are forbidden to every variant by default, each citing where
+it is known from - the drawing's toleranced dimensions and notes, or the geometry. A datum the
+drawing names but the system cannot yet place on a face is shown for the engineer to point at.
+Forbidding a bore forbids its bearing surface, not the boss round it. Every rib and pad keeps clear
+of what is closed in three dimensions, wherever it reaches: a bolt hole in the boss a rib ends on,
+reached by the end buried in it, is as much in the way as a hole in the floor. What ribs run
+between is theirs to meet.
 
 ## One kind of rib: a web between anchors
 
@@ -109,31 +129,49 @@ hanging rib, between a ring and a wall with nothing under it, is anchored at its
 anchored along two edges. None needs a class of its own.
 
 Its **section** is its thickness, a taper along its height or its length, a T or L flange, draft, a
-root fillet where it meets an anchor, and an edge round on its free edges. Its **plane** is set by
-the study or left free: *"parallel to YZ"*, *"vertical in XZ"*, *"square to face:723"*, *"radial
-about face:1453"*. **Which way it leaves the mould** - the pull direction - is in the study, never
-assumed from a floor.
+root fillet where it meets an anchor, and an edge round on its free edges. Its **footprint** is what
+it takes of the floor: half its thickness at the root and its root fillet each side, or half its
+flange where that is wider - everything kept clear of a rib is measured from it, never from its
+centre line. Its **plane** is set by the variant or left free: *"parallel to YZ"*, *"vertical in
+XZ"*, *"square to face:723"*, *"radial about face:1453"*. **Which way it leaves the mould** - the
+pull direction - is said, never assumed from a floor.
 
-## Proposers, never limits
+## Patterns, never limits
 
 A layout is a **graph**: anchors on named entities, joined by ribs. Spokes are a star, a grid a
-lattice, triangles a triangulated graph - shapes of graph, not classes. **Proposers** - parallel
-ribs, grids, spokes about a boss, and a free proposer that joins any two anchors - carry weights, so
-the structure production ribs have - even spacing, lined up with walls, joining stiff points - is
-likely, not required. A grid is one lattice: its families share a spacing and an origin, so they
-cross at common points. A pattern is a limit only when the engineer makes it one: *"a triangle grid
-only"*.
+lattice, triangles a triangulated graph - shapes of graph, not classes. A variant lays its ribs by
+**patterns** - parallel ribs, square and triangle grids, spokes about a boss, and **free lines**:
+independent lines, each at an angle of the variant's range and a place across what they stand on,
+drawn from a layout seed nobody sets, the same seed the same lines. A grid is one lattice: its
+families share a spacing and an origin, so they cross at common points. A pattern is a limit only
+when the engineer makes it one: *"a triangle grid only"*.
 
-**A solver chooses the combinations.** Candidate ribs are laid between anchors and each is tested
-against every rule about one rib; conflicts between pairs - too close, crossing in an X, meeting at
-a sharp angle - are computed once, at the thickest a rib may be. A constraint solver (CP-SAT) then
-picks sets of ribs that satisfy every rule about combinations at once - how many, where, what they
-tie together - with a random objective each time for variety. Foundry practice enters as assumed
-rules: no X-crossings, since foundries stagger them into T-junctions; ribs meeting at least 30°
-apart; a rib's plane containing the pull direction, so nothing undercuts. When nothing fits, the
-solver names the assumed rules to blame, and the model explains them.
+**How many and how far apart apply to every pattern.** Parallel ribs and grids take at most so
+many lines each way, the spacing apart, round the middle of the floor - a spacing alone fills it;
+spokes, so many and no nearer than the spacing where they end; free lines, so many, crossing at
+places the spacing apart. No setting shown is one a pattern ignores.
 
-Designs are described by what they are, not by which proposer made them: how many ribs, the angles
+**A solver mends what placing breaks.** Each piece of a design - rib, pad, hole - is placed where
+its variant says and held to every rule about one piece. Conflicts between pairs are then found
+once: two ribs with no room for the sand between their footprints; a wedge where two meet at a
+shallow angle - a finger of sand narrower than the root gap for longer than it is wide, or, where
+the fillets rounding their corner fill it, a lump of metal that long, two ribs run into one -
+judged where their bodies touch in the open, wherever their lines cross; a hole on a rib; a
+junction of more than three arms - an X - where a variant forbids them. A constraint solver
+(CP-SAT) leaves out the fewest
+pieces so that none is left - holes before ribs where it is a tie, a rib taking its pads with it,
+the same answer every time. The design says what was left out and why, and a design the solver
+cannot save is drawn again. Foundry practice enters as rules: room for the sand between ribs - two
+thicknesses by the rule of thumb, suggested for every variant of ribs and measured at the wedges
+where ribs meet - and no X crossings, since foundries stagger them into T-junctions, for the
+engineer to add.
+
+**To come**: free layouts grown from a graph of legal connections between regions, the solver
+choosing which to join with a random objective each time for variety; staggered crossings as a
+pattern; and, when nothing fits, the solver naming the assumed rules to blame, for the model to
+explain.
+
+Designs are described by what they are, not by which pattern made them: how many ribs, the angles
 between them, their spacing, how much of each region they cover, what each connects, the mass they
 add. Variety, feedback and the surrogate all work on those properties. *"Sixty degrees between
 ribs"* is a property; a triangle grid is one way to get it.
@@ -149,12 +187,13 @@ refer to them.
 
 Cheapest first:
 
-1. **Screening**, a fraction of a second a design: placement, and every check that needs no
-   geometry - the engineer's rules, every block making something, ribs against the floor under
-   them, gaps between ribs, holes against ribs, walls thinned no further than they may be.
-2. **Building**, minutes a design: the part and its ribs as a distance field, a closed surface, and
-   the checks on geometry - fillets achieved, thick spots, nothing floating, protected areas
-   unchanged.
+1. **Screening**, a fraction of a second a design: placement, repair, and every check that needs no
+   geometry - every variant in the design making something, ribs against the floor under them,
+   room for the sand between ribs and at their wedges, holes a ligament clear of ribs, walls thinned
+   no further than they may be.
+2. **Building**, minutes a design: the part and its changes as a distance field - mended as it was
+   screened - a closed surface, and the checks on geometry: fillets achieved, thick spots, nothing
+   floating, protected areas unchanged.
 3. **Simulation**: the decks solved.
 
 A **preview** builds a design on a coarser grid, nothing else relaxed, and is always labelled one; a
@@ -164,27 +203,30 @@ Every design comes with a **verdict** in two parts, and every rule and check app
 it can be audited. **Your rules**, each enforced while the design is built and verified on the
 result: *"keep out - pass, nearest hole edge 7.2 mm."* **Engineering checks**, which the platform
 holds every rib to whether or not anyone asked: the fillet achieved, thickness against the wall,
-mould release, thick spots at junctions, gaps between ribs, nothing floating, protected areas
-unchanged, the surface closed. Thresholds come from the study; any the engineer did not set is
-marked assumed. A check is code, shown to fail on a part built to make it fail before it is trusted,
-and added between sessions - never by a model at runtime. A model that could write its own checks
-could write one that passes everything.
+thick spots at junctions, gaps between ribs, nothing floating, protected areas unchanged, the
+surface closed - and mould release, once the pull is known. Thresholds come from the variant; any
+the engineer did not set is marked assumed. A check is code, shown to fail on a part built to make
+it fail before it is trusted, and added between sessions - never by a model at runtime. A model that
+could write its own checks could write one that passes everything.
 
 ## Variety
 
-Every free setting has a **step**, so a spacing of 100 mm and one of 101 mm are one design, not two,
-and two designs count as different only when they differ by at least a set number of ribs. Five to
-ten times too many designs are made, and the most spread out are kept, in a space of properties -
-rib count, total length, which entities are tied, orientations, added mass. If the rules leave fewer
-truly different designs than were asked for, the system says how many: the count is a result, not a
-target.
+Every free setting has a **step** - five in its own unit unless the engineer says otherwise - so a
+spacing of 100 mm and one of 101 mm are one design, not two, and designs alike in every rib, pad,
+hole and face moved are kept once. A campaign spreads what it draws: as many designs with one of its
+variants as with two or all of them, and the points of each spread evenly over what it allows.
+Asked to, it draws two to five times as many and keeps the most spread out, in a space of
+properties - rib count, total length, which entities are tied, orientations, added mass. If the
+rules leave fewer truly different designs than were asked for, the campaign says how many: the
+count is a result, not a target. Every campaign measures its spread - how each setting spread, how
+many distinct rib layouts, how far each design sits from its nearest neighbour.
 
-Every design's margin against every constraint is kept, so any proposed rule shows at once how many
-designs it would remove - its **kill count**.
+With the review loop, every design's margin against every rule is kept, so any proposed rule shows at
+once how many designs it would remove - its **kill count**.
 
 ## Review, and objections that become rules
 
-The engineer sees about 20 designs a round - the most representative of the kept set - each with a
+The engineer sees about 20 designs a round - the most representative of a campaign - each with a
 picture, what it is, the assumptions it used, and accept or reject, and any design on the part with
 its verdict. The thousands behind them are the surrogate's training set; nobody browses them.
 
@@ -192,25 +234,30 @@ its verdict. The thousands behind them are the surrogate's training set; nobody 
 two designs that differ in one thing - which pins the reason down in far fewer questions than a yes
 or no on whole designs. The model offers one to three readings as rules in named entities - *"no rib
 within 30 mm of face:1453"*, *"ribs parallel to XZ only"*, *"spacing at least 120 mm"* - each with
-its kill count, and the engineer confirms one. The study gets a new version, the designs made so far
-are rechecked at once, and the sampler refills. A rejection without a reason only makes similar
+its kill count, and the engineer confirms one. The rule goes into the variant it is about; the
+campaign's designs are rechecked against it at once - those that now break it hidden with the rule
+named, not deleted - and the next campaign obeys it. A rejection without a reason only makes similar
 designs rarer, visibly; it never becomes a hidden rule. Every rule can be relaxed or removed later.
 Designs rejected for taste still go to the solver: physics does not care what anyone likes.
 
-**What is learned** stays within a study - which settings fail, so less sampling is wasted; which
+**What is learned** stays within a project - which settings fail, so less sampling is wasted; which
 checks keep failing for one cause, which become rules at an earlier stage. Making a learned rule
 one for a family of parts or a company is a deliberate act; if a client opts in, it stays within
 that client. Never across clients.
 
 ## Where the model sits
 
-- **Before a batch** it turns words, clicks, the drawing and the extraction into the study - every
-  entity it names checked to exist, every rule it writes checkable or flagged - asks the few
-  questions that block everything, splits *"ribs here and here"* into groups, and chooses proposers
-  and ranges.
-- **After a batch** it explains what failed - *"most triangle layouts fail at the holes on
+**The model is paused**, its bar hidden, while variants and campaigns are made by hand. When it
+returns:
+
+- **Before a campaign** it turns words, clicks, the drawing and the extraction into variants -
+  every entity it names checked to exist, every rule it writes checkable or flagged - asks the few
+  questions that block everything, splits *"ribs here and here"* into variants, and chooses
+  patterns and ranges.
+- **After a campaign** it explains what failed - *"most triangle layouts fail at the holes on
   face:1543; spacing over 140 mm avoids them"* - and turns objections into rules.
-- **Code** proposes, builds and checks designs, samples, and picks the varied set shown.
+- **Code** proposes, places, repairs, builds and checks designs, samples, and picks the varied set
+  shown.
 - **Never** the model computing geometry, and never a model call per design: four thousand designs
   are a workflow with a handful of model decisions in it.
 
@@ -224,8 +271,8 @@ It is one agent with **a few general tools**, each doing one job, and it compose
   together: what lies between them, under and over;
 - **measure** an entity - how far it reaches along a direction, how thick the metal is under it;
 - **search the drawing** for its words;
-- **read and edit the study** - the only way to change it. An edit comes back with where each
-  block's ribs would go, counted, so the agent sees its reading makes ribs before the engineer does.
+- **read and edit a variant** - the only way to change one. An edit comes back with where its ribs
+  would go, counted, so the agent sees its reading makes ribs before the engineer does.
 
 **Skills** say how to compose them for a kind of request - ribs round a round thing, on a face,
 between things; keeping clear of anything; rules from words; sections; naming things; refining turn
@@ -235,12 +282,12 @@ skill composing the same tools, or a new general tool if a job is missing. A dec
 settle - whether anything lies under the space between two things - belongs in a tool that
 computes it, not in a skill that tells the model how to guess it.
 
-What the agent changes shows on Design a variant, marked, for the engineer to accept or undo. Its own
+What the agent changes shows on Design a variant, marked, for the engineer to keep or undo. Its own
 words are the few lines it asks the engineer to look at - a question that blocks, an assumption
 that matters, a rule nothing enforces yet - never what the card already shows; they stand until it
 gives them again or clears them, and every edit shows them back to it to check they still hold. It
 quotes the engineer's words exactly, every number it gives comes from a tool that measured it, and
-it is never scripted to an example sentence. It sees the study and summaries of named entities -
+it is never scripted to an example sentence. It sees the variants and summaries of named entities -
 names and numbers - never CAD files or meshes, and the provider can be changed: a client's approved
 one, or a local model.
 
@@ -252,11 +299,11 @@ earn their place where no form reaches:
   objectives and loads, which code then checks;
 - **objections** at review - *"too close to the bolt bosses"*, *"nothing over the drain"* - read
   into candidate rules, each with its kill count;
-- **explanation** over hundreds of designs - why a block makes one rib, why designs fail a check,
+- **explanation** over hundreds of designs - why a variant makes one rib, why designs fail a check,
   what the best of them share;
-- **a brief** - *"a tenth less mass, bearings as stiff, thinner side panels, ribs on the covers,
-  cast iron or ductile iron"* - read into a study of several kinds of feature, materials and
-  objectives, for the engineer to edit;
+- **a brief** - *"a tenth less mass, bearings as stiff, thinner side panels, ribs on the covers"* -
+  read into variants of several kinds of change and a campaign of them, with its objectives, for the
+  engineer to edit;
 - **things named by what they are for** - *"every bearing boss of the intermediate stage"*.
 
 **What the model must know.** It can reason only about what its tools answer, and today they
@@ -268,20 +315,20 @@ time. Two bodies of knowledge would make the answers engineering:
   bolt patterns, sealing faces and clearance envelopes - with their relations worked out once: what
   stands on what, what faces what across open space, what has nothing under it. Computed from the
   geometry and the drawing's labels, proposed by the model where they cannot be computed, and
-  approved by the engineer, its names are the ones the study, the card, the agent and the
+  approved by the engineer, its names are the ones the variants, the cards, the agent and the
   simulation's result regions all use. With it, *"the wall"* is looked up, not searched for.
 - **Design knowledge as data**: casting and rib rules, a materials catalogue, and each kind of
-  feature's ranges, each with its source - read by the code that fills a block, cited by the agent,
-  changed by the engineer.
+  feature's ranges, each with its source - read by the code that fills a variant, cited by the
+  agent, changed by the engineer.
 
 With them go the loads, operating points and targets in the project's documents, and what earlier
-studies decided.
+campaigns decided.
 
 ## Objectives, physics and learning
 
 Until designs are simulated, objectives only rank and filter - added mass, rib volume, coverage,
 symmetry - and are labelled geometric; no design is called optimal without physics. The physical
-objectives are recorded in the study for when it is.
+objectives come with simulation.
 
 Simulation runs two ways: the Code_Aster pipeline the housing was solved with before, gated so that
 the same design solved twice agrees within 0.1% - mesh noise once made its top eight designs
@@ -293,12 +340,14 @@ for real before it is called good, and that result joins the data.
 ## What comes out
 
 For every design: its mesh, its solver deck, a row of its settings and properties, and a **recipe** -
-its anchors, plane and section in words and numbers - from which anyone can rebuild it. A STEP solid
-of the part with its ribs follows, then native CAD features when a customer needs them.
+the part, each of its variants as it was and the values each took, hashed, and what it is in words
+and numbers - from which anyone can rebuild it. A STEP solid of the part with its ribs follows, then
+native CAD features when a customer needs them.
 
-A campaign of 4,000 designs - the surrogate's training set - runs overnight on one workstation:
-every candidate screened, the representatives built first, the rest in the background. Every one of
-them must build, mesh and solve, so what keeps a design robust is a hard rule, not a hope.
+A campaign of 4,000 designs - the surrogate's training set - is placed and screened in minutes on
+one workstation; building, meshing and solving follow, the representatives first and the rest in the
+background. Every one of them must build, mesh and solve, so what keeps a design robust is a hard
+rule, not a hope.
 
 ## How it is judged
 
@@ -307,138 +356,195 @@ them must build, mesh and solve, so what keeps a design robust is a hard rule, n
   for now, and by an engineer at the client for the demo.
 - **Generality** - a suite of at least 30 varied requirements on the housing - different regions;
   floor, hanging and gusset ribs; orientations; height, spacing and keep-away rules; tapered and T
-  sections - with the client's own, and a second cast part. A requirement passes when the study
-  written from it is right and every design it yields follows every rule. The suite runs on every
+  sections - with the client's own, and a second cast part. A requirement passes when the variants
+  written from it are right and every design they yield follows every rule. The suite runs on every
   change; nothing is fixed for one case.
 
 ## Design a variant
 
-Design a variant - the variant card, on the CAD tab where the faces it names are - is the one
-structured view of the study: the draft of its next version, read back from the study when the
-project opens. **The engineer builds it by hand**; the agent, from their words in the bar above
-every tab, changes the same draft. The engineer accepts it or undoes it, and makes one variant of it
-at a time to look at; thousands at once are a campaign, on Generate.
+Design a variant - a pane on the CAD tab's right, beside the faces it names - authors one variant at
+a time, by hand. A tab for each variant kept, with its code and name, and one for a new variant.
 
-**By hand**: faces selected on the part become a block - ribs standing on them, webs between them
-with nothing under them, faces to thicken, a plate to cut holes in - or the material, from nothing.
-What a block stands on and ends on is taken from the selection, or ends are read off the part again.
-Every setting is fixed, ranged with a step, narrowed to some of its choices, or handed back to the
-part, where it shows. A block keeps a clearance from what is selected, or from another block's ribs
-or holes. A rule the part suggested is kept as the engineer's, or taken out; a block is taken out.
-Each is the engineer's own: what was done is said in words - *"By hand: b1 thickness from 15 to
-25"* - and kept among the study's words, the faces selected with it, so every entry cites what it
-rests on whichever way it came in. Until a face is selected, the card says that ribs, webs,
-thickening and holes come from faces, and the material from nothing.
+**A new variant starts from faces.** Faces selected on the part, and what to add there: **ribs on**
+them - a floor, faces in one plane; **webs between** them, with nothing under them; the faces
+**thickened** or thinned; **holes in** a plate. The card names the faces each would take. What the
+variant stands on and ends on is taken from the selection, or read off the part. Ribs stand on flat
+faces in one plane: a selection that is not one is refused at once, saying which faces are curved
+and what to select instead. A second change is a second variant, and the part's material is no
+variant's.
 
-**Each block is its entities.** What its ribs **stand on** - a floor, as faces or features in one
-plane, or nothing, for webs that hang between what they join. What they **end on** - named, or read
-off the part: what rises round the floor. What they **keep clear of** - any entity: a face, a boss,
-the holes found, each one listed; the ribs of another block, named like any entity as `ribs:` and
-the block. Each is a chip that shows it on the part, and each says whose it is - the engineer's
-words, the part's suggestion, the drawing. As the engineer says more, entities are added to a block,
-or a new block is started: "without interfering with the ribs already there" adds every earlier
-block's ribs to what the new one keeps clear of, and a design places those blocks first. Another
-block's ribs are in the way only where they stand at the same height: ribs on a ceiling are no
-obstacle to webs far below it.
+The card shows a little, and opens the rest on demand. What a variant still needs from the
+engineer, and what cannot be built yet, stays at its top.
 
-A rule about the ribs of one block belongs to that block - "these ribs must not cross face:1417" -
-and a rule about every rib belongs to the study, after the blocks - the drawing's smallest radius.
+**Where, in a sentence** - *"on face:1201, ending on what rises round it (31); 5 mm clear of 12
+holes"* - each group a chip or a count that shows it on the part. **Change where** opens them one
+by one: what its ribs **stand on** - a floor, as faces or features in one plane, or nothing, for
+webs that hang between what they join; what they **end on** - named, or read off the part: what
+rises round the floor; for webs, what they run **from** - the faces they were added between - and
+what they run **to**, the other side, added from the faces selected: a web runs from one side to
+the other, never between two faces of one side, and until the other side is added the variant says
+it needs it, with *change where* open to add it; a face is on one side only. What they **keep clear
+of** - any entity: a face, a boss, the holes found; the ribs or holes of another variant, named like
+any entity as `ribs:` or `holes:` and its code.
+Every list of faces on the card - what spokes turn about among them - has an × on each face to
+take it out, but the last where one must stay, and **+ add** for the faces selected on the part.
+Another variant's ribs are in the way only where they stand at the same height: ribs on a ceiling
+are no obstacle to webs far below it.
 
-Then the block's **settings** - pattern, what spokes turn about, angle, how many, thickness, radii,
-draft, height, section - each fixed, or what it may vary over and who suggested that; and its
-**rules**, each hard, assumed or learned, and whether anything enforces it yet. What a block still
-needs from the engineer, and what cannot be built yet, stays on it. After the blocks: rules for every
-block, what makes a design better, the pull direction, and the part's interfaces, closed by the
-platform; then what the study rests on - every word said, every version - folded.
+**Its shape**: the settings that decide its designs first - for ribs the patterns, thickness,
+spacing, count and height; for holes the pattern, diameter and pitch; for faces, how far they move -
+and the rest - what spokes turn about, angle, radii, draft, top, pads - under **More settings**.
+What spokes turn about and how they spread show only while spokes are allowed, with **show** to see
+the choices on the part. Choices are chips, switched on and off at a click, every choice the part
+offers shown so one left out can be taken back; numbers change in place, as a **range** in steps
+or **one value**, chosen at the head of the editor, and what it shows is kept on Enter, on done, or
+on clicking anywhere else once anything in it was touched - Escape leaves it as it was - a range
+from a value to itself being that value. What the engineer set is marked, with
+**reset** to hand it back to the part; where the part's suggestion comes from is in the setting's
+tooltip. Every range the part suggests steps by five in its own unit, its ends rounded inward onto
+fives; a height is a percentage, by five. The card counts the distinct designs the variant allows:
+for each pattern, the values of every setting that makes a difference to it, multiplied; free lines
+have no end.
 
-**What the draft changes is marked**; **Accept** writes it as the next version, checked as any
-version is, and **Undo** reads it back as the study has it. Nothing is written until then. A design
-is made from the study, never from the draft: making one accepts the draft first.
+**Its rules**, in words, each its own - keep clear of; no taller than; at most so tall; every rib
+ends on what it runs between; no rib thicker than a share of the wall it meets; no radius under;
+room for the sand between ribs; no X crossings. A rule the part suggested says so, and a click on
+that makes it the engineer's; one from the drawing says so; any is taken out with ×, and **add a
+rule** offers only the kinds the pipeline checks. The part's interfaces, held for every variant,
+fold into one line below them.
 
-**It draws where ribs would go before anything is made.** "Show paths" draws every line each block's
-layout lays across its floor - never past it - or across the open space between what its webs join,
-cut into pieces by what it keeps clear of and by gaps, each piece coloured by what becomes of it: a
-rib, stopped by something to keep clear of, ending at an edge with nothing to meet, ending on
-something not named (which it names), ending on one thing at both ends, too close to another of its
-spokes, too short, or no room for its height. The words count lines, pieces and what each piece
-became, so the numbers add up.
+**Seen before it is kept.** **Show paths** draws the variant alone at its suggested point;
+**Another sample** at a point drawn at random from what it allows - every choice, and every step
+of a range, as likely as the next: no pattern is weighted over another. Each is placed, repaired
+and screened, up to 48 points tried until one passes, so a sample shown is one that passes, and the
+card says how it was drawn - its suggested point, or at random from which seed - and on which try it
+passed; when none does, the card says why, the commonest reasons first. What is made is drawn as
+wide as it is - a rib or a pad by its outline - and everything else faint. The paths are every line
+the variant's pattern lays across its floor - never past it - or across the open space between what
+its webs join, cut into pieces by what it keeps clear of, each piece coloured by what became of it:
+a rib; left out by repair; stopped by something to keep clear of; ending at an edge with nothing to
+meet; ending on something not named (which it names); ending on one thing at both ends; running
+within one side of its webs; too close to another; too short; no room for its height; reaching a
+hole or bore the part keeps closed. The card says what was made - so many ribs and pads - with the
+colours and the count of every piece folded under it, the values the sample took that make a
+difference to its pattern, and what repair left out, and why. Faces moved draw no lines: how many
+move and how far is said - a few faces by name, more as a count, never every face - with *show
+them* to see them on the part.
 
-**Preview and Full** make the study's suggested variant - the draft accepted first if it differs -
-and check it, the surfaces it changes drawn over the part.
+**Kept at the bottom.** Its name - suggested, what it changes and where - and **Create variant**,
+which keeps it in the library once one of its points passes, and refuses one none of whose points
+does. A variant kept is changed and **saved**, **discarded** back to what was kept, **duplicated**
+or **deleted** - moved aside, never lost. The campaigns that used it are listed on it, each keeping
+the copy it was launched with, and marked where the variant has changed since.
 
 ## A campaign
 
-A **campaign**, on Generate, makes as many designs as asked - thousands - the draft accepted if it
-differs: each block's settings tried alone first, then together, every design placed and screened,
-alike designs kept once, every one kept beside the project. Its tab lays out everything it runs -
-each block, where, what its settings may take; each rule and whose it is; the part's interfaces;
-the screening checks and the rules of thumb and materials behind them, with their sources; how ribs,
-pads and holes are placed; how designs are spread; the stages a design goes through - and any block,
-rule or check can be switched off there for this campaign alone, without touching the study. It
-counts designs as they come - how many of each block's points make something, how many designs are
-kept of how many tried, what screened the rest out, from what mass to what.
+A **campaign**, on Generate, is a card in three steps, each greyed until the one before holds
+something:
 
-**Designs** lists what a run kept: the ones that differ most, those built, or all, a page at a time,
-each with its stages - P its paths, F its field, M, S and R its mesh, setup and results - filled as
-each is done, in the colour of how it came out. A design's paths are drawn on the part - ribs, pads
-and holes each in their colour; Build field builds it from the version its run was made from,
-checks it and keeps it, so its field can be looked at again without building it twice.
+- **Compose** - its name, and the variants it takes, each with what it adds, where, and how many
+  designs it allows.
+- **Check** - at a glance, each item a few words with its full rule on hover: what each variant
+  varies and the rules it holds, as pills; what holds always without anyone writing it - holes
+  keep their ligament from every variant's ribs, ribs of two variants keep the root gap, the part's
+  interfaces stay clear, clashes are repaired by CP-SAT; the screening checks, each switched off
+  for this campaign alone at a click; and, folded, the checks a design's field is held to. A
+  variant that cannot be read says why beside it, to try again.
+- **Sample & launch** - how designs are drawn: **spread evenly**, the default - a scrambled Sobol
+  sequence over which variants and which point of each - **at random**, every choice and every step
+  as likely as the next, or **every combination**
+  when the variants allow no more than the designs asked for; how many designs, from which seed;
+  whether to keep the most different of two to five times as many; how many designs the variants
+  allow - every set of them at every point of each, `Π(1 + c) − 1`; **Screen 100** - a hundred drawn
+  as the launch would draw them, placed, repaired and screened, nothing kept: how many pass, how
+  many needed repair, why the rest do not, and how long the launch will take; and **Launch**.
+
+Launched, it pools each variant alone - points of what it allows, placed with nothing else,
+repaired and screened, those that pass its pool; a variant none of whose points passes stops the
+campaign, saying why. Then designs: a set of the variants, its size spread evenly over one to all,
+and a pool point of each by the method; placed together, repaired, screened, drawn again when repair
+cannot save it; alike designs kept once; `n` kept of at most `4n + 100` tried. Its progress shows as
+it goes - each variant pooled, designs kept and tried, repaired, and why the rest were not kept -
+and the campaigns launched are listed beside the card, each opening in Designs.
+
+**The archive** keeps each launch whole, beside the project: the card, the part's digest, the code's
+commit, a copy of every variant as it was, the seed and the method; every design with the variants
+it holds, the values each took, its recipe and the recipe's hash, its own seed, what repair left
+out, how it screened and its paths; a summary of what was tried, kept and dropped and why, how each
+setting spread, how many distinct rib layouts, how far each design sits from its nearest neighbour;
+and each design built so far.
+
+**Designs** lists a campaign's designs: the 20, 30 or 50 that differ most, those built, or all of
+them a page at a time - or only those holding one variant. Each has its stages as letters, filled as
+each is done in the colour of how it came out - P its paths placed and screened, F its field built
+and checked, M, S and R its mesh, setup and results - and a dot for each variant it holds. A design
+reads by variant - code, name, what it made and the values it took - with the variants it leaves
+out, what repair left out, and its recipe and seed. Its paths are drawn on the part at once; **Build
+field** builds it from the copy of the variants its campaign kept, checks it and keeps it, so it is
+built once. Its field is the surfaces it changes over the part, run down to where they meet it, and
+its new metal as cells.
 
 ## What is read off the part for ribs on a floor
 
-For a block standing on a floor, everything the words leave open is read off the part, round what
-they gave - or a default that says it is one:
+For a variant standing on a floor, everything left open is read off the part, round what the
+engineer gave - or a default that says it is one. Every range read off the part steps by five in
+its own unit - a height by five percent - its ends rounded inward onto fives, unless that would
+leave nothing. A new variant of ribs then starts simple, from a **starting point kept as data**
+beside the rules of thumb, which the engineer changes on the card: ribs 20 mm thick, 100 mm apart,
+as tall as what they meet, two to ten of them - two suggested - and a root fillet, edge round and
+draft each of three choices, the smallest, the middle and the largest the part offers, the middle
+one first:
 
 | what | read off the part as |
 |---|---|
 | what they end on | what stands up round the floor, past any fillet or chamfer at its foot, on the side ribs stand - each wall, boss or bore once |
-| keep clear of | every hole through the floor, 5 mm clear, listed and suggested; the engineer's own distance replaces it |
-| pattern | every pattern the floor allows - parallel, square grid, triangle grid, spokes - suggesting spokes about the largest boss or bore the floor goes round more than halfway, else a square grid |
+| keep clear of | every hole through the floor, 5 mm clear of the rib's footprint, listed and suggested; the engineer's own distance replaces it |
+| pattern | every pattern the floor allows - parallel, square grid, triangle grid, spokes - and free lines; suggesting spokes about the largest boss or bore the floor goes round more than halfway, else a square grid |
 | what spokes turn about | the bosses and bores standing round the floor, largest first |
-| orientation | set out from the longest wall round the floor: a grid along it, parallel ribs square to it; spokes fan across the floor, or go all the way round |
-| how many | 4 to 16 ribs, or 5 to 16 thicknesses apart |
-| how tall | each end as tall as what it meets, the top sloping between; half to all of that |
-| thickness | 0.6 to 1.0 of the plate they stand on, measured through it |
+| orientation | set out from the longest wall round the floor: a grid along it, parallel ribs square to it; spokes fan across the floor, or go all the way round; free lines at any angle |
+| how many, how far apart | two to ten lines each way, or spokes, and 100 mm apart to start - both, for every pattern; read off the part as 4 to 16, and 5 to 16 thicknesses apart |
+| how tall | each end as tall as what it meets, the top sloping between; all of it to start, half to all of it read off |
+| thickness | 20 mm to start; read off the part as 0.6 to 1.0 of the plate they stand on, measured through it |
 | thickness against the wall | no thicker than 0.8 of the wall they meet, assumed - a rule the engineer may take out |
+| room between ribs | the root gap: two thicknesses of sand between footprints, and at the wedges where ribs meet, assumed |
 | pads | on: a wall too thin for a rib is thickened round its end, and a floor too thin for its ribs under them, rather than the rib left out |
-| root fillet, edge round | from the smallest radius the part allows up to half the thickness |
-| draft | half a degree to three |
-| section | flat, unless the words ask for a T; a T's flange 2 to 4 times the web wide |
+| root fillet, edge round | from the smallest radius the part allows up to half the thickness - three of those choices to start, the middle first |
+| draft | half a degree to three - three choices to start, the middle first |
+| section | flat, unless the engineer asks for a T; a T's flange 2 to 4 times the web wide |
 | smallest radius | the drawing's note, cited by page and text |
 
 ## What is read off the part for webs with nothing under them
 
-For a block that stands on nothing, the webs join what it ends on - two things or more - and the
-rest is read off what they join:
+For a variant that stands on nothing, the webs join its two sides - what they run from, and what
+they run to - and the rest is read off what they join:
 
 | what | read off the part as |
 |---|---|
-| which way they stand | the direction the most of what they join runs along - the axis of a round one, the line two flat ones meet along, else one of the part's own axes - the pull first among equals |
-| from where to where | from the level where the most of them are present, up to where the first of those stops: every web meets all of them; the others take no part, and the card says so |
+| which way they stand | along the axis of what they run from when that is round - a bearing's webs stand along the bearing, whatever else is named; else the direction the most of what they join runs along - the axis of a round one, the line two flat ones meet along, else one of the part's own axes |
+| from where to where | each web from the height of its own two ends: every height where one of each side begins - a few millimetres apart counting as one, at most eight - is tried, lowest first, and each web hangs from the first where it runs from one side to the other, so a part whose walls step up and down is joined all round; what runs along some other way takes no part |
 | where they may go | the open space between them at those heights - where the part is not, in the pieces of open space that reach two of them or more |
 | pattern | spokes about the round thing among them - a boss before a bore - or straight webs; both stay open |
 | orientation | spokes fanned across the others than what they turn about; straight webs square to the largest flat one, laid across where two of them face each other |
-| how many | 2 to 12 webs, or 5 to 16 thicknesses apart |
-| how tall | level with the lower end, or sloping; half to all of it; never into what stands over them |
-| thickness | 0.6 to 1.0 of the thinnest of what they join, measured through it |
+| how many, how far apart | two to ten and 100 mm apart to start, as for ribs on a floor; read off the part as 2 to 12 webs, or 5 to 16 thicknesses apart |
+| how tall | level with the lower end, or sloping; all of it to start, half to all of it read off; never into what stands over them |
+| thickness | 20 mm to start; read off the part as 0.6 to 1.0 of the thinnest of what they join, measured through it |
 | root fillet, edge round, draft | as for ribs on a floor |
 
-Each web runs from one of them to another - never from one to itself - and is buried in both. Spokes
-may meet at their roots, but past them each leaves twice its thickness clear of the next - room for
-the mould between them - or is left out. So is a rib that would pass one of an earlier block that
-close.
+Each web runs from one side to the other - never within one side, never from one thing to itself -
+and is buried in both. Spokes meet inside what they turn about; where they stand in the open, each
+keeps the root gap from the next, measured between footprints - room for the mould between them -
+or is left out. Placing sees to that within a variant, and repair between variants.
 
 ## Beyond ribs
 
-The recipe that makes ribs makes other variations: a kind of block - where it goes, what may vary,
+The recipe that makes ribs makes other variations: a kind of change - where it goes, what may vary,
 its rules - a way to build it on the distance field, its checks, and what is read off the part for
-it. Ribs, faces moved, holes and the material are built; the rest are to come:
+it. Ribs, faces moved and holes are built; the rest are to come:
 
 | kind | where | what varies | built as | checked for |
 |---|---|---|---|---|
-| **thicken** (built) | faces - a wall, a plate, a boss | how far they move along their normal, from a few mm thinner to 10 mm thicker unless the engineer says; the blend | the faces' weight in the field, times the offset, exactly in a window round them | the wall left at least its least - the block's, or the material's |
+| **thicken** (built) | faces - a wall, a plate, a boss | how far they move along their normal, from 5 mm thinner - never below the least a wall may be - to 10 mm thicker, unless the engineer says; the blend | the faces' weight in the field, times the offset, exactly in a window round them | the wall left at least its least - the variant's, or the material's |
 | **holes** (built) | a plate | square or staggered lattice; diameter, one to four plate thicknesses; pitch; angle, from the plate's longest direction; edge distance | capped cylinders cut away, through the plate and no further | a ligament of metal - one plate thickness - between holes, from edges, ribs, holes the plate has, and nothing standing under the plate |
-| **material** (built) | the part | none: the one the part is cast in, chosen from the catalogue - a part's material is not varied | not geometry: every design's mass and least wall | its least wall |
 | bulge or crown | a panel | how high, where, how wide | the same weight, times a smooth bump | draft; clearance envelopes kept |
 | boss transition | a boss and the floor it rises from | the transition radius, the boss's wall | a local growth and fillet at its foot | the bore unchanged; thick spots |
 | existing rib | a rib the part already has | its height and thickness, scaled | its region offset | as for ribs |
@@ -447,11 +553,15 @@ What is read off the part for each: for faces to thicken, the metal under them, 
 goes below the least a wall may be; for holes, the plate's thickness, its longest direction, and the
 holes it has already, kept a ligament clear.
 
-Blocks are built in one order - what changes the shape (faces moved), then what adds to it (ribs,
-webs and their pads), then what cuts it (holes) - and rules run across kinds: holes keep a ligament
-clear of every block's ribs unless the engineer has those ribs keep clear of the holes instead; a
-rib meets a wall as the design moves it, and a thin wall is padded, or thickened by a block of the
-study; a floor is thickened for ribs too thick for it; a wall is never thinned below what its
+**The material is not a change.** A part is cast in one material, from the catalogue - the
+catalogue's default for a cast housing until the engineer names the part's own - and every design
+is weighed in it, its least wall the least any wall is thinned to.
+
+A design's variants are built in one order - what changes the shape (faces moved), then what adds
+to it (ribs, webs and their pads), then what cuts it (holes) - and rules run across variants: holes
+keep a ligament clear of every variant's ribs, unless the holes' variant says how far itself; a rib
+meets a wall as the design moves it, and a thin wall is padded, or thickened by another variant of
+the design; a floor is thickened for ribs too thick for it; a wall is never thinned below what its
 material allows. A face the part keeps closed - a bore - cannot be moved; faces round it can. A
 customer's own part, ribs and all, is a baseline to vary like any other - never a reference to
 match.
@@ -461,18 +571,17 @@ bulges, transitions, existing ribs - are the most often valid, and come first. F
 templates - ribs, webs, holes - change the part's topology within rules. Free exploration on the
 field changes it further, and a design found there is rebuilt as features only when it is worth it.
 
-**How variants are made.** The study holds every block. A campaign tries each block's settings alone - so a
-block whose settings mostly make nothing says so, and only settings that work are combined - then
-samples them together, continuous settings spread evenly and choices balanced, screens each design
-cheapest first, and keeps alike designs once. To come: keeping the most spread out, every margin
-recorded so a proposed rule shows its kill count before it is confirmed, and a solver that repairs a
-combination - leaving out the one rib or hole in the way - instead of discarding it. A chosen few
-are then meshed and solved, a surrogate learns from them, the search runs on the surrogate, and the
-best are solved for real before anyone calls them good.
+**How designs are made.** A campaign tries each variant alone first - its points placed with
+nothing else, repaired and screened, those that pass its pool - so a variant whose points mostly
+make nothing says so before anything is combined. Then it draws designs - a set of the variants and
+a pool point of each - places them together, repairs them, screens them, and draws again where
+repair cannot save one. To come: every margin recorded so a proposed rule shows its kill count
+before it is confirmed; a chosen few meshed and solved, a surrogate learning from them, the search
+run on the surrogate, and the best solved for real before anyone calls them good.
 
 ## Reading the part
 
-Everything a block and the proposers start from is read off the part by code, in one pass:
+Everything a variant and its patterns start from is read off the part by code, in one pass:
 
 - **Holes go round.** A hole is a small concave cylinder or cone - with the cones that chamfer or
   countersink it - whose faces go more than 200° round their axis. A fillet in a square corner is a
@@ -504,11 +613,11 @@ Everything a block and the proposers start from is read off the part by code, in
 
 ## Seeing, naming and selecting faces
 
-Hovering a face on any 3D tab shows a small card with its one name, `face:N` - which the study takes
-wherever it takes a feature - and its type, area, which way it faces or its axis,
-diameter, height, and whether a drawing controls it. Clicking pins the card.
+Hovering a face on any 3D tab shows a small card with its one name, `face:N` - which a variant takes
+wherever it takes a feature - and its type, area, which way it faces or its axis, diameter, height,
+and whether a drawing controls it. Clicking pins the card.
 
-**Selecting is how faces get into the study.** A click selects a face; a Ctrl-click adds one or
+**Selecting is how faces get into a variant.** A click selects a face; a Ctrl-click adds one or
 takes it out. The **grow** angle spreads a click across every edge shallower than it - and belongs
 to that click alone: the stage lists the clicks, the grow control acts on the last one or whichever
 is picked, and a face clicked after growing another starts ungrown. Lowering an angle takes faces
@@ -516,7 +625,8 @@ back out. Selections are highlighted in a colour no design uses.
 
 ## Build order
 
-[build-plan.md](build-plan.md) has the steps and what shows each done: the study; candidates and
-conflicts; choosing, sizing, screening and the archive; the model on the study; choosing what to
-show, and objections; the general rib; an unseen housing; speed; Simulate and Learn; the next kinds
-of feature.
+[build-plan.md](build-plan.md) has the steps and what shows each done: the variant library; what a
+variant may vary; footprints, wedges, crossings and repair; a variant's samples; campaigns; designs
+by variant; the interface; a clean start. After them: the engineer's review loop, quality-diversity
+search, mould release with the pull, wall fields, meshing and physics, the part's regions, and
+scale.

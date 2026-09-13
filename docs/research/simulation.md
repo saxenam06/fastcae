@@ -1,0 +1,245 @@
+# Solving thousands of designs
+
+How a generated design becomes solved stress and displacement, fast enough for thousands of designs:
+meshing, solvers, GPU solvers, voxel and cut-cell (immersed) methods, what they cost on this
+housing, and what speeds each route up. September 2026. No published open-source work does the whole
+of it - rule-driven variants of one cast part feeding an open structural surrogate; every piece
+exists separately. Runtimes marked *(est.)* are estimates, not published benchmarks.
+
+## Two routes from a design to a solution
+
+Every fastcae design exists as a signed distance field on a regular grid (3 mm at preview, 1.5 mm
+at full) and a contoured triangle surface. From there:
+
+| | A. Mesh, then solve | C. Solve directly on the grid, on a GPU |
+|---|---|---|
+| What happens | grid → surface → solid elements (quadratic tets, TET10/C3D10) → solver | each cell of the design's grid becomes an element; no mesh |
+| Can it fail? | meshing sometimes (fTetWild succeeds on about 98.7% of a hard test set) | no |
+| Time per design | mesh about 1 min, solve 2-10 min on CPU *(est.)* | about 10-60 s on a laptop GPU *(est.)* |
+| Bearing tilt, misalignment, deflection | accurate | close; these converge well on grids |
+| Natural frequencies | accurate | close |
+| Stress at fillets and rib roots | accurate with a fine TET10 mesh | unreliable: the grid's stair-step boundary distorts surface stress. A 99.9th-percentile stress fares better than the peak but is still biased |
+| Memory | 8-25 GB RAM | fits an 8 GB GPU at 3-5 mm cells *(est.)* |
+| Libraries | meshing: gmsh, fTetWild (pytetwild), MMG; solvers: CalculiX, Code_Aster, FEniCSx | NVIDIA Warp fem (Windows), JAX-FEM (Linux/WSL), torch-fem; commercial: Ansys Discovery, Intact in nTop |
+
+A middle route keeps the grid but computes the cells the surface cuts properly - **cut-cell
+(immersed) methods**, below. It restores most of the stress accuracy at surfaces without meshing,
+and is research-grade.
+
+## Measured on this housing (agenticCAE)
+
+The earlier agenticCAE project solved this housing ([agenticcae.md](agenticcae.md)); its
+`handbook/research/16-implicit-rib-variants.md` measures both routes:
+
+| | Unknowns (DOF) | Solve: Code_Aster `MACRO_ELAS_MULT`, 55 unit load cases, one core | Stress quality |
+|---|---|---|---|
+| Linear tets (C3D4): 57,240 nodes, 202,496 tets | 0.19 M | 138 s (55 × `MECA_STATIQUE`: 385 s; CalculiX 55 × `*STEP`: 915 s) | linear tets are 25-35% too stiff on this housing - not usable |
+| **Quadratic tets (C3D10)** | **1.27 M** | **1,139 s** (CalculiX exhausts 7.8 GB) | good |
+| Grid, 20 mm (29,013 active cells, 83% cut) | 0.13 M | not measured | too coarse |
+| Grid, 10 mm (182,504 active cells, 61% cut) | 0.72 M | not measured | too coarse |
+| Grid, 5 mm (1,239,208 active cells, 36% cut, 1,464k nodes) | 4.39 M | not measured | stair-step unless cut-cell |
+| Grid, 4 mm / 3 mm (extrapolated from 5 mm) | about 8.6 M / 20 M | not measured | same |
+
+agenticCAE's conclusion: *"The fixed grid costs more DOF than the body-fitted mesh and spends them
+worse."* The housing fills about 10.4% of its bounding box and its median wall is 27.6 mm, so a
+Cartesian grid spends most of its resolution straddling surfaces. At 10 mm the grid needs 4× the DOF
+of the linear-tet mesh with 61% of its cells cut; at 5 mm, 4.39 M DOF is beyond `scipy_splu`. (The
+inside test ran on a tessellation 0.26% low in volume.) A GPU still handles 9-20 M unknowns with
+matrix-free multigrid, but that is 7-16× the work of the TET10 mesh, for worse stress. A rough
+estimate from the part's volume alone (about 121,000 cm³) - 4.5 M cells and 13.5 M unknowns at 3 mm,
+1.9 M and 5.7 M at 4 mm, 1 M and 2.9 M at 5 mm - undercounts: cut cells add nodes, which is why the
+measured 5 mm grid has 4.39 M.
+
+Also measured there: the old mesh path (B-rep → OCC tessellation → STL → gmsh volume, MeshSizeMax 20
+mm) was non-deterministic - identical CAD gave 57,240 nodes on one run and 57,372 on another; q_min
+0.00788, 67 elements below q 0.1. gmsh alone cannot mesh the STEP (`Impossible to mesh periodic
+surface 2`; `occ.healShapes()` fails; surface meshing at 6 mm ran past 10 minutes). A 1 mm dense
+grid is not workable (an R8 fillet needs ≲ 1 mm voxels to be resolved to a few voxels across its
+radius); a narrow band is.
+
+## What a "GPU solver" means
+
+The solver does not care how the elements were made. Either way, the finite element method ends with
+one giant set of linear equations, K·u = f - millions of unknowns saying how far each point moves.
+There are two ways to solve it:
+
+1. **Direct**, like Gaussian elimination: factorise K once. Exact and robust, but memory-hungry -
+   agenticCAE needed about 10 GB per design. On CPU: MUMPS (in Code_Aster), PARDISO or PaStiX (in
+   CalculiX). One factorisation serves many load cases at almost no extra cost. On GPU: NVIDIA cuDSS
+   ([nvmath-python API](https://docs.nvidia.com/cuda/nvmath-python/latest/host-apis/sparse/generated/nvmath.sparse.advanced.direct_solver.html)),
+   adopted by [COMSOL 6.4 (November 2025)](https://www.comsol.com/blogs/faster-simulation-with-nvidia-gpu-support-for-comsolmph)
+   and OptiStruct, which accepts SciPy CSR matrices - only if the factorisation fits in GPU memory,
+   roughly 1-2 M unknowns on 8 GB.
+2. **Iterative**: start from a guess and improve it step by step - conjugate gradient with a
+   preconditioner, usually multigrid. Little memory, very fast on GPUs. On a regular grid every cell
+   is identical, so the GPU never stores K at all: it applies it on the fly ("matrix-free"). This is
+   how GPU topology optimisation handles 10-100 M cells.
+
+**The iterative method works on meshes too**, TET10 included. On an irregular tet mesh it needs a
+stronger preconditioner - algebraic multigrid (AMG) - to converge quickly, and still uses little
+memory:
+- Code_Aster has iterative solving built in (PETSc, with preconditioners such as GAMG or hypre
+  BoomerAMG, or `LDLT_SP`, a single-precision factorisation used as a preconditioner). agenticCAE used
+  the direct solver (MUMPS).
+- CalculiX has iterative options, less robust.
+- On GPU: NVIDIA AMGX (GPU algebraic multigrid for any sparse matrix, mainly Linux), PETSc on GPU
+  (Linux; [a blocked GPU AMG path for elasticity](https://arxiv.org/abs/2606.24748), June 2026), cuDSS
+  (direct; the 1.27 M-unknown TET10 mesh likely does not fit in 8 GB). Warp fem, JAX-FEM and torch-fem
+  also do quadratic tets.
+
+Scale shown by GPU topology optimisation, on regular grids like fastcae's:
+[Träff et al., CMAME 2023](https://www.sciencedirect.com/science/article/pii/S0045782523001676)
+optimised 65.5 M elements in about 2 h on one GPU; [Aage et al., Nature 2017](https://pubmed.ncbi.nlm.nih.gov/28980645/)
+passed a billion voxels. Linear-elastic solves at 10⁷-10⁸ voxels are routine with matrix-free
+multigrid.
+
+## Voxel, immersed and GPU FEM on distance-field grids
+
+- **NVIDIA Warp `warp.fem`** ([docs](https://nvidia.github.io/warp/domain_modules/fem.html), Warp 1.12,
+  2026). GPU finite elements written in Python. Supports sparse-voxel geometry built from NanoVDB
+  (`Nanogrid`, `AdaptiveNanogrid`) as well as tet and hex meshes; installs on Windows. *Fit: high* for
+  a GPU voxel path straight from the distance field. The elasticity form and a strong preconditioner
+  (multigrid) are ours to write, or to bring in (AMGX).
+- **JAX-FEM** ([arXiv 2212.00964](https://arxiv.org/abs/2212.00964), CPC 2023). A 7.7 M-DOF
+  linear-elastic model took 523 s on one GPU versus 4,769 s for Abaqus on 24 MPI ranks; includes
+  TET10; gives gradients for optimisation. *Fit: medium*: JAX has no native Windows CUDA,
+  [WSL2 only](https://docs.jax.dev/en/latest/installation.html).
+- **torch-fem** ([GitHub](https://github.com/meyer-nils/torch-fem), active 2025-26). PyTorch solid
+  mechanics with autograd sensitivities, quadratic tets included. *Fit: medium*: CUDA works on
+  Windows; targets moderate model sizes; the same framework as the surrogate's training.
+- **cuDSS** (above). *Fit: high* as a drop-in accelerator where the factorisation fits in GPU memory.
+- **PETSc GPU / AMGX**. *Fit: low on Windows*: an HPC/Linux stack; natural under WSL.
+
+| | NVIDIA Warp fem | JAX-FEM | torch-fem |
+|---|---|---|---|
+| What it is | NVIDIA's Python GPU toolkit, with a finite-element module | FEM written in JAX (Google's GPU and auto-gradient library) | FEM written in PyTorch |
+| Windows GPU | yes | no (Linux/WSL only) | yes |
+| Element types | tets, hexes, sparse voxel grids; higher order too | includes TET10 | includes quadratic tets |
+| Strength | fast on grids; flexible | proven fast (7.7 M unknowns in 523 s on one GPU); gradients | same framework as the model training; gradients |
+| Weakness | only simple built-in preconditioners; multigrid is ours to write or add | WSL only | moderate model sizes |
+| Fit here | high, for the grid route | medium | medium |
+
+## Cut-cell (immersed) methods
+
+Think of the grid as Lego bricks. A plain voxel solve treats each brick as wholly solid or wholly
+empty, so curved surfaces become stair-steps and stress at fillets comes out wrong. A cut-cell solve
+keeps the same bricks, but for every brick the true surface cuts through, it integrates over the
+solid part only - knowing the exact surface from the distance field, which fastcae already has for
+every design.
+
+**Their role:** the middle route. No meshing, so nothing fails, and it runs well on a GPU, yet stress
+near surfaces approaches a body-fitted mesh.
+
+**The catches:** very thin solid slivers inside a brick make the equations ill-conditioned, so a
+stabilisation ("ghost penalty") is needed; cut bricks cost more to integrate; and on this housing
+36-61% of bricks are cut, its walls being thin compared with the grid.
+
+**Methods and libraries:**
+- The finite cell method ([Düster 2008](https://www.sciencedirect.com/science/article/abs/pii/S0045782508001163)).
+- Shifted Boundary / Gap-SBM elasticity ([2025](https://arxiv.org/html/2508.09613)).
+- SBM on distance-field / neural-implicit geometry in 3D elasticity ([Karki et al., July 2025](https://arxiv.org/abs/2507.03087)).
+- [ngsxfem](https://github.com/ngsxfem/ngsxfem): CutFEM on level sets, pip install, CPU.
+- Research code on FEniCSx.
+- Commercial: [Intact.Simulation in nTop](https://intact-solutions.com/intact-simulation-for-ntop/)
+  (stress and modal on implicit geometry) and [Ansys Discovery Explore](https://innovationspace.ansys.com/forum/forums/topic/explore-mode-vs-refine-mode/)
+  (GPU voxels, with a separate "Refine" mode for fidelity).
+
+**Accuracy verdict:** stair-stepped voxel boundaries produce spurious surface stresses; filtering
+only partly fixes them ([Charras & Guldberg 2000](https://pubmed.ncbi.nlm.nih.gov/10653042/); voxel
+versus X-FEM/level-set in [Lian et al. 2013](https://link.springer.com/article/10.1007/s00466-012-0723-9)).
+Stiffness, displacements and natural frequencies converge fine. Cut-cell and SBM methods recover
+boundary accuracy with good quadrature, but fillet peak stress still wants body-fitted quadratic tets.
+So: voxel and immersed solves for low fidelity and interactive preview; TET10 for the stress labels -
+unless a measured comparison on this part says otherwise.
+
+## Tet meshing
+
+- **fTetWild / pytetwild** ([TOG 2020](https://ar5iv.labs.arxiv.org/html/1908.03581),
+  [pytetwild](https://github.com/pyvista/pytetwild): MPL-2.0, Windows wheels). Meshes 98.7% of the
+  Thingi10k test set in under 2 min (18.5 s on average). *Fit: high* as the fallback that almost never
+  fails; its output approximates the input surface within a tolerance envelope.
+- **TetGen** (AGPLv3 [or commercial licence](https://www.wias-berlin.de/software/tetgen/FAQ-license.jsp)).
+  Fails to produce a constrained Delaunay mesh on about 8.5% of valid Thingi10k models
+  ([Diazzi et al. 2023](https://cims.nyu.edu/gcl/papers/2023-CDT.pdf)). *Fit: medium*: fast on clean
+  surfaces, but AGPL is a problem for a hosted product.
+- **gmsh**. Its parallel Delaunay kernel (HXT) makes 3 billion tets in 53 s
+  ([IJNME 2019](https://arxiv.org/abs/1805.08831)); size fields and second-order elements. *Fit: high*
+  as the primary mesher for watertight contoured surfaces. (gmsh 4.15.2 is installed in fastcae's
+  environment, unused.)
+- **MMG `mmg3d -ls`** ([man page](https://www.mankier.com/1/mmg3d), LGPL). Takes level-set values on a
+  background tet mesh and produces a conforming, quality-optimised mesh of the zero set, preserving
+  ridges. *Fit: high*: distance field to body-fitted mesh with no surface step.
+- **CGAL Mesh_3** ([manual](https://doc.cgal.org/latest/Mesh_3/index.html)). Meshes implicit
+  functions and labelled images; sharp-feature protection improved in
+  [6.0.1, December 2024](https://www.cgal.org/2024/12/01/mesh3-improvements/); Python via
+  [pygalmesh](https://github.com/meshpro/pygalmesh). *Fit: medium*: excellent quality, GPL/commercial
+  licence and Windows build friction.
+- **quartet** ([GitHub](https://github.com/crawforddoran/quartet)), isosurface stuffing
+  ([Labelle & Shewchuk 2007](https://people.eecs.berkeley.edu/~jrs/papers/stuffing.pdf); dihedral angles
+  guaranteed between 10.7° and 164.8°). Never fails on a distance field, but element size is uniform:
+  low fidelity.
+- **Tip:** after building TET10, move the mid-side nodes onto the distance field's zero surface
+  (along its gradient) - fillet curvature restored cheaply. agenticCAE's TET10 had mid-side nodes on
+  straight edges.
+
+## Solvers and realistic runtimes
+
+*(est.)* For a 0.5-2 M-DOF TET10 model on an 8-16-core workstation: a static solve with a sparse
+direct solver (PARDISO, MUMPS or PaStiX) about 0.5-2 min and 8-25 GB RAM; the first 10 modes
+(shift-invert Lanczos) another 1-3 min; with meshing and I/O about 3-6 min per design - 4,000 designs
+in about 8-17 days one at a time, or 3-6 days three at once. Anchors: CalculiX forum users solve
+1.87 M-node models in 64 GB with PARDISO, and PaStiX beats PARDISO below about 1 M nodes
+([thread](https://calculix.discourse.group/t/problem-with-large-model-solution/748?page=2)); PaStiX
+gives up to 4× (CPU) and 8× (GPU) speed-ups at 1-5 M DOF ([dhondt.de](https://www.dhondt.de/)).
+agenticCAE's measured campaign: 559.9 s per solve on GCP (TET10), a median 687 s per design, 36 min
+wall time for 29 designs at 14 at a time; 243 s per design on the laptop with linear elements.
+
+- **CalculiX** (GPL). Text `.inp` input, static and frequency steps, quadratic tets (C3D10). Runs on
+  Windows via [PrePoMax](https://prepomax.fs.um.si/), in Linux containers, and as a cloud API on
+  [Inductiva](https://inductiva.ai/simulators/calculix). *Fit: high* as a label generator; ran out of
+  memory at C3D10 on this housing in 7.8 GB.
+- **Code_Aster**. MUMPS/PETSc solvers; official builds are Linux and containers only
+  ([SALOME_MECA 2025](https://open-simulation-center.org/downloads/code_aster/SALOME_MECA/2025));
+  community Windows builds lag ([code-aster-windows](https://code-aster-windows.com/)). agenticCAE's
+  proven solver on this housing - the reference here.
+- **FEniCSx / dolfinx**. Native Windows via
+  [conda-forge](https://github.com/conda-forge/fenics-dolfinx-feedstock). CG with PETSc's GAMG
+  multigrid for elasticity, SLEPc for modes, many right-hand sides per factorisation. *Fit: high* for
+  an all-Python route.
+- **scikit-fem**. Pure Python; its multigrid option (PyAMG) is serial
+  ([discussion](https://github.com/kinnala/scikit-fem/discussions/1079)). *Fit: medium*, for QA
+  re-solves and prototypes.
+- **MFEM / deal.II**. GPU matrix-free high-order ([MFEM performance](https://mfem.org/performance/));
+  C++ and Linux-first. *Fit: low* (overkill here).
+- **Kratos**. pip wheels including Windows ([install guide](https://github.com/KratosMultiphysics/Kratos/blob/master/INSTALL.md));
+  an MMG remeshing process. *Fit: medium-low*.
+
+## Multi-fidelity setups
+
+A multi-fidelity graph network trained coarse mesh first, then fine
+([Taghizadeh et al., CACAIE 2025](https://onlinelibrary.wiley.com/doi/10.1111/mice.13312)); a
+multi-fidelity Graph U-Net ([arXiv 2412.15372](https://arxiv.org/abs/2412.15372)); a
+pretrain-then-finetune neural operator for structural dynamics
+([Eng. Struct. 2025](https://www.sciencedirect.com/science/article/abs/pii/S0141029625016098)). At
+4,000 designs a single fidelity of TET10 solves is affordable; a GPU voxel low-fidelity level earns its
+place for well over 10,000 designs or for live previews in the interface.
+
+## What speeds each route up
+
+- **Many designs at once** - the biggest lever; agenticCAE ran 14 at a time on the cloud.
+- **Start from the unmodified housing's solution** as the iterative solver's first guess: a variant
+  differs by a few ribs, so it starts near the answer.
+- **Fine cells only near ribs and fillets**, coarse elsewhere: Warp's sparse NanoVDB grids support it.
+- **On the mesh route**: gmsh's parallel mesher; PaStiX (faster than MUMPS below 1 M nodes); an AMG
+  iterative solver on GPU; one factorisation shared by several load cases (Code_Aster
+  `MACRO_ELAS_MULT`); mid-side nodes snapped to the surface rather than a finer mesh.
+- **On this laptop** (i7-13700HX, 16 cores/24 threads, 15.7 GB RAM, RTX 5060 Laptop 8 GB): one
+  Code_Aster TET10 solve at a time fits (about 10 GB); memory, not cores, limits parallel work.
+
+## Where fastcae stands
+
+The route is decided by measurement, on the same load case, supports and metrics as agenticCAE
+(bearing tilt, gear-mesh misalignment, 99.9th-percentile von Mises, largest displacement): TET10 with
+a GPU iterative solver, and the plain voxel grid on Warp - with a cut-cell solve if it earns its place
+- each against Code_Aster on TET10 solved locally, as the reference. See
+[../build-plan.md](../build-plan.md).

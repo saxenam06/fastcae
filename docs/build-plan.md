@@ -1,7 +1,9 @@
-# Build plan: a design space from the engineer's words
+# Build plan
 
-**The plan as agreed.** What is built, in what order, and how each step is judged. The design behind
-it is in [ribs.md](ribs.md); what runs today is in [status.md](status.md).
+**The plan as agreed.** What is built, in what order, and how each step is judged. Variants and
+campaigns are built; the next phase takes their designs to a trained, trusted surrogate. The design
+behind the variants is in [ribs.md](ribs.md); the research behind the next phase in
+[research/](research/README.md); what runs today in [status.md](status.md).
 
 ---
 
@@ -13,202 +15,334 @@ follow their rules, with solver decks. A surrogate trained on them finds groups 
 well on several objectives at once - each a real, castable design - and shows which choices matter
 for the next design.
 
-The engineer brings a plain STEP file and its drawing, builds the study on Design a variant by
-hand - or says what they want in words, and the agent writes the same draft - launches a campaign,
-and reviews about 20 designs a round, the ones that differ most. The 4,000 behind them are the
-surrogate's training set, each followed through its stages, which nobody browses one by one.
+The engineer brings a plain STEP file and its drawing. On the CAD tab they author **variants**: each
+one change in one place - ribs on a floor, webs between two faces, a wall thickened, holes through a
+plate - with what it may vary and every rule it must hold. On the Generate tab they compose a
+**campaign** from the variants they choose, see how many combinations it could make, screen a
+hundred in half a minute, and launch it - twenty designs to try the flow, four thousand for a
+training set. The designs appear in Designs with their stages - paths, field, mesh, setup, results -
+and the ones that differ most side by side.
 
 ## What is agreed
 
-1. **The study is the one source of truth**: a versioned document in the part's named entities -
-   what to add and where, what may vary (ranges with steps), what must hold, what is preferred, what
-   "better" means, and a seed. Generation reads only the study; the same version and seed give the
-   same designs, bit for bit.
-2. **Entities are bound by fingerprint** - kind, size, position. `face:1201` is a name to show; when
-   the CAD is read again the study finds its faces by fingerprint, or says it cannot.
-3. **Every constraint has a strength and a source.** *Hard* - the engineer or the drawing said it.
-   *Assumed* - a default the system took, the only kind it may offer to relax. *Learned* - from a
-   rejection the engineer confirmed. Each cites the words, the callout or the measurement it came
-   from.
-4. **Interfaces are closed**: bearing bores, holes with room for the tool, datums and machined faces
-   are forbidden unless the engineer allows them, each citing where it is known from. Everywhere
-   else is open: what the engineer does not say is explored, and listed as assumed.
-5. **A layout is a graph**: anchors on named entities, joined by ribs. A rib is a web in a plane
-   between two anchors - a floor under it optional - with a section: thickness, taper, height, draft,
-   root fillet, edge round. Spokes, grids and triangles are shapes of graph; they survive as
-   proposers with weights, never as limits.
-6. **A solver chooses the combinations.** Candidate ribs and their conflicts are computed once;
-   CP-SAT picks sets of ribs that satisfy every combination rule at once, with a random objective
-   for variety, and names the assumed rules to blame when nothing fits. Sobol sampling sets the
-   sizes.
-7. **Cheapest checks first**: one rib at a time, then combinations, then sizes, then geometry, then
-   physics. Every design's margin against every constraint is kept, so any proposed rule shows at
-   once how many designs it would remove - its **kill count**.
-8. **Designs are chosen for difference**: five to ten times too many are made, the 4,000 most spread
-   out in a space of properties are kept - rib count, total length, which entities are tied,
-   orientations, added mass - and the ~20 most representative are shown.
-9. **Objections become rules**: the engineer points at the rib they object to; the model offers one
-   to three readings, each with its kill count; the engineer confirms one. Learned rules belong to
-   the study; making one a rule for a family of parts is a deliberate act. Designs rejected for taste
-   stay in the physics set.
-10. **Design a variant writes the study by hand**: blocks from the faces selected, their entities,
-    settings and rules, each the engineer's own and said in words in the study. **The model** writes
-    the same draft from words, grounds names, asks only what blocks every design, explains why a
-    request is impossible, and turns objections into readings - where words are worth more than a
-    form. It never makes geometry and is never called once per design. Its tools are study-level.
-11. **No code is written for one part or one request.** What the study cannot express is added to
-    the library as a general piece - a rule kind, a proposer, a feature kind, a query - and every old
-    study must reproduce its designs exactly afterwards.
-12. **Physics**: Code_Aster, gated so the same design solved twice agrees within 0.1%, and analysis
-    on the distance field; results kept apart, never folded into one number. After physics, search
-    keeps the best design in each cell of the property space (MAP-Elites), and a design the
-    surrogate recommends is solved for real before it is called good.
+1. **A variant is one change in one place**: ribs on, webs between, faces thickened or thinned,
+   holes in. It carries what always comes with it - ribs bring their pads and the floor thickened
+   under them. Its identity is a short random code and a name that says what and where
+   (`k7f3a · Ribs on face:1201`). The part's alloy is not a variant: a part is cast in one material.
+2. **A variant holds everything that decides its designs**: where (what it stands on, ends on, keeps
+   clear of - faces, or another variant's ribs or holes; for webs, the two sides they run between,
+   from one to the other and never within one), what it may vary, and every rule it is held to.
+   Each lever is fixed, a range with a step, or a set of options. Every range steps by 5 in its own
+   unit unless the engineer says otherwise; height is in percent. Patterns are options: parallel,
+   square grid, triangle grid, spokes, and **free** - independent lines at any angle and position -
+   so "only square" is one choice and "anything" another. Drawn at random, every option and every
+   step is as likely as the next.
+3. **Only rules that are checked are offered.** A rule the pipeline cannot hold a design to is not
+   on the card. Rules a variant may hold: keep clear of, no taller than, at most so tall, every rib
+   ends on what it runs between, no rib thicker than a share of the wall it meets, no radius under,
+   room for the sand between ribs (root gap), and no X crossings.
+4. **The part's interfaces are held for every variant**: bores, holes, what the drawing controls and
+   its datums, each citing where it is known from. Everything else is open.
+5. **Variants are edited freely.** A campaign keeps a copy of each variant as it was when it was
+   launched, so its designs can always be built again; the library says which campaigns used a
+   variant and whether it changed since. Versions exist inside, never on the screen.
+6. **A campaign is a card**: its name, the variants it takes, which screening checks it holds,
+   how designs are drawn - spread evenly (the default), random, or every combination - how many to
+   keep, from which seed, and whether to draw more and keep the most different. Each design is a
+   random set of the chosen variants - as many designs with one of them as with two, three or all -
+   each variant at a point of what it allows. A campaign never narrows a variant: to hold a lever
+   fixed, change the variant.
+7. **Repaired, not discarded.** A design whose pieces break a rule between them - ribs too close,
+   a narrow wedge of sand, a hole on a rib, an X crossing a variant forbids - is repaired by CP-SAT,
+   which leaves out the fewest ribs, pads or holes so every rule holds, and the design says what was
+   left out. A design repair cannot save is drawn again.
+8. **Clearance is measured from real metal**: a rib's footprint is half its thickness at the root
+   and its root fillet, not its centre line - for holes, for faces kept clear of, and between ribs.
+9. **Every design can be made again**: a campaign keeps its card, the part's digest, the code it
+   ran, the copy of its variants and its seed; each design its recipe, a hash of it, its own seed,
+   what was left out and how it screened.
+10. **Cheapest first.** Placing and screening a design takes a fraction of a second, building its
+    field minutes, meshing and solving more. A campaign places and screens every design; a field is
+    built when someone asks for it.
+11. **Designs are measured for spread**: how many were tried, kept and dropped and why, how each
+    lever spread, how many distinct rib layouts, how far each design sits from its nearest
+    neighbour.
+12. **No code is written for one part or one request.** What a variant cannot express is added as a
+    general piece - a rule kind, a pattern, a kind of change - and every old campaign must build its
+    designs again exactly afterwards.
 
 ## The pipeline
 
 ```
-words + clicks + drawing + CAD
-        │  the model, with tools: ground names, write entries, ask what blocks
-        ▼
-  study (versioned, seeded)
-        │
-        ├─ anchors ─► candidate ribs ─────────── one-rib rules remove candidates
-        │                 │
-        │                 └─► conflicts between pairs, at the thickest a rib may be
-        ▼
-  CP-SAT: sets of ribs ──────────────────────── combination rules; random objectives;
-        │                                        spread over which entities are tied
-        ▼
-  Sobol: sizes of each rib ──────────────────── size rules
-        ▼
-  screening (seconds) ─► building (minutes) ─► checks ─► archive: every margin, kill counts
-        ▼
-  5-10× over-made ─► 4,000 most spread out ─► ~20 representatives ─► the engineer
-        ▲                                                                   │
-        └──────── new study version ◄─ confirmed rule ◄─ readings ◄─ objection
+STEP + drawing
+      │  read once: faces, features, interfaces, the part's field
+      ▼
+variants (CAD tab) ─── each: where + levers + rules; samples shown only when they pass
+      │
+      ▼
+campaign card ─── variants chosen · checks held · method, n, seed · count · screen 100
+      │
+      ▼
+each variant alone ─── its pool of points that place and pass on their own (repaired)
+      │
+      ▼
+designs ─── a random set of variants, a point of each ─► placed ─► CP-SAT repair ─► screened
+      │                                                   (a design repair cannot save: drawn again)
+      ▼
+archive: card, part digest, code, variants copy, seed · each design's recipe, hash, what was left
+      │   out, how it screened, its paths
+      ▼
+Designs: P for every design ─► F built on demand ─► M, S, R (to come)
 ```
 
 ## Where each rule is enforced
 
 | stage | rules |
 |---|---|
-| **one rib** - decides which candidate ribs exist | on the support and within the span · interfaces closed · clear of holes by the clearance · plane contains the pull direction · orientation asked for (parallel to a plane, along or square to a face, radial about an axis) · ends on allowed anchors, never on excluded ones · room for a height taller than the root fillet · at least two thicknesses long |
-| **combinations** - CP-SAT | how many, in total, per group, per anchor or region · not closer than the spacing · no X-crossings · junction angle at least 30° · at most a few ribs meeting at one point · ties asked for between two entities · symmetric pairs together, if required · rejected combinations never return · each new design differs from those kept by at least *d* ribs · a rough added-mass limit |
-| **sizes** - Sobol within ranges | root fillet at least the smallest radius · thickness at most 0.7 of the wall met · edge round at most half the thickness · draft at least 1° |
-| **built** - checks | fillets achieved · thick spots · mould release · nothing floating · protected faces unchanged · the surface closed |
-| **physics** | bearing-seat tilt · stiffness · stress · mass · natural frequencies |
+| **placing** a variant's ribs and holes | on what they stand on · clear of the faces and variants named, from the rib's footprint · clear of every hole, bore and controlled feature of the part in three dimensions, ends buried in what they meet included · no taller than named features or a height · ends on what they run between · pads where a wall is too thin, floors thickened where a floor is · stubs left out |
+| **repair** (CP-SAT) | root gap between footprints, within a variant and between variants · no narrow wedge of sand where two ribs meet · a ligament of metal between holes and ribs · no X crossings, where a variant says so |
+| **screening** | every variant in the design made something · a rib no thicker than its floor allows · the root gap · holes clear of ribs · no wall thinned below its least |
+| **built** (field checks) | protected cells unchanged · inside the grid · nothing floating · rib thickness · root gap · root fillet achieved · rib ends · blend bridging and clipping · thick spots · rib against wall · the surface closed |
+| **physics** (to come) | bearing-seat tilt · stiffness · stress · mass · natural frequencies |
 
-Preferences are weights in the solver's objective, never limits. An assumed rule is a switch the
-solver can blame. A check that keeps failing for one cause becomes a rule at an earlier stage.
-
-## The model's tools
-
-A few general tools, each doing one job, which the model composes - with **skills** that say how,
-for a kind of request. Today: find entities, describe them, relate them to the part - what they
-stand on, what rises round a floor, what is round a face, what shares an axis, what lies across the
-open space in front of them, what lies between several of them - measure them, search the drawing,
-and read and edit the study, each edit coming back with where every block's ribs would go. To
-come: an entry's kill count, running a study version, why nothing fits, the representatives,
-readings of an objection. No tool is made for one kind of request.
-
-What the model knows is what those tools answer, and today they answer geometry. The knowledge that
-would let them answer engineering - a model of the part's regions and what they are for, and
-design knowledge as cited data - is described in [ribs.md](ribs.md) and not built.
+Mould release is not checked while the pull direction is out of the variants; it comes back with
+the pull and with cores that form the pockets inside a casting.
 
 ## Steps
 
-Each step names what is built and what shows it done. Every step keeps all tests passing and every
-earlier study reproducing its designs.
+Each step names what is built and what shows it done. Every step keeps the tests passing.
 
-**1. The study** - the document, and Design a variant as its one structured view.
-- The study: entities by fingerprint, blocks (what to add, where, span), the pull direction, free
-  ranges with steps and sources, constraints with strength and source, preferences, objectives, the
-  target (how many, spread how, how different, the seed). Written only through one function that
-  refuses names the part does not have, words never said, and hard rules citing nothing.
-- The catalogue of rule kinds, each with the stage that enforces it and whether that stage is built.
-  A rule no stage enforces yet is kept and listed as open, never dropped.
-- Assumptions listed: every range and rule nobody confirmed.
-- Interfaces closed by default, from the part and the drawing: bores, holes, drawing-controlled
-  features; the drawing's datums listed for the engineer to point at.
-- A block is read off the part round what the words gave - on a floor, or webs between what it
-  joins with nothing under them: its settings ranged round a suggested point, the rules the part
-  suggests for it marked as the part's, and what the words said always winning.
-- Design a variant, on the CAD tab, is the draft of the study's next version, read back from the
-  study when the project opens: block by block, what its ribs stand on, end on and keep clear of -
-  any entity, each a chip - then its settings and rules, each with what the study makes of it; what
-  the draft changes marked, Accept and Undo. The agent, above every tab, changes the study only
-  through the draft, and says only what needs the engineer's attention.
-- Preview and Full make the design at the study's suggested point, accepting the draft first.
-- *Done when* a request on the housing writes a study, the study reads back the same draft, and
-  every refusal and open item is tested.
+**1. The variant library**
+- `src/fastcae/variants.py`: a variant is a study of one block - the same schema, checked by the
+  same function - with a label, kept in `<project>/variants/<id>.json`. Its id is five characters,
+  a letter then letters and digits, random and unique in the project; its block's id is the same,
+  so another variant's ribs are `ribs:<id>`. Listing gives each variant's code, name, kind, where,
+  how many combinations it allows, which campaigns used it and whether it changed since. Delete
+  moves the file to `variants/.deleted/`.
+- `study.py`: reading and writing take the folder - `studies` or `variants` - and writing a variant
+  does not make it the project's study. A rule may name the ribs or holes of any variant in the
+  library.
+- The session's draft holds one block: the variant being authored, new or opened. Adding a second
+  block is refused.
+- Routes: `GET /api/variants`, `GET /api/variants/{id}`, `POST /api/variants/new`,
+  `POST /api/variants/{id}/open`, `GET /api/variant/draft`, `POST /api/variant/hand`,
+  `POST /api/variant/sample`, `POST /api/variant/save` (creates a new one, or saves the changes to
+  one kept), `POST /api/variant/discard`, `POST /api/variants/{id}/duplicate`,
+  `DELETE /api/variants/{id}`.
+- *Done when* tests on the ring part create, list, open, edit, save, duplicate and delete variants;
+  a variant naming another's ribs is written and read back; nothing touches `project.json`'s study.
 
-**2. Candidates and conflicts**
-- Anchors on the entities the study names; candidate ribs between them, each tested against every
-  one-rib rule; conflicts between pairs at the thickest allowed.
-- Show paths becomes show candidates: every candidate rib on the part, coloured by the rule that
-  removed it.
-- *Done when* the housing's candidates and conflicts are computed in seconds and every removed
-  candidate names its rule.
+**2. What a variant may vary**
+- Every range the part suggests steps by 5 in its unit, its ends rounded inward to multiples of 5 -
+  kept as they are when that would leave nothing. Height is a percentage, stepping by 5.
+- The **free** pattern: `Layout.kind` `lines`, each line an angle and a place across the host,
+  drawn from the design's `layout` lever - a seed, never shown - the count and the angle range from
+  the variant's levers; `_paths` lays each across the host like any other.
+- Only levers that change the design are sampled and counted: spacing for straight patterns that
+  have one, count for spokes, free lines and straight patterns without spacing, centre and spread
+  for spokes only.
+- `combinations(block)`: the exact number of distinct points a variant allows - summed over its
+  patterns, the product of each pattern's levers' values; "unlimited" with the free pattern.
+- Rules: the kinds a variant may hold (above) - `root_gap` a new kind, suggested from the rule of
+  thumb, and `no_x_junctions` enforced by repair. Kinds nothing reads (along, square to, draft at
+  least, thickness to wall, wall at least) are marked not enforced and not offered. Hand actions
+  `rule` and `drop` add and take them out.
+- No pull, preferences, objectives or target in a variant.
+- *Done when* tests show the ring's ribs ranged in fives, free lines the same for the same seed,
+  counts exact on blocks built by hand, and only checked kinds offered.
 
-**3. Choosing, sizing, screening, the archive**
-- Built: Sobol over every block's free settings - each block alone first, then which of each block's
-  workable points to combine; screening in a fraction of a second a design; alike designs kept once;
-  the archive of every design kept, in `designs/`, with what it is made of, how it screened and what
-  it weighs, keyed by study version.
-- To build: CP-SAT over the candidates with the combination rules as constraints and the assumed
-  ones as switches - choosing the ribs of a design so every rule about sets of ribs holds, and
-  repairing a combination by leaving out the one rib or hole in the way rather than discarding it;
-  random objectives; spread over which entities are tied; each design differing from the last by at
-  least *d* ribs; every margin against every constraint kept, for kill counts.
-- *Done when* one study gives 40,000 screened candidates in minutes, the same version and seed give
-  the same archive bit for bit, and an impossible request names the assumed rules to blame.
+**3. Footprints, wedges, crossings and repair**
+- `Rib` carries its root fillet. A rib's footprint half-width is half its thickness plus its root
+  fillet, or half its flange where that is wider.
+- Placing: keep-outs, other variants' ribs and holes, spokes crowding each other and ribs crowding
+  another variant's all measured from footprints.
+- `_gaps` - screening and the built check alike - measures between footprints; two ribs whose
+  footprints overlap meet in a junction. Where two ribs meet or cross at an acute angle, the sand
+  between them is a finger from the rounded corner to where it is as wide as the root gap; longer
+  than the root gap, the pair is a **wedge** conflict.
+- A junction's arms are counted - a rib passing through gives two, one ending there one; more than
+  three arms is an X crossing, which `no_x_junctions` forbids for the ribs of its variant.
+- `src/fastcae/generate/repair.py`: the conflicts of a placed design - rib-rib gap, wedge,
+  hole-rib ligament, X crossings - as a CP-SAT model that leaves out the fewest pieces (a rib takes
+  its pads with it), the same answer for the same design; the lines of what was left out drawn as
+  "left out"; screened again after.
+- The built checks leave out mould release while there is no pull.
+- *Done when* tests show: two ribs closer than the root gap lose one; a hole on a rib's fillet is
+  left out rather than the rib; a square grid of a variant that forbids X crossings loses ribs until
+  none cross; a shallow wedge is found; a hole 3 mm from a rib's side with an 8 mm root fillet is a
+  conflict; the built checks name no mould release.
 
-**4. The model on the study**
-- The tools above over the study and the archive. Words and clicks become entries, each echoed back
-  in plain words with its kill count. Blocking questions only.
-- The requirement suite: thirty varied requirements on the housing, drafted here and vetted by the
-  engineer, with the client's own when they come. The first five are the engineer's own, asked in
-  one conversation, each refining the study the earlier ones wrote.
-- *Done when* the suite's requirements become the right studies, judged by the engineer.
+**4. A variant's samples**
+- Show paths: the variant alone at its suggested point - or, for Another sample, at a random point
+  of what it allows, every choice and every step as likely as the next - placed, repaired,
+  screened; up to 48 points tried until one passes. The lines, what was left out, the counts, and
+  how it was drawn and on which try it passed; or why none passes, the commonest reasons first.
+- Create and Save refuse a variant none of whose samples pass.
+- *Done when* the ring's variant shows passing paths, Another sample shows a different one, and a
+  variant that cannot be placed is refused with its reason.
 
-**5. Choosing what to show, and objections**
-- The property space, farthest-point selection of the 4,000, k-medoids for the ~20 shown; the review
-  screen; pointing at a rib; readings with kill counts; confirmed rules; recheck and refill.
-- *Done when* a round of objections gives a new batch with none of them in it, and the engineer
-  accepts at least 70% of what is shown by the third round.
+**5. Campaigns**
+- `src/fastcae/generate/campaigns.py`: the card - `name`, `variants`, `checks_off`, `method`
+  (`even`, `random`, `every`), `n`, `seed`, `diverse` (off, or draw `k` times `n` and keep the `n`
+  most different).
+- Composing: one study version from the chosen variants - their blocks as they are, each variant's
+  rules on its own block, the part's interfaces once, and the rules between variants that hold
+  automatically: holes keep their ligament from every variant's ribs, ribs of two variants the root
+  gap. A rule naming a variant not in the campaign is left out.
+- Counting: `Π(1 + c_i) − 1` over the variants' combinations - every non-empty set of them at every
+  point of each. "Every combination" is offered when that is no more than `n`.
+- Screen 100: a hundred designs drawn as the campaign would, placed, repaired and screened, nothing
+  kept - how many pass, why the rest do not, and the time a design takes, so the launch's time is
+  known.
+- Go: each variant alone first - a pool of its points that place and pass on their own, repaired -
+  then designs: a set of variants with its size spread evenly from one to all, a pool point of
+  each by the method, placed, repaired, screened; a design repair cannot save drawn again; designs
+  alike kept once; `n` kept of at most `4n + 100` tried. With `diverse`, `k·n` are kept and the `n`
+  farthest apart chosen.
+- `_pieces` builds only the variants a design holds.
+- The archive, a folder per launch - `_archived_designs/<project>/<id>-<name>/`: `campaign.json`
+  (the card, the part's digest, the code's commit, the variants' copy with their inside versions,
+  the seed and method), `study.json` (the composed version), `designs.jsonl` (each design's
+  variants, values, recipe hash, seed, what was left out, how it screened), `paths.jsonl`,
+  `summary.json` (tried, kept, repaired, dropped by reason, how each lever spread, distinct rib
+  layouts, nearest-neighbour distance), `built/`.
+- Routes: `GET /api/campaign` (the pipeline: stages with their inputs and outputs, screening and
+  field checks, placing rules, materials), `POST /api/campaign/estimate`,
+  `POST /api/campaign/screen`, `POST /api/campaign/go` (a stream of events), `GET /api/campaigns`.
+- *Done when* tests on the ring: two and three variants composed; counts exact; set sizes spread
+  evenly over 300 designs; every combination enumerates each exactly once; `n` kept with repairs;
+  the same card and seed give the same designs and hashes; the summary holds its metrics.
 
-**6. The general rib**
-- Webs between any two anchors with nothing under them - boss to wall, bearing boss to bearing boss -
-  the pull direction from the study, a rounded free edge; then taper and T sections.
-- *Done when* "strengthen the bearings of all three shafts" gives valid designs of every family.
+**6. Designs by variant**
+- A design's rows and its readout say what it is made of by variant - code, name, what it made -
+  with the values it took and the variants it left out; plans are coloured by variant with a key;
+  a list can be filtered to designs holding one variant. Runs are listed as campaigns: name, how
+  many, method, when.
+- *Done when* route tests show names, left-out variants and the filter.
 
-**7. An unseen housing**
-- A second cast housing with a drawing, run with no code changed.
-- *Done when* it gives 20 valid representatives, and the time from files to designs is known.
+**7. The interface**
+- CAD - **Design a variant**, a pane on the right: a sub-tab for each variant and one for a new
+  one. A new variant starts from the faces selected and what to add. The card: where - stand on,
+  end on, keep clear of, chips from the selection; what varies - each lever fixed, a range with its
+  step, or options, patterns among them; its rules, offered kinds only; how many combinations it
+  allows; **Show paths** and **Another sample**, with what was left out. At the bottom: its name
+  and **Create variant** - or, for one already made, **Save changes** and **Discard** - with
+  Duplicate and Delete, and the campaigns that used it. The agent bar is hidden.
+- Generate - **Campaign**, in three steps: **Compose** (name; variants, each with its variations and
+  count), **Check** (at a glance, a few words an item and its rule on hover: what each variant
+  varies and the rules it holds, what holds always, screening checks to switch, field checks
+  folded), **Sample & launch** (method, n,
+  seed, keep the most different, the count, Screen 100, the time it will take, Launch); a later step
+  greyed until the one before holds something. Campaigns launched below, with their progress, each
+  opening in Designs.
+- Generate - **Designs**: as today, with the variant readout, left-out variants and the filter;
+  "left out" lines in the paths key.
+- *Done when* the interface type-checks and a walk in a headless browser, on a scratch copy of the
+  housing, authors three variants, composes them, estimates, screens a hundred, launches twenty,
+  and shows every design's paths and one design's field.
 
-**8. Speed**
-- Placing and screening are fast enough: 4,000 designs of a ten-block study in about a quarter of an
-  hour on one core. Building and checking each is still a minute or more: to go overnight on one
-  workstation, windows reused, cheaper checks, every core.
+**8. A clean start, and the docs**
+- Retired to `_archived_designs/_retired/2026-09-13/`, where nothing lists them: the housing's
+  `studies/` and `specs/`, the agent's conversation in `.fastcae/agent/`, and every run under
+  `_archived_designs/GRC_Gearbox_Housing/`; `project.json` forgets its study and spec. Kept: the
+  part, its drawings, the caches and the knowledge.
+- README, architecture, generate, ribs and status rewritten to what is true then.
+- The whole test suite run once; committed when the engineer says so.
 
-**9. Simulate and Learn**
-- Decks for every design; Code_Aster with the repeatability gate; analysis on the distance field;
-  the surrogate; MAP-Elites; real solves before a design is called good.
+## Next: from designs to a trained, trusted surrogate
 
-**10. The next kinds of feature**
-- Built: faces moved along their normal - walls, plates, bosses thicker or thinner; hole patterns
-  through plates, clear of ribs; the material the part is cast in, one, never varied; pads where
-  a rib meets a wall too thin for it, and floors thickened for ribs too thick for them. One study
-  varies them all at once, built in their order - shape changes, then additions, then cuts - with
-  rules across kinds, and a campaign spreads designs over all of them.
-- To come: bulges and crowns, bearing-boss transitions, ribs the part already has varied in height
-  and thickness, pockets. Each through the same recipe: a kind of block, a way to build it on the
-  field, its checks, what is read off the part for it - in [ribs.md](ribs.md), *Beyond ribs*.
+Agreed with the engineer on 14 September 2026. The research behind each choice is in
+[research/](research/README.md).
+
+**What it is for.** ZenryxAI first as a **castable training-data factory**: a plain STEP file and its
+rules in; castable variants, meshes, solved labels and standard records out, ready for any physics-AI
+platform. The GRC gearbox run is its showcase and the first public dataset of solved cast-part
+variants; the other markets in [research/market.md](research/market.md) follow. No date - the best
+product.
+
+### Decided
+
+1. **Compute.** Open-source solvers. This workstation first (RTX 5060 Laptop 8 GB, 16 cores, 16 GB
+   RAM): what needs Linux (Code_Aster, PETSc, JAX) runs in WSL, the rest on Windows. RunPod for GPU
+   training when the laptop is not enough; Google Cloud, with agenticCAE's cluster, for bursts of CPU
+   solves.
+2. **Physics.** Linear static first, with agenticCAE's load case as it is - DLC 1.3 extreme, 401 kN·m on
+   the low-speed shaft - so results compare with its 490 solved designs; one load case to start, the
+   16-unit-load basis kept switchable. Modal and harmonic later, by agenticCAE's method.
+3. **The solving route, by measurement.** Design #7 of campaign `w4zf5`, meshed with quadratic tets
+   (TET10), solved by Code_Aster locally as the reference; by a GPU iterative solver on the same mesh;
+   by NVIDIA Warp on the design's voxel grid; by FEniCSx on the mesh and as a cut-cell (finite cell)
+   solve on the grid; JAX-FEM, PETSc on GPU and cuDSS as each earns a place. Compared on agenticCAE's
+   metrics - bearing tilt, gear-mesh misalignment, 99.9th-percentile von Mises, largest displacement -
+   for accuracy, time and memory: [../bench/solvers/](../bench/solvers/README.md).
+4. **Data in rounds**, not 4,000 at once: about 300 spread evenly, train, then batches the agent picks
+   from the last results, up to 4,000. A fixed test set of about 300 is never trained on.
+5. **The field model**: stress and displacement anywhere on the part, from the design's distance
+   field (PhysicsNeMo); agenticCAE's metrics; mass computed exactly from geometry, never learned.
+6. **Accuracy and stopping**, on the test set: tilt and misalignment within 5%, p99.9 stress within
+   10%, displacement maps within 5%, stress maps within 15%, confidence ranges holding the true value
+   90% of the time. Stop when a round improves these by less than 10%, or at 4,000 designs.
+7. **Data format**: a PhysicsNeMo Zarr folder per design, a Parquet table of metrics, and a record per
+   design - its recipe, loads, solver version and every check it passed.
+8. **Publishing**: the validated GRC dataset openly, on Hugging Face under an open licence; the
+   generator stays private.
+9. **Validation**: against real FE solves now; against NREL's measured data later.
+10. **Agents**: one copilot the engineer talks to, in a dedicated Agent tab with a live log; helpers
+    behind it - failed runs, data checks, the next batch, explanations - each labelled in the log.
+    Safe, undoable steps they do themselves; anything that changes the design space or spends money
+    waits for the engineer's yes. Built on LangGraph; models through OpenRouter chosen per helper - a
+    cheap one for routine watching, Claude for next batches and explanations - each switchable to
+    DeepSeek. No Slack or Teams.
+11. **GRC only** for now; a second part once the loop runs.
+
+### First, before anything new
+
+1. **Rib height.** An end is as tall as what it actually meets, never the metal found behind it (a
+   web reached 422 mm through a 494 mm column behind a 45 mm boss). Webs are no taller than where both
+   sides overlap, their top level by default. Spokes turn only about round things with an axis - a
+   ring's faces map to the ring's axis. Height becomes a setting in thicknesses, 2-5× by default,
+   never taller than what the end meets.
+2. **No floor thickening.** Floors are never thickened for ribs; a rib too thick for its floor is left
+   out, saying why.
+3. **Holes see-through.** The Field view hides the CAD faces a design cuts and draws the design's own
+   surface there; the verdict adds a check that holes go through.
+4. **Builds that finish.** The face-moving step fixed (262 faces thickened spent 30-40 minutes in one
+   step); builds as background jobs with progress, outside the development server, each design saved
+   as it finishes.
+
+### Open
+
+- **Job runner** - an own queue now, Dagster when the published dataset needs its lineage (see
+  [research/orchestration-and-agents.md](research/orchestration-and-agents.md)).
+- **Optimisation** - repair weighted by each piece's worth; pymoo on the surrogate with CP-SAT as its
+  repair, then BoTorch/Ax with real solves; the next-batch mix, recommended 50% least sure, 30% most
+  promising, 20% random (see [research/optimization.md](research/optimization.md)).
+- **Rib thickness from the floor** - with no floor thickening, 20 mm ribs on a 15 mm floor are left
+  out; starting ribs at 0.6-0.8 of the floor they stand on would keep them.
+- **The solving route**, once the comparison is in.
+
+## Later
+
+- **The engineer's review loop**: about twenty representatives a round - medoids, the most novel,
+  the nearest a hard rule, the least certain - pointing at a rib, readings of an objection with
+  the number of designs each would remove, confirmed rules, the agent writing variants and
+  campaigns from words again.
+- **Quality-diversity search**: an archive over a few measures of the design, emitters aimed at
+  its empty cells; staggered crossings as a pattern; free layouts grown from a graph of legal
+  connections between regions.
+- **Mould release** with the pull and with cores; then draft and undercut maps.
+- **Wall fields**: thickness varied smoothly over a region, fading to nothing at what is held.
+- **Gated solves**: the same design solved twice agrees within 0.1%; MAP-Elites; a design the
+  surrogate recommends solved for real before it is called good.
+- **The part's regions and what they are for**, computed from the geometry and the drawing,
+  approved by the engineer; the names the card, the agent and the results share.
+- **Scale**: an unseen housing with no code changed; campaigns spread over every core; orchestration
+  and data versioning when campaigns outgrow one machine.
 
 ## Always
 
-- No code names a part's faces or an example sentence; examples go into the requirement suite.
-- Every study in the suite reproduces its archive exactly after every change.
+- No code names a part's faces or an example sentence.
+- Every campaign kept builds its designs again exactly after every change.
 - Docs describe what is true now and the design as agreed; nothing records a journey.
 - Nothing is committed and no server is started without the engineer saying so.
 
@@ -216,29 +350,9 @@ earlier study reproducing its designs.
 
 - **A second housing** with a drawing, allowed to be used - from the engineer, or a public model
   with a clear licence.
-- **The requirement suite**, to vet once drafted, and the client's own requirements.
 - **Which material the housing is cast in**: one, never varied - assumed the ductile iron
   wind-turbine housings are cast in by default, EN-GJS-400-18-LT; the drawing names the material
   only as the existing housing's.
 - **The client's solver deck**, when there is one.
 - **Employment and IP terms** to check before any commercial step with driveline suppliers - for a
   lawyer.
-
-**Decided:** the study is built by hand on the card; the agent is kept, writing the same draft from
-words, and will be moved to what no form reaches - documents, briefs, objections, explanation over
-many designs - judged on a fixed set of such requests by how often it gives the right study, how
-alike repeated runs are, and its time and cost against an engineer doing the same by hand.
-
-**Proposed, not yet decided:**
-
-1. **What comes next: the model of the part's regions and what they are for.** Computed from the
-   geometry and the drawing, proposed by the model where it cannot be computed, approved by the
-   engineer; the names the card, the agent and the simulation's result regions share. A first
-   piece of it: where a kind of block fits at a given size - which floors take 15 to 25 mm ribs -
-   asked of the part, not found by trying.
-2. **The baseline.** Keep adding ribs to a part without them, and vary any part as it is - a
-   customer's own ribbed part among them, as the thing to vary, never as a reference.
-3. **The order after that.** CP-SAT choosing and repairing combinations; then a thin slice of step
-   9 - mesh, static and modal - on some twenty designs a campaign kept, so the loop closes on real
-   numbers, each design's M, S and R filled in;
-   then bulges, boss transitions and existing ribs.
