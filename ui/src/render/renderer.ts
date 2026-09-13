@@ -34,18 +34,23 @@ precision highp float;
 layout(location = 0) in vec3 a_position;
 layout(location = 1) in vec3 a_normal;
 layout(location = 2) in uint a_faceId;
+// How far a surface drawn over the part stands off it, 0 to 1. A mesh that does not say reads the
+// constant 1 set when the renderer is made: wholly its own colour.
+layout(location = 3) in float a_standing;
 
 uniform mat4 u_viewProjection;
 uniform mat4 u_model;
 
 out vec3 v_normal;
 out vec3 v_worldPosition;
+out float v_standing;
 flat out uint v_faceId;
 
 void main() {
   vec4 world = u_model * vec4(a_position, 1.0);
   v_worldPosition = world.xyz;
   v_normal = mat3(u_model) * a_normal;
+  v_standing = a_standing;
   v_faceId = a_faceId;
   gl_Position = u_viewProjection * world;
 }`;
@@ -56,6 +61,7 @@ precision highp usampler2D;
 
 in vec3 v_normal;
 in vec3 v_worldPosition;
+in float v_standing;
 flat in uint v_faceId;
 
 uniform sampler2D u_faceState;
@@ -102,7 +108,9 @@ void main() {
   // A tinted pass ignores face state entirely. It is a second surface drawn over the first for
   // comparison, so it has to read as one object rather than as a selection someone made.
   if (u_tinted == 1) {
-    base = u_tint;
+    // Where it runs down onto the part it takes the part's colour, so the join reads as metal
+    // joined rather than as an edge cut where the colour happens to stop.
+    base = mix(STEEL, u_tint, clamp(v_standing, 0.0, 1.0));
     isSelected = false;
     isHovered = false;
   } else if (u_colourMode == 1) {
@@ -375,6 +383,9 @@ export class Renderer {
 
     this.program = linkProgram(gl, VERTEX_SHADER, FRAGMENT_SHADER);
     this.pickProgram = linkProgram(gl, PICK_VERTEX_SHADER, PICK_FRAGMENT_SHADER);
+    // What a surface reads for how far it stands off the part when its mesh does not say: wholly
+    // its own colour. Context state, not a vertex array's, and nothing else uses the slot.
+    gl.vertexAttrib1f(3, 1.0);
 
     const positionBuffer = createBuffer(gl, mesh.positions);
     const normalBuffer = createBuffer(gl, mesh.normals);
@@ -520,24 +531,25 @@ export class Renderer {
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
         gl.depthMask(false);
-        // Pulled a hair towards the camera. The two surfaces are the same surface - a contour of a
-        // field built from that very geometry - so they sit within a fraction of a millimetre of
-        // each other, which is below what a depth buffer can separate. Without the bias the depth
-        // test passes and fails in patches and the overlay comes back stippled, which reads as a
-        // strange material rather than as the numerical noise it is.
-        gl.enable(gl.POLYGON_OFFSET_FILL);
-        gl.polygonOffset(-1.0, -1.0);
       }
+      // Pulled a hair towards the camera, see-through or not. Where the overlay lies on the part -
+      // a contour of a field built from that very geometry, or a design's surface running down
+      // onto the part it joins - the two sit within a fraction of a millimetre of each other,
+      // below what a depth buffer can separate. Without the bias the depth test passes and fails
+      // in patches and the overlay comes back stippled, which reads as a strange material rather
+      // than as the numerical noise it is.
+      gl.enable(gl.POLYGON_OFFSET_FILL);
+      gl.polygonOffset(-1.0, -1.0);
       gl.uniform1f(alpha, this.overlayAlpha);
       gl.uniform1i(tinted, 1);
       gl.uniform3fv(gl.getUniformLocation(this.program, "u_tint"), this.overlayTint);
       gl.bindVertexArray(this.overlayVao);
       gl.drawElements(gl.TRIANGLES, this.overlayIndexCount, gl.UNSIGNED_INT, 0);
+      gl.disable(gl.POLYGON_OFFSET_FILL);
+      gl.polygonOffset(0.0, 0.0);
       if (seeThrough) {
         gl.depthMask(true);
         gl.disable(gl.BLEND);
-        gl.disable(gl.POLYGON_OFFSET_FILL);
-        gl.polygonOffset(0.0, 0.0);
       }
     }
 
@@ -660,6 +672,13 @@ export class Renderer {
     bindFloatAttribute(gl, position, 0, 3);
     bindNormalAttribute(gl, normal, 1);
     bindIntAttribute(gl, faceId, 2);
+    if (mesh.standing) {
+      const standing = createBuffer(gl, mesh.standing);
+      this.overlayBuffers.push(standing);
+      gl.bindBuffer(gl.ARRAY_BUFFER, standing);
+      gl.enableVertexAttribArray(3);
+      gl.vertexAttribPointer(3, 1, gl.UNSIGNED_BYTE, true, 0, 0);
+    }
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, index);
     gl.bindVertexArray(null);
     this.overlayVertexCount = mesh.vertexCount;
@@ -872,7 +891,10 @@ function linkProgram(gl: WebGL2RenderingContext, vertexSource: string, fragmentS
   return program;
 }
 
-function createBuffer(gl: WebGL2RenderingContext, data: Float32Array | Uint32Array | Int8Array) {
+function createBuffer(
+  gl: WebGL2RenderingContext,
+  data: Float32Array | Uint32Array | Int8Array | Uint8Array,
+) {
   const buffer = gl.createBuffer()!;
   gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
   gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);

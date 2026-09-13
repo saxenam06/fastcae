@@ -1745,6 +1745,17 @@ button.quiet:hover {
   color: var(--blue);
 }
 
+/* The × that takes one entity out of a list. */
+.ref-chip button.chip-x {
+  padding: 0 4px 0 1px;
+  font-family: var(--sans);
+  color: var(--muted);
+}
+
+.ref-chip button.chip-x:hover {
+  color: var(--conflict);
+}
+
 .ref-chip .remove {
   padding: 0 3px 0 0;
   color: var(--muted);
@@ -1991,6 +2002,18 @@ button.quiet:hover {
   margin: 2px 0 4px 12px;
   padding: 3px 6px;
   border-left: 2px solid var(--blue-wash);
+}
+
+/* Typed, and not kept yet. */
+.setting-editor[data-typed="true"] {
+  border-left-color: var(--running);
+  background: var(--running-wash);
+}
+
+.setting-unkept {
+  flex-basis: 100%;
+  color: var(--running);
+  font-size: 10.5px;
 }
 
 .setting-editor label {
@@ -2732,3 +2755,607 @@ table.materials th {
   margin-top: 4px;
 }
 
+
+/* Design a variant: a tab for each variant kept, and one for a new one. */
+.variant-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 10px 8px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.variant-tab {
+  max-width: 100%;
+  padding: 3px 8px;
+  font-size: 11.5px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: var(--sheet);
+  border: 1px solid var(--hairline);
+  border-radius: 3px;
+}
+
+.variant-tab .mono {
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.variant-tab[data-active="true"] {
+  color: var(--blue);
+  border-color: var(--blue);
+  background: var(--blue-wash);
+}
+
+.variant-tab.new {
+  color: var(--blue);
+  border-style: dashed;
+}
+
+.variant-id {
+  padding: 6px 12px 2px;
+  font-size: 11.5px;
+}
+
+.variant-used {
+  padding: 0 12px 6px;
+  font-size: 11.5px;
+}
+
+.variant-count {
+  margin: 8px 0 2px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+/* --- Design a variant: one change, in a sentence, then its shape and its rules ---------------- */
+
+.variant-block {
+  padding: 8px 12px 10px;
+}
+
+.variant-block-head {
+  display: flex;
+  align-items: center;
+  margin-bottom: 2px;
+}
+
+.variant-block-head .variant-kind {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.variant-block-head .icon {
+  margin-left: auto;
+}
+
+.where-summary {
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.where-summary .where-edit {
+  margin-left: 6px;
+}
+
+.where-details {
+  margin: 6px 0 4px;
+  padding: 6px 8px;
+  background: var(--ground);
+  border-radius: 4px;
+}
+
+.variant-section {
+  margin-top: 12px;
+}
+
+.variant-section .section-title {
+  margin-bottom: 4px;
+  padding-bottom: 2px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.setting-row {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: baseline;
+  padding: 3px 0;
+  font-size: 12px;
+}
+
+.setting-row .setting-name {
+  color: var(--muted);
+}
+
+.setting-row .setting-value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.setting-row .setting-editor {
+  grid-column: 1 / -1;
+  margin-left: 0;
+}
+
+.setting-row .reset {
+  font-size: 11px;
+}
+
+.mine-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 5px;
+  vertical-align: middle;
+  background: var(--blue);
+  border-radius: 50%;
+}
+
+.choice-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.choice {
+  padding: 1px 8px;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--sheet);
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.choice[data-on="true"] {
+  color: var(--blue);
+  background: var(--blue-wash);
+  border-color: var(--blue);
+}
+
+.choice:disabled {
+  cursor: default;
+}
+
+.choice[data-on="true"]:disabled {
+  opacity: 1;
+}
+
+.more-settings > summary {
+  margin: 6px 0 2px;
+  font-size: 11.5px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.rule-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.rule-row .rule-text {
+  flex: 1;
+}
+
+.rule-row[data-changed="true"],
+.setting-row[data-changed="true"] {
+  background: var(--running-wash);
+}
+
+/* A new variant is all new: nothing in it is marked as changed. */
+.variant-block[data-kept="false"] [data-changed="true"] {
+  background: none;
+  box-shadow: none;
+}
+
+.rule-tag {
+  padding: 0 6px;
+  font-size: 10px;
+  color: var(--muted);
+  background: none;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+}
+
+button.rule-tag {
+  cursor: pointer;
+}
+
+.add-rule {
+  margin-top: 4px;
+  font-size: 11.5px;
+}
+
+.interfaces-fold {
+  margin-top: 8px;
+}
+
+.paths-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  margin: 4px 0;
+}
+
+.slot-sub,
+.step-sub {
+  margin: 10px 0 4px;
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.rule-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 11.5px;
+}
+
+.rule-add select {
+  max-width: 100%;
+  font-size: 11.5px;
+}
+
+.variant-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.variant-look,
+.variant-keep {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.variant-keep {
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline);
+}
+
+.variant-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.variant-name input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  font: inherit;
+  border: 1px solid var(--hairline);
+}
+
+.sample-about {
+  font-size: 11.5px;
+}
+
+button.danger {
+  color: var(--conflict);
+}
+
+/* Generate, Campaign: the card in three steps, side by side where there is room. */
+.campaign-card {
+  padding: 16px 22px 40px;
+}
+
+.campaign-card-head h1 {
+  font-size: 16px;
+  margin-bottom: 4px;
+}
+
+.campaign-card-head p {
+  max-width: 900px;
+  margin-bottom: 12px;
+  font-size: 12.5px;
+}
+
+.campaign-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.campaign-step {
+  min-width: 0;
+  padding: 10px 14px 14px;
+  background: var(--sheet);
+  border: 1px solid var(--hairline);
+}
+
+.campaign-step[data-waiting="true"] {
+  opacity: 0.55;
+}
+
+.campaign-step h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.step-number {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  font-size: 11px;
+  color: var(--sheet);
+  background: var(--blue);
+  border-radius: 50%;
+}
+
+.campaign-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.campaign-name input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  font: inherit;
+  border: 1px solid var(--hairline);
+}
+
+.variant-choice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  padding: 4px 0;
+  font-size: 12px;
+  border-top: 1px solid var(--hairline);
+  cursor: pointer;
+}
+
+.variant-choice .mono {
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.variant-choice .tag {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  padding: 0 4px;
+  border-radius: 2px;
+  color: var(--blue);
+  background: var(--blue-wash);
+}
+
+.variant-choice[data-on="true"] b {
+  color: var(--blue);
+}
+
+/* Check: each variant, what holds always and the checks - a few words each, the rule on hover. */
+.variant-held {
+  padding: 5px 0;
+  font-size: 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.variant-held-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  margin-bottom: 3px;
+}
+
+.variant-held-head .mono {
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.variant-held-head .tag {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  padding: 0 4px;
+  border-radius: 2px;
+  color: var(--blue);
+  background: var(--blue-wash);
+}
+
+.held-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 4px;
+  padding: 1px 0;
+  font-size: 11px;
+}
+
+.held-what {
+  flex: none;
+  width: 40px;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.held-pill {
+  padding: 0 7px;
+  line-height: 18px;
+  white-space: nowrap;
+  background: var(--ground);
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+  cursor: default;
+}
+
+.held-pill b {
+  font-weight: 600;
+}
+
+.held-pill.rule {
+  background: var(--sheet);
+}
+
+.held-pill.rule[data-strength="assumed"] {
+  border-style: dashed;
+}
+
+.held-always {
+  margin: 0;
+  padding: 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  list-style: none;
+}
+
+.held-always li::before {
+  content: "✓";
+  margin-right: 6px;
+  color: var(--blue);
+}
+
+.check-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.check-pill {
+  padding: 0 8px;
+  font: inherit;
+  font-size: 11px;
+  line-height: 20px;
+  color: var(--blue);
+  background: var(--blue-wash);
+  border: 1px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.check-pill::before {
+  content: "✓ ";
+}
+
+.check-pill[data-off="true"] {
+  color: var(--faint);
+  text-decoration: line-through;
+  background: transparent;
+  border-color: var(--hairline);
+}
+
+.check-pill[data-off="true"]::before,
+.check-pill.fixed::before {
+  content: "";
+}
+
+.check-pill.fixed {
+  color: var(--ink);
+  background: var(--ground);
+  cursor: default;
+}
+
+.field-checks {
+  margin-top: 8px;
+  font-size: 11.5px;
+}
+
+.field-checks summary {
+  margin-bottom: 4px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.field-checks .dim {
+  margin-top: 4px;
+  font-size: 11px;
+}
+
+.held-hint {
+  margin-top: 8px;
+  font-size: 10.5px;
+}
+
+.method-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+
+.method-row[data-off="true"] {
+  color: var(--faint);
+}
+
+.estimate-line,
+.screen-said {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.launch-actions {
+  margin-top: 10px;
+}
+
+/* Generate, Designs: each design's variants as dots, and the filter. */
+.variant-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 11.5px;
+}
+
+.variant-filter select {
+  max-width: 100%;
+  font-size: 11.5px;
+}
+
+.design-variants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  grid-column: 1 / -1;
+}
+
+.variant-dot {
+  padding: 0 4px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: #fff;
+  border-radius: 2px;
+}
+
+.made-row {
+  padding: 2px 0;
+}
+
+.made-values {
+  padding-left: 12px;
+  font-size: 11px;
+}
+
+.recipe {
+  font-size: 10.5px;
+}

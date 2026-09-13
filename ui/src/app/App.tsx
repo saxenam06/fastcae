@@ -4,11 +4,11 @@
  * Starts empty. There is no model until something has been extracted, and nothing on screen is derived
  * from anything but the files in that project's folder.
  *
- * Five tabs, in the order the work happens: the Drawing as read; the CAD, where single variants are
- * designed by hand on Design a variant; Generate, where campaigns make thousands and every design
- * is followed through its stages; Learn and Optimize. The agent sits above them all - one
- * conversation, whichever tab is open. The project's name comes from its folder, so a
- * `DEEPJEB_Bracket/` folder renames the whole application without a code change.
+ * Five tabs, in the order the work happens: the Drawing as read; the CAD, where variants - one
+ * change in one place, with what it may vary and every rule it holds - are authored by hand on
+ * Design a variant; Generate, where a campaign composed of variants makes thousands of designs and
+ * every design is followed through its stages; Learn and Optimize. The project's name comes from
+ * its folder, so a `DEEPJEB_Bracket/` folder renames the whole application without a code change.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -26,13 +26,12 @@ import type {
   Step,
   Summary,
 } from "../api/client";
-import { AgentBar } from "../panel/AgentBar";
 import { ModelIndex } from "../panel/ModelIndex";
 import { DrawingIndex } from "../panel/DrawingIndex";
 import { Inspector } from "../panel/Inspector";
 import { VariantCard } from "../panel/VariantCard";
 import { Splitter } from "../panel/Splitter";
-import { CampaignLaunch, CampaignPipelineView, CampaignRuns, useCampaign } from "../generate/Campaign";
+import { CampaignCardView, CampaignRuns, useCampaign } from "../generate/Campaign";
 import { DesignReadout, DesignStage, DesignTabs, DesignsRail, useDesigns } from "../generate/Designs";
 import { DrawingStage } from "../stage/DrawingStage";
 import { UploadStage } from "../stage/UploadStage";
@@ -59,7 +58,7 @@ interface Model {
 type GenerateTab = "campaign" | "designs";
 
 /** The right-hand panes that fold away to the edge, one a place. */
-type Pane = "cad" | "campaign" | "designs";
+type Pane = "cad" | "designs";
 
 export function App() {
   const [session, setSession] = useState<SessionState | null>(null);
@@ -87,24 +86,15 @@ export function App() {
   const [ofKind, setOfKind] = useState<Feature[] | null>(null);
   const [calloutFilter, setCalloutFilter] = useState<string | null>(null);
 
-  // CAD: the variant last made on Design a variant, drawn over the part, and where the card would
-  // put ribs before anything is made.
-  const [variantMesh, setVariantMesh] = useState<Mesh | null>(null);
+  // CAD: where the variant being authored puts its ribs and holes, drawn on the part.
   const [cardLines, setCardLines] = useState<LineSet | null>(null);
   const [showPart, setShowPart] = useState(true);
-  const [showVariant, setShowVariant] = useState(true);
-  // Bumped when the agent changes the study, so the card reads itself again.
-  const [cardRefresh, setCardRefresh] = useState(0);
 
   // Pane widths, remembered between sessions. Losing them on every reload is a small annoyance
   // that never stops being annoying.
   const [railWidth, setRailWidth] = useState(() => remembered("fastcae.rail", 300));
   const [cardWidth, setCardWidth] = useState(() => remembered("fastcae.card", 380));
-  const [open, setOpen] = useState<Record<Pane, boolean>>({
-    cad: true,
-    campaign: true,
-    designs: true,
-  });
+  const [open, setOpen] = useState<Record<Pane, boolean>>({ cad: true, designs: true });
 
   useEffect(() => {
     try {
@@ -177,25 +167,8 @@ export function App() {
     await extract(session.project, paths, false);
   }, [session, extract]);
 
-  // A variant made on the card: the surfaces it changes, drawn over the part. Its verdict is on
-  // the card.
-  const variantMade = useCallback(async () => {
-    try {
-      setVariantMesh(await api.designMesh());
-      setShowVariant(true);
-    } catch {
-      setVariantMesh(null);
-    }
-  }, []);
-
   const openCard = useCallback(() => {
     setView("cad");
-    setOpen((was) => ({ ...was, cad: true }));
-  }, []);
-
-  // The agent changed the card: it reads itself again, and is opened where it lives.
-  const cardChanged = useCallback(() => {
-    setCardRefresh((n) => n + 1);
     setOpen((was) => ({ ...was, cad: true }));
   }, []);
 
@@ -214,7 +187,6 @@ export function App() {
     setSeeds([]);
     setActiveSeed(null);
     setFace(null);
-    setVariantMesh(null);
     setCardLines(null);
     setView("drawing");
   }, []);
@@ -379,7 +351,7 @@ export function App() {
 
   // What each tab lays out: a rail on the left, a pane on the right - and which pane.
   const pane: Pane | null =
-    view === "cad" ? "cad" : view === "generate" ? generateTab : null;
+    view === "cad" ? "cad" : view === "generate" && generateTab === "designs" ? "designs" : null;
   const hasRail = view === "drawing" || view === "cad" || view === "generate";
   const paneWidth = pane === null ? 0 : open[pane] ? cardWidth : 30;
 
@@ -388,10 +360,10 @@ export function App() {
   const onDesigns = view === "generate" && generateTab === "designs";
   const designField = onDesigns && designs.tab === "field";
   const designPaths = onDesigns && designs.tab === "paths";
-  const overlay = view === "cad" ? variantMesh : designField ? designs.overlay : null;
+  const overlay = designField ? designs.overlay : null;
   const lines = view === "cad" ? cardLines : designPaths ? designs.lines : null;
   const voxels = designField && designs.showCells ? designs.cells : null;
-  const partShown = view === "cad" || designField ? showPart : true;
+  const partShown = designField ? showPart : true;
   const pageOver =
     view === "learn" ||
     view === "optimize" ||
@@ -461,14 +433,8 @@ export function App() {
 
       {opened ? (
         <>
-          <AgentBar
-            selection={selection?.face_ids ?? []}
-            onCardChanged={cardChanged}
-            onOpenCard={openCard}
-            cardInView={view === "cad" && open.cad}
-            onShow={selectRefs}
-          />
-
+          {/* The agent is paused while variants and campaigns are built by hand: its bar is
+              kept, and comes back once it writes variants. */}
           {hasRail ? (
             <div className="rail">
               <div className="rail-scroll">
@@ -500,7 +466,7 @@ export function App() {
                     </nav>
                     {generateTab === "campaign" ? (
                       <CampaignRuns
-                        runs={campaign.pipeline?.runs ?? []}
+                        launched={campaign.launched}
                         going={campaign.going}
                         onOpenRun={openRun}
                       />
@@ -563,7 +529,7 @@ export function App() {
                     faceCount={model.summary.faces ?? 0}
                     bbox={model.summary.bbox_mm ?? [0, 0, 0, 1, 1, 1]}
                     showSurface={partShown}
-                    showOverlay={view === "cad" ? showVariant : true}
+                    showOverlay
                     showVoxels={voxels !== null}
                     overlay={overlay}
                     overlayAlpha={1.0}
@@ -590,21 +556,6 @@ export function App() {
                           {mode === "frozen" ? "controlled" : mode}
                         </button>
                       ))}
-                      {variantMesh ? (
-                        <span className="layers inline-layers">
-                          <button data-on={showPart} onClick={() => setShowPart((was) => !was)}>
-                            <span className="swatch" style={{ background: "#a5a9a4" }} />
-                            part
-                          </button>
-                          <button
-                            data-on={showVariant}
-                            onClick={() => setShowVariant((was) => !was)}
-                          >
-                            <span className="swatch" style={{ background: "#0e6e74" }} />
-                            the variant
-                          </button>
-                        </span>
-                      ) : null}
                     </div>
                   ) : null}
                   {onDesigns ? (
@@ -641,7 +592,11 @@ export function App() {
                   ) : null}
                   {view === "generate" && generateTab === "campaign" ? (
                     <div className="stage-page">
-                      <CampaignPipelineView campaign={campaign} onOpenCard={openCard} />
+                      <CampaignCardView
+                        campaign={campaign}
+                        onOpenCard={openCard}
+                        onOpenRun={openRun}
+                      />
                     </div>
                   ) : null}
                   {view === "learn" || view === "optimize" ? (
@@ -663,18 +618,11 @@ export function App() {
                     <VariantCard
                       project={project}
                       selection={selection?.face_ids ?? []}
-                      refresh={cardRefresh}
+                      refresh={0}
                       onShow={selectRefs}
-                      onDesign={variantMade}
-                      onStudyChanged={() => undefined}
                       onPaths={setCardLines}
                       onCollapse={() => setOpen((was) => ({ ...was, cad: false }))}
-                    />
-                  ) : pane === "campaign" ? (
-                    <CampaignLaunch
-                      campaign={campaign}
-                      onOpenRun={openRun}
-                      onCollapse={() => setOpen((was) => ({ ...was, campaign: false }))}
+                      onLibrary={campaign.refresh}
                     />
                   ) : (
                     <DesignReadout
@@ -725,7 +673,6 @@ const EMPTY = new Set<number>();
 /** What a folded pane says on its strip. */
 const PANE_NAMES: Record<Pane, string> = {
   cad: "Design a variant",
-  campaign: "Launch a campaign",
   designs: "The design",
 };
 

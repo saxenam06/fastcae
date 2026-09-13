@@ -241,6 +241,8 @@ export interface Mesh {
   indices: Uint32Array;
   vertexCount: number;
   indexCount: number;
+  /** For a surface drawn over the part: how far each vertex stands off it, 0 on it to 255. */
+  standing?: Uint8Array;
 }
 
 /** Where ribs may go, and whether a person has approved it. */
@@ -521,13 +523,139 @@ export interface StudySetting {
     high: number | null;
     step: number | null;
     options: (number | string)[] | null;
+    /** Every choice the part offers - the engineer may have kept only some, in ``options``. */
+    choices?: (number | string)[] | null;
     suggested: number | string | null;
     unit: string;
     /** For what the part is cast in: every material there is, to choose the one it is. */
     catalogue?: string[];
   };
   changed?: boolean;
+  /** Varied over, never set: which free layout a design takes. */
+  hidden?: boolean;
+  /** A share of what each end meets, shown as a percentage. */
+  percent?: boolean;
 }
+
+/** The variant being authored: its code, its name, whether it is kept yet, what it adds, how many
+ * combinations it allows - null when free layouts give it no end - and the other variants a rule
+ * of it may name. */
+export interface VariantInfo {
+  id: string;
+  label: string;
+  kept: boolean;
+  kind: string | null;
+  combinations: number | null;
+  others: { id: string; label: string; kind: string }[];
+}
+
+/** A kind of rule a variant may hold: what it reads as, what it needs, whether it names faces. */
+export interface OfferedRule {
+  kind: string;
+  says: string;
+  needs: string[];
+  names: boolean;
+}
+
+/** A variant as the library lists it. */
+export interface VariantRow {
+  id: string;
+  label: string;
+  kind: string;
+  stand_on: string[];
+  end_on: string[];
+  combinations: number | null;
+  version: number;
+  created: string;
+  changed: string;
+  used_in: { run: string; name: string; version: number; changed_since: boolean }[];
+}
+
+/** A variant of the library, read only: what it adds and where, what it may vary, its rules. */
+export interface VariantShown extends VariantRow {
+  block: StudyBlockView;
+  interfaces: number;
+  names: Record<string, string>;
+}
+
+/** A piece repair left out, and the rule it broke. */
+export interface LeftOut {
+  block: string;
+  what: "rib" | "hole";
+  index: number;
+  why: string;
+}
+
+/** The variant at a point that passes: its lines, what repair left out, what it made. */
+export interface VariantSample extends CardPaths {
+  values: Record<string, unknown>;
+  about: string;
+  left_out: LeftOut[];
+  left_out_said: string;
+  findings: { check: string; outcome: Outcome; reason: string; rule: string }[];
+  tried: number;
+  /** How it was drawn, in a sentence: its suggested point, or at random - and on which try. */
+  drawn: string;
+  waiting: string[];
+}
+
+/** What a campaign is: everything that decides its designs. */
+export interface CampaignCard {
+  name: string;
+  variants: string[];
+  checks_off: string[];
+  method: "even" | "random" | "every";
+  n: number;
+  seed: number;
+  /** 0: as drawn; k: keep k times n, then the n that differ most. */
+  diverse: number;
+}
+
+/** How many designs a card's variants allow - null when free layouts give it no end. */
+export interface CampaignEstimate {
+  count: number | null;
+  variants: { id: string; label: string; combinations: number | null }[];
+  every: boolean;
+}
+
+/** A hundred designs drawn as the card would, placed, repaired and screened - nothing kept. */
+export interface CampaignScreen {
+  tried: number;
+  passed: number;
+  repaired: number;
+  rejected: Record<string, number>;
+  alone: Record<string, { kept: number; tried: number; rejected: Record<string, number> }>;
+  seconds_per_design: number;
+  estimate_seconds: number;
+}
+
+/** A campaign launched, as the list shows it. */
+export interface LaunchedCampaign {
+  run: string;
+  id: string;
+  name: string;
+  variants: { id: string; label: string; kind: string; version: number }[];
+  card: CampaignCard;
+  count: number | null;
+  created: string;
+  state: "done" | "unfinished";
+  made: number | null;
+  tried: number | null;
+  seconds: number | null;
+  built: number;
+  when: number;
+}
+
+/** What happens while a campaign runs, as it happens. */
+export type CampaignEvent =
+  | { type: "started"; run: string; id: string; name: string; n: number; count: number | null }
+  | { type: "variant"; variant: string; label: string; kept: number; tried: number;
+      rejected: Record<string, number> }  // prettier-ignore
+  | ({ type: "progress"; repaired: number } & GoProgress)
+  | ({ type: "design"; variants: string[] } & GoDesign)
+  | ({ type: "done"; run: string; name: string; asked: number; repaired: number;
+      layouts: number } & GoProgress)  // prettier-ignore
+  | { type: "error"; message: string };
 
 /** A rule as Design a variant shows it: in words, how firmly, from where and by whom, and whether
  * anything enforces it yet - and if not, until when. */
@@ -560,6 +688,8 @@ export interface StudyBlockView {
   add: string;
   stand_on: StudyEntities;
   end_on: StudyEntities;
+  /** What webs run to from what they end on: one side to the other, never within one. */
+  other_side?: StudyEntities;
   keep_clear: StudyRule[];
   settings: StudySetting[];
   rules: StudyRule[];
@@ -596,12 +726,17 @@ export interface StudyDraft {
   names: Record<string, string>;
   /** Every run of Go kept for the project, newest first. */
   runs: KeptRun[];
+  /** The variant being authored, when it is one. */
+  variant: VariantInfo | null;
+  /** The rules a variant may hold. */
+  offered: OfferedRule[];
 }
 
 /** A campaign's run, kept in `_archived_designs`: its study and version, what it switched off, how
  * many designs it kept of how many tried, and how many of them are built. */
 export interface KeptRun {
   run: string;
+  name: string;
   study: string;
   version: number;
   made: number;
@@ -649,7 +784,18 @@ export interface CampaignPipeline {
     pool: { least: number; most: number; tries: number };
     tries_per_design: number;
   };
-  stages: { key: StageKey; label: string; built: boolean; says: string }[];
+  /** How a design whose pieces break a rule between them is mended. */
+  repair: { says: string; rules: string[] };
+  /** How designs may be drawn. */
+  methods: { key: CampaignCard["method"]; label: string; says: string }[];
+  stages: {
+    key: StageKey;
+    label: string;
+    built: boolean;
+    says: string;
+    takes: string;
+    gives: string;
+  }[];
   runs: KeptRun[];
 }
 
@@ -665,6 +811,10 @@ export interface RunRow {
   rank: number | null;
   stages: Record<StageKey, StageState>;
   short: [string, string][];
+  /** The variants it holds, by code. */
+  variants: string[];
+  /** How many pieces repair left out of it. */
+  left_out: number;
 }
 
 /** A run's designs as the list shows them, and how many are at each stage. */
@@ -672,12 +822,17 @@ export interface RunDesigns {
   run: string;
   version: number;
   of: number;
+  /** How many hold the variant asked for - every one, when none is. */
+  holding: number;
+  variant: string | null;
   show: "varied" | "built" | "all";
   rows: RunRow[];
   counts: Record<StageKey, number>;
   /** The designs built, each with how its field was checked. */
   built: [number, StageState][];
   blocks: Record<string, string>;
+  /** What the campaign calls each variant, by code. */
+  labels: Record<string, string>;
 }
 
 /** One design of a run in full, with its verdict at each fidelity it was built at. */
@@ -687,6 +842,14 @@ export interface RunDesign extends GoDesign {
   short: [string, string][];
   stages: Record<StageKey, StageState>;
   built: Partial<Record<"preview" | "full", Verdict>>;
+  variants: string[];
+  /** The campaign's variants this design leaves out. */
+  absent: string[];
+  labels: Record<string, string>;
+  left_out: LeftOut[];
+  left_out_said: string;
+  recipe: string | null;
+  seed: number | null;
 }
 
 /** A design seen along the pull: ribs and pads as lines - x1, y1, x2, y2, block - and holes as
@@ -763,7 +926,18 @@ export type GoEvent =
 
 /** Something done by hand on Design a variant. */
 export interface HandAction {
-  action: "add" | "stand_on" | "end_on" | "setting" | "keep_clear" | "remove" | "confirm" | "designs";
+  action:
+    | "add"
+    | "stand_on"
+    | "end_on"
+    | "other_side"
+    | "setting"
+    | "keep_clear"
+    | "rule"
+    | "drop"
+    | "remove"
+    | "confirm"
+    | "designs";
   block?: string;
   add?: "ribs" | "webs" | "thicken" | "holes" | "material";
   refs?: string[];
@@ -775,6 +949,9 @@ export interface HandAction {
   options?: (number | string)[];
   clearance_mm?: number;
   rule?: string;
+  /** For ``rule``: the kind a variant holds, and what it needs. */
+  kind?: string;
+  params?: Record<string, number>;
   n?: number;
   seed?: number;
   selected?: number[];
@@ -786,6 +963,9 @@ export interface PathLine {
   b: number[];
   /** ``rib``, or why not: missed, keep_out, open_end, ended_elsewhere, too_short, no_height. */
   outcome: string;
+  /** For what is made - a rib, a pad - how wide it is, and which way it stands. */
+  mm?: number;
+  up?: number[];
 }
 
 /** Where the card would put ribs, before anything is made. */
@@ -830,14 +1010,25 @@ async function go(
   campaign: { n: number | null; seed?: number | null; off?: Partial<CampaignOff> },
   onEvent: (event: GoEvent) => void,
 ): Promise<void> {
-  const response = await fetch("/api/study/go", {
+  return stream("/api/study/go", campaign, onEvent);
+}
+
+/** A campaign launched from its card; each variant pooled and each design kept handed on as it
+ * happens. */
+async function launch(card: CampaignCard, onEvent: (event: CampaignEvent) => void): Promise<void> {
+  return stream("/api/campaign/go", card, onEvent);
+}
+
+/** Events a route streams, one JSON object a ``data:`` line, each handed on as it arrives. */
+async function stream<T>(path: string, body: unknown, onEvent: (event: T) => void): Promise<void> {
+  const response = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(campaign),
+    body: JSON.stringify(body),
   });
   if (!response.ok || !response.body) {
     const text = await response.text();
-    throw new Error(text || `go answered ${response.status}`);
+    throw new Error(text || `${path} answered ${response.status}`);
   }
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -851,18 +1042,50 @@ async function go(
       const chunk = buffer.slice(0, cut);
       buffer = buffer.slice(cut + 2);
       for (const line of chunk.split("\n")) {
-        if (line.startsWith("data: ")) onEvent(JSON.parse(line.slice(6)) as GoEvent);
+        if (line.startsWith("data: ")) onEvent(JSON.parse(line.slice(6)) as T);
       }
       cut = buffer.indexOf("\n\n");
     }
   }
 }
 
+async function deleteJson<T>(path: string): Promise<T> {
+  const response = await fetch(path, { method: "DELETE" });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`${path}: ${response.status} ${text}`);
+  }
+  return response.json() as Promise<T>;
+}
+
+const variantPath = (id: string) => `/api/variants/${encodeURIComponent(id)}`;
+
 /** A run's name in a path: it is one folder's name, and may hold spaces. */
 const runPath = (run: string) => `/api/runs/${encodeURIComponent(run)}`;
 
 export const api = {
   campaign: () => getJson<CampaignPipeline>("/api/campaign"),
+  campaigns: () => getJson<LaunchedCampaign[]>("/api/campaigns"),
+  estimateCampaign: (card: CampaignCard) =>
+    postJson<CampaignEstimate>("/api/campaign/estimate", card),
+  screenCampaign: (card: CampaignCard) => postJson<CampaignScreen>("/api/campaign/screen", card),
+  launch,
+  variants: () => getJson<{ variants: VariantRow[]; authoring: string | null }>("/api/variants"),
+  variant: (id: string) => getJson<VariantShown>(variantPath(id)),
+  variantDraft: () => getJson<{ draft: StudyDraft }>("/api/variant/draft"),
+  newVariant: () => postJson<{ draft: StudyDraft }>("/api/variants/new", {}),
+  openVariant: (id: string) => postJson<{ draft: StudyDraft }>(`${variantPath(id)}/open`, {}),
+  handVariant: (action: HandAction) =>
+    postJson<{ draft: StudyDraft }>("/api/variant/hand", action),
+  sampleVariant: (another = false, seed?: number) =>
+    postJson<VariantSample>("/api/variant/sample", { another, seed: seed ?? null }),
+  saveVariant: (label: string | null) =>
+    postJson<{ variant: string; version: number; label: string; draft: StudyDraft;
+      variants: VariantRow[] }>("/api/variant/save", { label }),  // prettier-ignore
+  discardVariant: () => postJson<{ draft: StudyDraft }>("/api/variant/discard", {}),
+  duplicateVariant: (id: string) =>
+    postJson<{ id: string; variants: VariantRow[] }>(`${variantPath(id)}/duplicate`, {}),
+  deleteVariant: (id: string) => deleteJson<{ variants: VariantRow[] }>(variantPath(id)),
   runs: () => getJson<KeptRun[]>("/api/runs"),
   runDesigns: (
     run: string,
@@ -870,9 +1093,11 @@ export const api = {
     k = 30,
     offset = 0,
     limit = 200,
+    variant: string | null = null,
   ) =>
     getJson<RunDesigns>(
-      `${runPath(run)}/designs?show=${show}&k=${k}&offset=${offset}&limit=${limit}`,
+      `${runPath(run)}/designs?show=${show}&k=${k}&offset=${offset}&limit=${limit}` +
+        (variant ? `&variant=${encodeURIComponent(variant)}` : ""),
     ),
   runDesign: (run: string, index: number) =>
     getJson<RunDesign>(`${runPath(run)}/designs/${index}`),
@@ -1057,6 +1282,20 @@ async function fetchMesh(path: string): Promise<Mesh> {
   const faceIds = new Uint32Array(buffer, offset, vertexCount);
   offset += vertexCount * 4;
   const indices = new Uint32Array(buffer, offset, triangleCount * 3);
+  offset += triangleCount * 12;
+  // A surface drawn over the part may end with a byte per vertex: how far it stands off the part.
+  const standing =
+    buffer.byteLength >= offset + vertexCount
+      ? new Uint8Array(buffer, offset, vertexCount)
+      : undefined;
 
-  return { positions, normals, faceIds, indices, vertexCount, indexCount: triangleCount * 3 };
+  return {
+    positions,
+    normals,
+    faceIds,
+    indices,
+    vertexCount,
+    indexCount: triangleCount * 3,
+    standing,
+  };
 }

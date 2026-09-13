@@ -19,22 +19,68 @@ export const OUTCOMES: Record<string, { colour: [number, number, number]; label:
   no_height: { colour: [0.6, 0.35, 0.8], label: "no room for its height" },
   crowded: { colour: [0.6, 0.35, 0.8], label: "no room for the mould beside another rib" },
   one_thing: { colour: [0.85, 0.2, 0.2], label: "ends on one thing at both ends" },
+  one_side: { colour: [0.9, 0.45, 0.45], label: "runs within one side, not from one side to the other" },
   thin_wall: { colour: [0.85, 0.3, 0.1], label: "ends on a wall too thin for it" },
+  closed: { colour: [0.75, 0.05, 0.35], label: "would reach a hole or bore the part keeps closed" },
   missed: { colour: [0.55, 0.55, 0.55], label: "misses where ribs stand" },
   pad: { colour: [0.9, 0.75, 0.1], label: "a pad: the wall thickened where a rib meets it" },
   hole: { colour: [0.85, 0.2, 0.65], label: "a hole" },
+  left_out: { colour: [0.3, 0.3, 0.3], label: "left out so the rest hold together" },
 };
 
-/** The lines to draw on the part, each coloured by what became of it. */
+/** Patterns as a person names them. */
+export const PATTERN_NAMES: Record<string, string> = {
+  parallel: "parallel",
+  grid: "square grid",
+  triangle: "triangle grid",
+  radial: "spokes",
+  free: "free lines",
+};
+
+/** Whether a setting makes any difference, given the patterns allowed: every setting does for
+ * every pattern - how many and how far apart included - but what spokes turn about and how they
+ * spread, which only spokes have. */
+export function matters(name: string, patterns: string[]): boolean {
+  if (!patterns.length) return true;
+  if (name === "centre" || name === "spread") return patterns.includes("radial");
+  return true;
+}
+
+/** The lines to draw on the part, each coloured by what became of it. What was made - ribs and
+ * pads - drawn as their outline, as wide as they are; every piece of a line that was not made
+ * drawn faint, in a paler shade of what became of it, so the eye goes to the ribs and a line over
+ * a hole is plainly not one. */
 export function toLines(paths: CardPaths): LineSet {
-  const positions = new Float32Array(paths.lines.length * 6);
-  const colours = new Float32Array(paths.lines.length * 6);
-  paths.lines.forEach((line, index) => {
-    positions.set([...line.a, ...line.b], index * 6);
+  const positions: number[] = [];
+  const colours: number[] = [];
+  const add = (a: number[], b: number[], colour: number[]) => {
+    positions.push(...a, ...b);
+    colours.push(...colour, ...colour);
+  };
+  for (const line of paths.lines) {
     const colour = (OUTCOMES[line.outcome] ?? OUTCOMES.missed).colour;
-    colours.set([...colour, ...colour], index * 6);
-  });
-  return { positions, colours };
+    const made = line.outcome === "rib" || line.outcome === "pad";
+    if (made && line.mm && line.up) {
+      const along = [0, 1, 2].map((i) => line.b[i] - line.a[i]);
+      // Square to the rib, in the floor: across = along x up, a half-width long.
+      const across = [
+        along[1] * line.up[2] - along[2] * line.up[1],
+        along[2] * line.up[0] - along[0] * line.up[2],
+        along[0] * line.up[1] - along[1] * line.up[0],
+      ];
+      const size = Math.hypot(...across) || 1;
+      const half = across.map((v) => (v / size) * (line.mm as number) * 0.5);
+      const corner = (p: number[], sign: number) => p.map((v, i) => v + sign * half[i]);
+      const [a1, a2, b1, b2] = [corner(line.a, 1), corner(line.a, -1), corner(line.b, 1), corner(line.b, -1)];
+      add(a1, b1, colour);
+      add(a2, b2, colour);
+      add(a1, a2, colour);
+      add(b1, b2, colour);
+      continue;
+    }
+    add(line.a, line.b, made ? colour : colour.map((c) => 0.35 * c + 0.65 * 0.78));
+  }
+  return { positions: new Float32Array(positions), colours: new Float32Array(colours) };
 }
 
 /** What became of the lines, counted in words, and what each colour on the part means - the
@@ -43,36 +89,54 @@ export function PathsKey({
   paths,
   note,
   folded = false,
+  quiet = false,
 }: {
   paths: CardPaths | null;
   note: string | null;
   folded?: boolean;
+  /** The colours folded away too, with the words: only what was made shows. */
+  quiet?: boolean;
 }) {
   if (note || !paths) return <div className="card-note">{note}</div>;
   const shown = [...new Set(paths.lines.map((line) => line.outcome))];
+  const legend = shown.map((outcome) => {
+    const known = OUTCOMES[outcome] ?? OUTCOMES.missed;
+    const [r, g, b] = known.colour.map((c) => Math.round(c * 255));
+    return (
+      <span key={outcome} className="paths-key-item">
+        <span className="swatch" style={{ background: `rgb(${r}, ${g}, ${b})` }} />
+        {known.label}
+      </span>
+    );
+  });
+  const many = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
+  const made = `${many(paths.ribs, "rib")}${paths.pads ? ` · ${many(paths.pads, "pad")}` : ""}${
+    paths.holes ? ` · ${many(paths.holes, "hole")}` : ""
+  }`;
+  if (quiet) {
+    return (
+      <div className="paths-key">
+        <details className="paths-said">
+          <summary className="verdict-line">
+            {made} <span className="dim">- what the colours mean</span>
+          </summary>
+          <div className="paths-legend">{legend}</div>
+          <div className="dim">{paths.summary}</div>
+        </details>
+      </div>
+    );
+  }
   return (
     <div className="paths-key">
       {folded ? (
         <details className="paths-said">
-          <summary className="verdict-line">
-            {paths.ribs} ribs{paths.pads ? ` · ${paths.pads} pads` : ""}
-            {paths.holes ? ` · ${paths.holes} holes` : ""} - what became of each path
-          </summary>
+          <summary className="verdict-line">{made} - what became of each path</summary>
           <div className="dim">{paths.summary}</div>
         </details>
       ) : (
         <div className="verdict-line">{paths.summary}</div>
       )}
-      {shown.map((outcome) => {
-        const known = OUTCOMES[outcome] ?? OUTCOMES.missed;
-        const [r, g, b] = known.colour.map((c) => Math.round(c * 255));
-        return (
-          <span key={outcome} className="paths-key-item">
-            <span className="swatch" style={{ background: `rgb(${r}, ${g}, ${b})` }} />
-            {known.label}
-          </span>
-        );
-      })}
+      {legend}
     </div>
   );
 }

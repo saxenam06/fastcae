@@ -1,684 +1,706 @@
 /**
- * Generate, Campaign: many designs at once, with the whole pipeline in the open.
+ * Generate, Campaign: a card in three steps, with the whole pipeline in the open.
  *
- * What varies is the design space as Design a variant (on CAD) has it - every block, what it adds,
- * where, what its settings may take - and what must hold: the rules of each block and of the study,
- * the part's interfaces, the screening checks every design passes before it is kept, and the rules
- * of thumb they rest on, each with its source. How designs are spread over it and the stages each
- * one goes through are said too.
+ * **Compose** - its name, and the variants it takes from the library, each with how many designs
+ * it allows. **Check** - every rule each variant holds, what holds between variants, the part's
+ * interfaces held always, the screening checks - each switchable for this campaign - the checks a
+ * design's field is held to, and the pipeline: what each stage takes and gives. **Sample & launch**
+ * - how designs are drawn, how many, from which seed, whether to keep the most different of more;
+ * how many designs the variants allow; a hundred screened in half a minute, and how long the launch
+ * will take; then the launch, and what it came to.
  *
- * Any block, rule or check can be switched off for one campaign without touching the study: the run
- * keeps the version it used and what was off beside its designs, and a campaign with other switches
- * is a run of its own. The part's interfaces stay closed whatever is switched off.
+ * A campaign never narrows a variant: to hold a lever fixed, change the variant on CAD. Every
+ * launch is a campaign of its own, kept whole beside the project.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type {
-  CampaignOff,
+  CampaignCard,
+  CampaignEstimate,
   CampaignPipeline,
-  GoAlone,
+  CampaignScreen,
   GoProgress,
-  KeptRun,
-  StudyBlockView,
-  StudyDraft,
-  StudyRule,
+  LaunchedCampaign,
+  StudySetting,
+  VariantRow,
+  VariantShown,
 } from "../api/client";
 import { api } from "../api/client";
-import { plain } from "../panel/shared";
+import { PATTERN_NAMES, matters, plain } from "../panel/shared";
 
-const NONE_OFF: CampaignOff = { blocks: [], rules: [], checks: [] };
+const FRESH: CampaignCard = {
+  name: "",
+  variants: [],
+  checks_off: [],
+  method: "even",
+  n: 20,
+  seed: 0,
+  diverse: 0,
+};
 
 /** What a launched campaign has said so far. */
-export interface Launched {
+interface Started {
   run: string;
-  version: number;
+  name: string;
   n: number;
-  budget: number;
-  waiting: string[];
-  off: CampaignOff;
+  count: number | null;
+}
+
+interface Alone {
+  variant: string;
+  label: string;
+  kept: number;
+  tried: number;
+  rejected: Record<string, number>;
 }
 
 export interface Campaign {
   pipeline: CampaignPipeline | null;
-  draft: StudyDraft | null;
-  off: CampaignOff;
-  toggle: (kind: keyof CampaignOff, id: string) => void;
-  allOn: () => void;
-  n: string;
-  setN: (n: string) => void;
-  seed: string;
-  setSeed: (seed: string) => void;
+  library: VariantRow[];
+  shown: Record<string, VariantShown>;
+  /** Variants chosen that could not be read, and why. */
+  unread: Record<string, string>;
+  readAgain: () => void;
+  card: CampaignCard;
+  update: (change: Partial<CampaignCard>) => void;
+  toggleVariant: (id: string) => void;
+  toggleCheck: (name: string) => void;
+  estimate: CampaignEstimate | null;
+  screen: CampaignScreen | null;
+  screening: boolean;
+  runScreen: () => Promise<void>;
   going: string | null;
-  launched: Launched | null;
-  alone: GoAlone[];
-  progress: GoProgress | null;
+  started: Started | null;
+  alone: Alone[];
+  progress: (GoProgress & { repaired?: number }) | null;
   kept: number;
-  masses: [number, number] | null;
   finished: string | null;
   problem: string | null;
   launch: () => Promise<void>;
+  launched: LaunchedCampaign[];
+  refresh: () => void;
 }
 
-/** A campaign's state: read whenever the tab is opened, since the card may have changed since. */
+/** A campaign card's state: the library and the pipeline read whenever the tab is opened - a
+ * variant may have been authored since - and what a launch says as it runs. */
 export function useCampaign(active: boolean, project: string | null): Campaign {
   const [pipeline, setPipeline] = useState<CampaignPipeline | null>(null);
-  const [draft, setDraft] = useState<StudyDraft | null>(null);
-  const [off, setOff] = useState<CampaignOff>(NONE_OFF);
-  const [n, setN] = useState("4000");
-  const [seed, setSeed] = useState("");
+  const [library, setLibrary] = useState<VariantRow[]>([]);
+  const [shown, setShown] = useState<Record<string, VariantShown>>({});
+  const [unread, setUnread] = useState<Record<string, string>>({});
+  const [again, setAgain] = useState(0);
+  const [launched, setLaunched] = useState<LaunchedCampaign[]>([]);
+  const [card, setCard] = useState<CampaignCard>(FRESH);
+  const [estimate, setEstimate] = useState<CampaignEstimate | null>(null);
+  const [screen, setScreen] = useState<CampaignScreen | null>(null);
+  const [screening, setScreening] = useState(false);
   const [going, setGoing] = useState<string | null>(null);
-  const [launched, setLaunched] = useState<Launched | null>(null);
-  const [alone, setAlone] = useState<GoAlone[]>([]);
-  const [progress, setProgress] = useState<GoProgress | null>(null);
+  const [started, setStarted] = useState<Started | null>(null);
+  const [alone, setAlone] = useState<Alone[]>([]);
+  const [progress, setProgress] = useState<(GoProgress & { repaired?: number }) | null>(null);
   const [kept, setKept] = useState(0);
-  const [masses, setMasses] = useState<[number, number] | null>(null);
   const [finished, setFinished] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [stamp, setStamp] = useState(0);
 
   useEffect(() => {
     setPipeline(null);
-    setDraft(null);
-    setOff(NONE_OFF);
-    setLaunched(null);
+    setLibrary([]);
+    setShown({});
+    setUnread({});
+    setLaunched([]);
+    setCard(FRESH);
+    setEstimate(null);
+    setScreen(null);
+    setStarted(null);
     setFinished(null);
+    setProblem(null);
   }, [project]);
 
-  const read = useCallback(() => {
-    Promise.all([api.campaign(), api.studyDraft()])
-      .then(([found, card]) => {
+  useEffect(() => {
+    if (!active || !project || going !== null) return;
+    let live = true;
+    Promise.all([api.campaign(), api.variants(), api.campaigns()])
+      .then(([found, listed, runs]) => {
+        if (!live) return;
         setPipeline(found);
-        setDraft(card.draft);
+        setLibrary(listed.variants);
+        setLaunched(runs);
+        // A variant since taken out of the library is out of the card too.
+        const ids = new Set(listed.variants.map((v) => v.id));
+        setCard((was) => ({ ...was, variants: was.variants.filter((id) => ids.has(id)) }));
+        setShown({});
       })
-      .catch((caught) => setProblem(plain(caught)));
+      .catch((caught) => live && setProblem(plain(caught)));
+    return () => {
+      live = false;
+    };
+  }, [active, project, going, stamp]);
+
+  // Each variant chosen, read in full once: what it may vary and every rule it holds - or why it
+  // could not be, beside it, to try again.
+  useEffect(() => {
+    const missing = card.variants.filter((id) => !shown[id]);
+    if (!missing.length) {
+      setUnread({});
+      return;
+    }
+    let live = true;
+    void Promise.allSettled(missing.map((id) => api.variant(id))).then((found) => {
+      if (!live) return;
+      const read: Record<string, VariantShown> = {};
+      const failed: Record<string, string> = {};
+      found.forEach((result, i) => {
+        if (result.status === "fulfilled") read[missing[i]] = result.value;
+        else failed[missing[i]] = plain(result.reason);
+      });
+      setUnread(failed);
+      if (Object.keys(read).length) setShown((was) => ({ ...was, ...read }));
+    });
+    return () => {
+      live = false;
+    };
+  }, [card.variants, shown, again]);
+
+  // How many designs the card's variants allow, counted again as the card changes.
+  useEffect(() => {
+    setScreen(null);
+    if (!card.variants.length) {
+      setEstimate(null);
+      return;
+    }
+    let live = true;
+    const timer = window.setTimeout(() => {
+      api
+        .estimateCampaign(card)
+        .then((found) => live && setEstimate(found))
+        .catch((caught) => live && setProblem(plain(caught)));
+    }, 250);
+    return () => {
+      live = false;
+      window.clearTimeout(timer);
+    };
+  }, [card]);
+
+  const update = useCallback((change: Partial<CampaignCard>) => {
+    setCard((was) => ({ ...was, ...change }));
   }, []);
 
-  useEffect(() => {
-    if (active && project && going === null) read();
-  }, [active, project, going, read]);
-
-  const toggle = useCallback((kind: keyof CampaignOff, id: string) => {
-    setOff((was) => ({
+  const toggleVariant = useCallback((id: string) => {
+    setCard((was) => ({
       ...was,
-      [kind]: was[kind].includes(id) ? was[kind].filter((x) => x !== id) : [...was[kind], id],
+      variants: was.variants.includes(id)
+        ? was.variants.filter((x) => x !== id)
+        : [...was.variants, id],
     }));
   }, []);
 
-  const allOn = useCallback(() => setOff(NONE_OFF), []);
+  const toggleCheck = useCallback((name: string) => {
+    setCard((was) => ({
+      ...was,
+      checks_off: was.checks_off.includes(name)
+        ? was.checks_off.filter((x) => x !== name)
+        : [...was.checks_off, name],
+    }));
+  }, []);
+
+  const runScreen = useCallback(async () => {
+    setScreening(true);
+    setProblem(null);
+    try {
+      setScreen(await api.screenCampaign(card));
+    } catch (caught) {
+      setProblem(plain(caught));
+    } finally {
+      setScreening(false);
+    }
+  }, [card]);
 
   const launch = useCallback(async () => {
-    const count = Number(n);
-    const from = seed.trim() === "" ? null : Number(seed);
-    // Only what the card still has: a switch left over from a block since taken out is dropped.
-    const known = knownIds(draft, pipeline);
-    const sent: CampaignOff = {
-      blocks: off.blocks.filter((id) => known.blocks.has(id)),
-      rules: off.rules.filter((id) => known.rules.has(id)),
-      checks: off.checks.filter((id) => known.checks.has(id)),
-    };
     setProblem(null);
-    setLaunched(null);
+    setStarted(null);
     setAlone([]);
     setProgress(null);
     setKept(0);
-    setMasses(null);
     setFinished(null);
-    setGoing("Accepting the card if it changed, and trying each block alone.");
-    // Thousands of designs come one by one: only how many, and what they weigh, is kept here - the
-    // designs themselves are read from the run, on Designs.
-    let low = Infinity;
-    let high = -Infinity;
+    setGoing("Each variant alone first: points of it placed, repaired and screened.");
     let made = 0;
-    // What the stream said, read once it ends: kept in an object the handler writes to.
     const ended: { run: string | null; failed: boolean } = { run: null, failed: false };
     try {
-      await api.go(
-        { n: Number.isInteger(count) && count > 0 ? count : null, seed: from, off: sent },
-        (event) => {
-          if (event.type === "started") {
-            ended.run = event.run;
-            setLaunched(event);
-            setGoing(
-              `Trying each block alone, then ${event.n.toLocaleString()} designs from study ` +
-                `v${event.version} - at most ${event.budget.toLocaleString()} tried.`,
-            );
-          } else if (event.type === "block") setAlone((was) => [...was, event]);
-          else if (event.type === "design") {
-            made += 1;
-            low = Math.min(low, event.mass_kg);
-            high = Math.max(high, event.mass_kg);
-          } else if (event.type === "progress" || event.type === "done") {
-            setProgress(event);
-            setKept(made);
-            if (made) setMasses([low, high]);
-          } else if (event.type === "error") {
-            ended.failed = true;
-            setProblem(event.message);
+      await api.launch(card, (event) => {
+        if (event.type === "started") {
+          ended.run = event.run;
+          setStarted(event);
+        } else if (event.type === "variant") {
+          setAlone((was) => [...was, event]);
+          setGoing(
+            `${event.label} alone: ${event.kept} of ${event.tried} points pass. Then designs, ` +
+              "each a set of the variants.",
+          );
+        } else if (event.type === "design") {
+          made += 1;
+          if (made % 5 === 0) setKept(made);
+        } else if (event.type === "progress" || event.type === "done") {
+          setProgress(event);
+          setKept(made);
+          if (event.type === "progress") {
+            setGoing(`${made.toLocaleString()} designs kept of ${event.tried.toLocaleString()} tried.`);
           }
-        },
-      );
+        } else if (event.type === "error") {
+          ended.failed = true;
+          setProblem(event.message);
+        }
+      });
+      setKept(made);
       if (ended.run && !ended.failed) setFinished(ended.run);
     } catch (caught) {
       setProblem(plain(caught));
     } finally {
       setGoing(null);
     }
-  }, [n, seed, off, draft, pipeline]);
+  }, [card]);
+
+  const refresh = useCallback(() => setStamp((n) => n + 1), []);
+  const readAgain = useCallback(() => {
+    setUnread({});
+    setAgain((n) => n + 1);
+  }, []);
 
   return {
     pipeline,
-    draft,
-    off,
-    toggle,
-    allOn,
-    n,
-    setN,
-    seed,
-    setSeed,
+    library,
+    shown,
+    unread,
+    readAgain,
+    card,
+    update,
+    toggleVariant,
+    toggleCheck,
+    estimate,
+    screen,
+    screening,
+    runScreen,
     going,
-    launched,
+    started,
     alone,
     progress,
     kept,
-    masses,
     finished,
     problem,
     launch,
+    launched,
+    refresh,
   };
 }
 
-/** The ids the card has now, of blocks and rules, and the names of the checks. */
-function knownIds(draft: StudyDraft | null, pipeline: CampaignPipeline | null) {
-  const blocks = new Set((draft?.blocks ?? []).map((b) => b.id));
-  const rules = new Set<string>();
-  for (const block of draft?.blocks ?? []) {
-    for (const rule of [...block.rules, ...block.keep_clear]) rules.add(rule.id);
-  }
-  for (const rule of draft?.rules ?? []) rules.add(rule.id);
-  const checks = new Set((pipeline?.checks ?? []).map((c) => c.name));
-  return { blocks, rules, checks };
-}
-
-// --- the pipeline, in the open ------------------------------------------------------------------
-
-/** What each rule of thumb is, in words. */
-const KNOWLEDGE: Record<string, [string, string]> = {
-  rib_to_wall: ["a rib no thicker than", "× the wall it stands on"],
-  root_gap: ["ribs in the open at least", "× the thinner one apart"],
-  hole_ligament: ["between a hole and a rib at least", "× the plate's thickness of metal"],
-  min_wall_mm: ["no wall thinner than", "mm, where the material says nothing"],
-};
-
-/** The pipeline, top to bottom: what varies, what must hold, how designs are screened and on what
- * rules of thumb, how they are spread, and the stages each one goes through. */
-export function CampaignPipelineView(props: {
+/** The card, in three steps: compose, check, sample and launch. */
+export function CampaignCardView(props: {
   campaign: Campaign;
   onOpenCard: () => void;
+  onOpenRun: (run: string) => void;
 }) {
-  const { pipeline, draft, off, toggle } = props.campaign;
-  const locked = props.campaign.going !== null;
-  if (!pipeline || !draft) {
+  const c = props.campaign;
+  const chosen = c.card.variants;
+  const suggested = chosen.map((id) => c.library.find((v) => v.id === id)?.label ?? id).join(" + ");
+  if (!c.pipeline) {
     return (
-      <div className="campaign-doc">
-        <p className="card-note">{props.campaign.problem ?? "Reading the pipeline…"}</p>
+      <div className="campaign-card">
+        <p className="card-note">{c.problem ?? "Reading the pipeline…"}</p>
       </div>
     );
   }
   return (
-    <div className="campaign-doc">
-      <section className="campaign-section">
-        <h2>
-          What varies
-          <span className="dim">
-            {" "}
-            - the design space as{" "}
-            <button className="link" onClick={props.onOpenCard}>
-              Design a variant
-            </button>{" "}
-            on CAD has it
-            {draft.accepted !== null ? `, study v${draft.accepted}` : ""}
-          </span>
-        </h2>
-        {draft.refused ? (
-          <div className="card-note warn">
-            The card's draft cannot be written - {draft.cannot}. No campaign can start until it can.
-          </div>
-        ) : draft.differs ? (
-          <div className="card-note warn">
-            The card has changes not accepted yet: launching accepts them as v
-            {(draft.accepted ?? 0) + 1} first.
-          </div>
-        ) : null}
-        {!draft.blocks.length ? (
-          <div className="card-note">
-            Nothing varies yet: add blocks on Design a variant, on CAD - or say what you want to the
-            agent at the top.
-          </div>
-        ) : null}
-        {draft.blocks.map((block) => (
-          <BlockRow
-            key={block.id}
-            block={block}
-            names={draft.names}
-            off={off}
-            locked={locked}
-            onToggle={toggle}
-          />
-        ))}
-      </section>
-
-      <section className="campaign-section">
-        <h2>
-          What must hold <span className="dim">- for every block</span>
-        </h2>
-        {draft.rules.length ? (
-          draft.rules.map((rule) => (
-            <RuleSwitch key={rule.id} rule={rule} off={off} locked={locked} onToggle={toggle} />
-          ))
-        ) : (
-          <div className="card-note">No rules for the whole study.</div>
-        )}
-        {draft.interfaces.length ? (
-          <details className="study-fold">
-            <summary>
-              The part's {draft.interfaces.length} interfaces are kept as they are - always, whatever
-              is switched off
-            </summary>
-            <ul className="study-lines">
-              {draft.interfaces.map((rule) => (
-                <li key={rule.id}>{rule.says}</li>
-              ))}
-            </ul>
-          </details>
-        ) : null}
-      </section>
-
-      <section className="campaign-section">
-        <h2>
-          Screening <span className="dim">- every design, before it is kept, in milliseconds</span>
-        </h2>
-        <p className="card-note">
-          A check switched off lets through what it would have screened out. A design is checked in
-          full only when its field is built.
-        </p>
-        {pipeline.checks.map((check) => (
-          <label key={check.name} className="switch-row" data-off={off.checks.includes(check.name)}>
-            <input
-              type="checkbox"
-              checked={!off.checks.includes(check.name)}
-              disabled={locked}
-              onChange={() => toggle("checks", check.name)}
-            />
-            <b>{check.name}</b>
-            <span>{check.rule}</span>
-            <span className="dim"> · {check.source}</span>
-          </label>
-        ))}
-      </section>
-
-      <section className="campaign-section">
-        <h2>
-          How ribs, pads and holes are placed{" "}
-          <span className="dim">- for every design, before it is screened</span>
-        </h2>
-        {pipeline.placement.map((rule) => (
-          <div key={rule.name} className="knowledge-row">
-            <span>
-              <b>{rule.name}</b> {rule.says}
-            </span>
-            <span className="mono">{rule.value ?? ""}</span>
-          </div>
-        ))}
-        <div className="knowledge-row">
-          <span>
-            <b>interfaces</b> the part's holes and bores are kept as they are, whatever is switched
-            off, this many mm clear
-          </span>
-          <span className="mono">{pipeline.interfaces_clear_mm}</span>
-        </div>
-      </section>
-
-      <section className="campaign-section">
-        <h2>
-          Rules of thumb <span className="dim">- what the checks and the blocks rest on</span>
-        </h2>
-        {pipeline.knowledge.map((rule) => {
-          const [before, after] = KNOWLEDGE[rule.name] ?? [rule.name, ""];
-          return (
-            <div key={rule.name} className="knowledge-row">
-              <span>
-                {before} <b className="mono">{rule.value}</b> {after}
-              </span>
-              <span className="dim">{rule.source}</span>
-            </div>
-          );
-        })}
-        <details className="study-fold">
-          <summary>
-            The materials the catalogue holds ({pipeline.materials.length}) - a part is cast in one,
-            which its designs do not change
-          </summary>
-          <table className="materials">
-            <thead>
-              <tr>
-                <th>material</th>
-                <th>density</th>
-                <th>least wall</th>
-                <th>source</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pipeline.materials.map((m) => (
-                <tr key={m.id}>
-                  <td>{m.name}</td>
-                  <td className="mono">{m.density_kg_m3.toLocaleString()} kg/m³</td>
-                  <td className="mono">{m.min_wall_mm} mm</td>
-                  <td className="dim">{m.source}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </details>
-      </section>
-
-      <section className="campaign-section">
-        <h2>How designs are spread</h2>
-        <p className="card-note">
-          {capital(pipeline.sampler.says)}. Each block alone tries {pipeline.sampler.pool.least} to{" "}
-          {pipeline.sampler.pool.most.toLocaleString()} points; together, up to{" "}
-          {pipeline.sampler.tries_per_design} tries a design kept. Two designs that come out alike
-          are kept once.
-        </p>
-      </section>
-
-      <section className="campaign-section">
-        <h2>What each design goes through</h2>
-        <div className="stage-list">
-          {pipeline.stages.map((stage) => (
-            <div key={stage.key} className="stage-list-row" data-built={stage.built}>
-              <span className="stage-badge" data-state={stage.built ? "done" : "none"}>
-                {stage.key}
-              </span>
-              <b>{stage.label}</b>
-              <span>{stage.says}</span>
-              <span className="dim">{stage.built ? "" : " · not built yet"}</span>
-            </div>
-          ))}
-        </div>
-        <p className="card-note">
-          A campaign places and screens its designs; a design's field is built on Designs, one at a
-          time. Meshing, solver setup and results come next.
-        </p>
-        <details className="study-fold">
-          <summary>
-            What a design is checked for when its field is built ({pipeline.full_checks.length})
-          </summary>
-          {pipeline.full_checks.map((check) => (
-            <div key={check.name} className="knowledge-row">
-              <span>
-                <b>{check.name}</b> {check.rule}
-              </span>
-            </div>
-          ))}
-        </details>
-      </section>
-    </div>
-  );
-}
-
-/** One block: in this campaign or not; what it adds, where, what its settings may take - and its
- * rules, each switched on or off. */
-function BlockRow(props: {
-  block: StudyBlockView;
-  names: Record<string, string>;
-  off: CampaignOff;
-  locked: boolean;
-  onToggle: (kind: keyof CampaignOff, id: string) => void;
-}) {
-  const { block, off } = props;
-  const gone = off.blocks.includes(block.id);
-  const where = block.stand_on.refs;
-  const rules = [...block.keep_clear, ...block.rules];
-  return (
-    <div className="campaign-block" data-off={gone}>
-      <label className="switch-row block-switch">
-        <input
-          type="checkbox"
-          checked={!gone}
-          disabled={props.locked}
-          onChange={() => props.onToggle("blocks", block.id)}
-        />
-        <b>
-          {block.id} · adds {block.add}
-        </b>
-        {where.length ? (
-          <span className="dim" title={where.map((r) => props.names[r] ?? r).join("\n")}>
-            {block.add === "thicken" ? "moving " : block.add === "holes" ? "through " : "on "}
-            {where.slice(0, 3).join(", ")}
-            {where.length > 3 ? ` +${where.length - 3}` : ""}
-          </span>
-        ) : null}
-        {block.cannot ? <span className="warn"> · {block.cannot}</span> : null}
-      </label>
-      {!gone ? (
-        <div className="campaign-block-body">
-          {block.settings.map((setting) => (
-            <div key={setting.name} className="campaign-setting">
-              <span className="tag" data-fixed={setting.fixed}>
-                {setting.fixed ? "fixed" : "varies"}
-              </span>
-              <span className="setting-label">{setting.label}</span> {setting.says}
-            </div>
-          ))}
-          {rules.map((rule) => (
-            <RuleSwitch
-              key={rule.id}
-              rule={rule}
-              off={off}
-              locked={props.locked}
-              onToggle={props.onToggle}
-            />
-          ))}
-        </div>
-      ) : (
-        <div className="card-note">Switched off for this campaign: nothing of it is made.</div>
-      )}
-    </div>
-  );
-}
-
-/** A rule switched on or off for this campaign - or, the platform's, always on. */
-function RuleSwitch(props: {
-  rule: StudyRule;
-  off: CampaignOff;
-  locked: boolean;
-  onToggle: (kind: keyof CampaignOff, id: string) => void;
-}) {
-  const { rule } = props;
-  const platform = rule.by === "platform";
-  const isOff = props.off.rules.includes(rule.id);
-  return (
-    <label className="switch-row rule-switch" data-off={isOff} title={rule.basis || undefined}>
-      <input
-        type="checkbox"
-        checked={!isOff}
-        disabled={props.locked || platform}
-        onChange={() => props.onToggle("rules", rule.id)}
-      />
-      <span className="chip" data-strength={rule.strength}>
-        {rule.strength}
-      </span>
-      <span>{rule.says}</span>
-      {platform ? <span className="dim"> · the platform's, always on</span> : null}
-      {!rule.enforced ? <span className="dim"> · not enforced yet</span> : null}
-    </label>
-  );
-}
-
-// --- launching, and what came of it -------------------------------------------------------------
-
-/** Launch: how many, from which seed, what is switched off - and the campaign as it runs. */
-export function CampaignLaunch(props: {
-  campaign: Campaign;
-  onOpenRun: (run: string) => void;
-  onCollapse: () => void;
-}) {
-  const c = props.campaign;
-  const offCount = c.off.blocks.length + c.off.rules.length + c.off.checks.length;
-  const buildable = (c.draft?.blocks ?? []).some(
-    (b) => !c.off.blocks.includes(b.id) && !b.cannot && !b.needed.length && !b.problems.length,
-  );
-  const rejected = Object.entries(c.progress?.rejected ?? {}).sort((a, b) => b[1] - a[1]);
-  const ruleSays = useMemo(() => {
-    const out: Record<string, string> = {};
-    for (const block of c.draft?.blocks ?? []) {
-      for (const rule of [...block.rules, ...block.keep_clear]) out[rule.id] = rule.says;
-    }
-    for (const rule of c.draft?.rules ?? []) out[rule.id] = rule.says;
-    return out;
-  }, [c.draft]);
-  return (
-    <div className="rib-card launch-card">
-      <header className="rib-card-head">
-        <span className="card-title">Launch a campaign</span>
-        <button className="icon pane-fold" onClick={props.onCollapse} aria-label="Fold away">
-          ›
-        </button>
+    <div className="campaign-card">
+      <header className="campaign-card-head">
+        <h1>Launch a campaign</h1>
+        <p className="dim">Choose variants, check what holds, then sample and launch.</p>
       </header>
-      <div className="rib-slots">
-        <section className="rib-slot">
-          <div className="launch-line">
-            <label>
-              designs to keep{" "}
+      <div className="campaign-steps">
+        <section className="campaign-step">
+          <h2>
+            <span className="step-number">1</span> Compose
+          </h2>
+          <label className="campaign-name">
+            <span className="dim">name</span>
+            <input
+              value={c.card.name}
+              placeholder={suggested || "what this campaign is for"}
+              disabled={c.going !== null}
+              onChange={(e) => c.update({ name: e.target.value })}
+              aria-label="the campaign's name"
+            />
+          </label>
+          <div className="step-sub">variants</div>
+          {!c.library.length ? (
+            <div className="card-note">
+              No variants yet. Author them on{" "}
+              <button className="link" onClick={props.onOpenCard}>
+                CAD → Design a variant
+              </button>
+              : one change in one place, with what it may vary.
+            </div>
+          ) : null}
+          {c.library.map((variant) => (
+            <label key={variant.id} className="variant-choice" data-on={chosen.includes(variant.id)}>
               <input
-                className="num"
-                value={c.n}
+                type="checkbox"
+                checked={chosen.includes(variant.id)}
                 disabled={c.going !== null}
-                onChange={(e) => c.setN(e.target.value)}
-                aria-label="designs to keep"
+                onChange={() => c.toggleVariant(variant.id)}
               />
+              <span className="mono">{variant.id}</span>
+              <b>{variant.label}</b>
+              <span className="tag">{variant.kind}</span>
+              <span className="dim">{designsSaid(variant.combinations)}</span>
             </label>
-            <label>
-              seed{" "}
-              <input
-                className="num"
-                value={c.seed}
-                placeholder="study's"
-                disabled={c.going !== null}
-                onChange={(e) => c.setSeed(e.target.value)}
-                aria-label="seed"
-              />
-            </label>
-          </div>
-          <div className="launch-off">
-            {offCount ? (
-              <>
-                <span className="dim">switched off for this campaign:</span>
-                {c.off.blocks.map((id) => (
-                  <OffChip key={`b${id}`} label={`block ${id}`} onOn={() => c.toggle("blocks", id)} />
-                ))}
-                {c.off.rules.map((id) => (
-                  <OffChip
-                    key={`r${id}`}
-                    label={ruleSays[id] ?? id}
-                    onOn={() => c.toggle("rules", id)}
-                  />
-                ))}
-                {c.off.checks.map((name) => (
-                  <OffChip key={`c${name}`} label={name} onOn={() => c.toggle("checks", name)} />
-                ))}
-                <button className="link" onClick={c.allOn} disabled={c.going !== null}>
-                  switch all back on
-                </button>
-              </>
-            ) : (
-              <span className="dim">
-                Nothing switched off: the design space as the card has it, every rule and check on.
-                Switch any of them off in the pipeline for this campaign alone.
-              </span>
-            )}
-          </div>
-          <div className="actions">
-            <button
-              className="primary"
-              onClick={() => void c.launch()}
-              disabled={c.going !== null || !buildable || Boolean(c.draft?.refused)}
-              title="Accept the card if it changed, then make this many designs over what it leaves free - each screened, every one kept written beside the project"
-            >
-              {c.going ? "Running…" : "Launch"}
+          ))}
+          {c.library.length ? (
+            <button className="link" onClick={props.onOpenCard}>
+              author or change a variant on CAD
             </button>
-          </div>
+          ) : null}
         </section>
 
-        {c.going || c.launched || c.problem ? (
-          <section className="rib-slot go-designs">
-            {c.launched ? (
-              <div className="dim">
-                run <b className="mono">{c.launched.run}</b>
-                {c.launched.waiting.length ? ` - waiting: ${c.launched.waiting.join("; ")}` : ""}
-              </div>
-            ) : null}
-            {c.going ? <div className="card-note busy-note">{c.going}</div> : null}
-            {c.alone.length ? (
-              <div className="go-alone">
-                {c.alone.map((block) => (
-                  <div key={block.block} className="dim">
-                    {block.block} alone: {block.kept} of {block.tried} points make something
-                    {Object.keys(block.rejected).length
-                      ? ` - the rest: ${Object.entries(block.rejected)
-                          .map(([why, n]) => `${why} ${n}`)
-                          .join(", ")}`
-                      : ""}
-                  </div>
-                ))}
-              </div>
-            ) : null}
-            {c.progress ? (
-              <div className="go-progress">
-                <b>{c.progress.made.toLocaleString()}</b> kept of{" "}
-                {c.progress.tried.toLocaleString()} tried together in {c.progress.seconds} s
-                {rejected.length
-                  ? ` - screened out: ${rejected.map(([why, n]) => `${why} ${n}`).join(", ")}`
-                  : ""}
-                {c.masses ? (
-                  <span className="dim">
-                    {" "}
-                    · {Math.round(c.masses[0]).toLocaleString()} to{" "}
-                    {Math.round(c.masses[1]).toLocaleString()} kg
-                  </span>
-                ) : null}
-              </div>
-            ) : null}
-            {c.finished && !c.going ? (
-              <div className="actions">
-                <button onClick={() => props.onOpenRun(c.finished as string)}>
-                  Open its designs
-                </button>
-              </div>
-            ) : null}
-            {c.problem ? <div className="card-note warn">{c.problem}</div> : null}
-          </section>
-        ) : null}
+        <section className="campaign-step" data-waiting={!chosen.length}>
+          <h2>
+            <span className="step-number">2</span> Check
+          </h2>
+          {!chosen.length ? (
+            <div className="card-note">Choose variants first: what they must hold is here.</div>
+          ) : (
+            <CheckStep campaign={c} />
+          )}
+        </section>
+
+        <section className="campaign-step" data-waiting={!chosen.length}>
+          <h2>
+            <span className="step-number">3</span> Sample &amp; launch
+          </h2>
+          {!chosen.length ? (
+            <div className="card-note">Choose variants first.</div>
+          ) : (
+            <LaunchStep campaign={c} onOpenRun={props.onOpenRun} />
+          )}
+        </section>
       </div>
     </div>
   );
 }
 
-function OffChip(props: { label: string; onOn: () => void }) {
+/** What must hold, at a glance: what each variant varies and the rules it holds, what holds always,
+ * the screening checks - each to switch off for this campaign - and the checks a built field goes
+ * through. Every item is a few words; its full rule shows on hover. */
+function CheckStep({ campaign: c }: { campaign: Campaign }) {
+  const pipeline = c.pipeline as CampaignPipeline;
+  const locked = c.going !== null;
+  const on = pipeline.checks.filter((check) => !c.card.checks_off.includes(check.name)).length;
   return (
-    <span className="off-chip">
-      {props.label}
-      <button className="icon" onClick={props.onOn} title="Switch it back on">
-        ×
-      </button>
-    </span>
+    <>
+      <div className="step-sub">each variant</div>
+      {c.card.variants.map((id) => (
+        <VariantHeld key={id} id={id} campaign={c} />
+      ))}
+
+      <div className="step-sub">always</div>
+      <ul className="held-always">
+        <li>Holes keep a ligament of metal from every variant's ribs</li>
+        <li>Ribs of different variants keep the root gap between them</li>
+        <li>The part's holes, bores and drawing features stay {pipeline.interfaces_clear_mm} mm clear</li>
+        <li title={pipeline.repair.says}>Clashes repaired by CP-SAT - the fewest pieces left out</li>
+      </ul>
+
+      <div className="step-sub">
+        screening · {on} of {pipeline.checks.length} on
+      </div>
+      <div className="check-pills">
+        {pipeline.checks.map((check) => {
+          const off = c.card.checks_off.includes(check.name);
+          return (
+            <button
+              key={check.name}
+              className="check-pill"
+              data-off={off}
+              aria-pressed={!off}
+              disabled={locked}
+              onClick={() => c.toggleCheck(check.name)}
+              title={`${check.rule}. Click to switch it ${off ? "on" : "off"} for this campaign.`}
+            >
+              {check.name}
+            </button>
+          );
+        })}
+      </div>
+      <details className="field-checks">
+        <summary>{pipeline.full_checks.length} more checks when a design's field is built</summary>
+        <div className="check-pills">
+          {pipeline.full_checks.map((check) => (
+            <span key={check.name} className="check-pill fixed" title={check.rule}>
+              {check.name}
+            </span>
+          ))}
+        </div>
+        <div className="dim">Mould release waits for the pull direction, which variants do not hold yet.</div>
+      </details>
+      <div className="dim held-hint">Hover any item for its rule in full.</div>
+    </>
   );
 }
 
-/** Every run kept for the project, newest first: its study and version, what it switched off,
- * how many designs of how many tried, how many built - each opened on Designs. */
+/** One variant at a glance: what it varies and the rules it holds, a pill each - its full words on
+ * hover - or why it could not be read, to try again. */
+function VariantHeld({ id, campaign: c }: { id: string; campaign: Campaign }) {
+  const variant = c.shown[id];
+  const label = variant?.label ?? c.library.find((v) => v.id === id)?.label ?? id;
+  const head = (
+    <div className="variant-held-head">
+      <span className="mono">{id}</span> <b>{label}</b>
+      {variant ? <span className="tag">{variant.kind}</span> : null}
+    </div>
+  );
+  if (!variant) {
+    const why = c.unread[id];
+    return (
+      <div className="variant-held">
+        {head}
+        {why ? (
+          <div className="card-note warn">
+            Could not read it: {why}.{" "}
+            <button className="link" onClick={c.readAgain}>
+              try again
+            </button>
+          </div>
+        ) : (
+          <div className="dim">reading…</div>
+        )}
+      </div>
+    );
+  }
+  const block = variant.block;
+  const generator = block.settings.find((s) => s.name === "generator");
+  const patterns = (generator?.domain.options ?? []).map(String);
+  const varies = block.settings.filter((s) => !s.hidden && !s.fixed && matters(s.name, patterns));
+  const rules = [...block.keep_clear, ...block.rules].filter((rule) => rule.enforced);
+  return (
+    <div className="variant-held">
+      {head}
+      <div className="held-line">
+        <span className="held-what">varies</span>
+        {varies.length ? (
+          varies.map((s) => (
+            <span key={s.name} className="held-pill" title={`${s.label}: ${s.says}`}>
+              {s.label} <b>{brief(s)}</b>
+            </span>
+          ))
+        ) : (
+          <span className="dim">nothing - one design</span>
+        )}
+      </div>
+      <div className="held-line">
+        <span className="held-what">rules</span>
+        {rules.length ? (
+          rules.map((rule) => (
+            <span
+              key={rule.id}
+              className="held-pill rule"
+              data-strength={rule.strength}
+              title={`${rule.says} - ${rule.strength}${rule.source ? `, from ${rule.source}` : ""}`}
+            >
+              {rule.says}
+            </span>
+          ))
+        ) : (
+          <span className="dim">none of its own</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** What a setting may take, in a few characters: 2–10, 15–25 mm, square grid · spokes, 3 choices. */
+function brief(s: StudySetting): string {
+  const d = s.domain;
+  const unit = s.percent ? " %" : d.unit === "°" ? "°" : d.unit ? ` ${d.unit}` : "";
+  const value = (v: unknown) => (s.percent ? String(Math.round(Number(v) * 100)) : String(v));
+  if (d.options) {
+    if (s.name === "generator") return d.options.map((p) => PATTERN_NAMES[String(p)] ?? String(p)).join(" · ");
+    return d.options.length <= 3 ? `${d.options.map(value).join(" · ")}${unit}` : `${d.options.length} choices`;
+  }
+  // A dash after a minus sign reads as another minus: a range below zero says "to".
+  const dash = Number(d.low) < 0 ? " to " : "–";
+  return `${value(d.low)}${dash}${value(d.high)}${unit}`;
+}
+
+/** How designs are drawn, how many, from which seed; the count; a hundred screened; the launch,
+ * and what it came to. */
+function LaunchStep({ campaign: c, onOpenRun }: { campaign: Campaign; onOpenRun: (run: string) => void }) {
+  const pipeline = c.pipeline as CampaignPipeline;
+  const locked = c.going !== null;
+  const every = Boolean(c.estimate?.every);
+  const rejected = Object.entries(c.progress?.rejected ?? {}).sort((a, b) => b[1] - a[1]);
+  const screened = c.screen;
+  const screenedOut = Object.entries(screened?.rejected ?? {}).sort((a, b) => b[1] - a[1]);
+  const [nText, setNText] = useState(String(c.card.n));
+  const [seedText, setSeedText] = useState(String(c.card.seed));
+  useEffect(() => setNText(String(c.card.n)), [c.card.n]);
+  useEffect(() => setSeedText(String(c.card.seed)), [c.card.seed]);
+  const blocked = useMemo(
+    () => locked || (c.card.method === "every" && !every),
+    [locked, c.card.method, every],
+  );
+  return (
+    <>
+      <div className="step-sub">how designs are drawn</div>
+      {pipeline.methods.map((method) => {
+        const off = method.key === "every" && !every;
+        return (
+          <label key={method.key} className="method-row" data-off={off}>
+            <input
+              type="radio"
+              name="method"
+              checked={c.card.method === method.key}
+              disabled={locked || off}
+              onChange={() => c.update({ method: method.key })}
+            />
+            <b>{method.label}</b> <span className="dim">{method.says}</span>
+          </label>
+        );
+      })}
+      <div className="launch-line">
+        <label>
+          designs to keep{" "}
+          <input
+            className="num"
+            value={nText}
+            disabled={locked}
+            onChange={(e) => {
+              setNText(e.target.value);
+              const n = Number(e.target.value);
+              if (Number.isInteger(n) && n >= 1 && n <= 20000) c.update({ n });
+            }}
+            aria-label="designs to keep"
+          />
+        </label>
+        <label>
+          seed{" "}
+          <input
+            className="num"
+            value={seedText}
+            disabled={locked}
+            onChange={(e) => {
+              setSeedText(e.target.value);
+              const seed = Number(e.target.value);
+              if (Number.isInteger(seed) && seed >= 0) c.update({ seed });
+            }}
+            aria-label="seed"
+          />
+        </label>
+      </div>
+      <label className="method-row">
+        <input
+          type="checkbox"
+          checked={c.card.diverse >= 2}
+          disabled={locked}
+          onChange={(e) => c.update({ diverse: e.target.checked ? 2 : 0 })}
+        />
+        <b>keep the most different</b>
+        <span className="dim"> of </span>
+        <select
+          value={Math.max(c.card.diverse, 2)}
+          disabled={locked || c.card.diverse < 2}
+          onChange={(e) => c.update({ diverse: Number(e.target.value) })}
+          aria-label="how many times as many to draw"
+        >
+          {[2, 3, 4, 5].map((k) => (
+            <option key={k} value={k}>
+              {k} times as many
+            </option>
+          ))}
+        </select>
+        <span className="dim"> drawn - placing takes as many times as long</span>
+      </label>
+
+      <div className="step-sub">how many</div>
+      <div className="estimate-line">
+        {c.estimate
+          ? c.estimate.count === null
+            ? "The variants allow no end of designs - free layouts among them."
+            : `The variants allow ${c.estimate.count.toLocaleString()} designs: every set of them at every point of each.`
+          : "Counting…"}
+      </div>
+      <div className="actions">
+        <button onClick={() => void c.runScreen()} disabled={locked || c.screening}>
+          {c.screening ? "Screening…" : "Screen 100"}
+        </button>
+      </div>
+      {screened ? (
+        <div className="screen-said">
+          <b>{screened.passed}</b> of {screened.tried} pass
+          {screened.repaired ? ` - ${screened.repaired} of them after repair` : ""} ·{" "}
+          {screened.seconds_per_design} s a design
+          {screenedOut.length
+            ? ` · the rest: ${screenedOut.map(([why, n]) => `${why} ${n}`).join(", ")}`
+            : ""}
+          <div className="dim">
+            {c.card.n.toLocaleString()} designs would take about {durationSaid(screened.estimate_seconds)}.
+          </div>
+        </div>
+      ) : null}
+
+      <div className="actions launch-actions">
+        <button
+          className="primary"
+          onClick={() => void c.launch()}
+          disabled={blocked}
+          title="Make the designs: each variant pooled alone, then designs drawn together, repaired, screened and kept"
+        >
+          {c.going ? "Running…" : `Launch ${c.card.n.toLocaleString()} designs`}
+        </button>
+      </div>
+
+      {c.going || c.started || c.problem ? (
+        <div className="go-designs">
+          {c.started ? (
+            <div className="dim">
+              campaign <b className="mono">{c.started.run}</b>
+            </div>
+          ) : null}
+          {c.going ? <div className="card-note busy-note">{c.going}</div> : null}
+          {c.alone.map((a) => (
+            <div key={a.variant} className="dim">
+              {a.label} alone: {a.kept} of {a.tried} points pass
+              {Object.keys(a.rejected).length
+                ? ` - the rest: ${Object.entries(a.rejected)
+                    .map(([why, n]) => `${why} ${n}`)
+                    .join(", ")}`
+                : ""}
+            </div>
+          ))}
+          {c.progress ? (
+            <div className="go-progress">
+              <b>{c.kept.toLocaleString()}</b> kept of {c.progress.tried.toLocaleString()} tried in{" "}
+              {c.progress.seconds} s
+              {c.progress.repaired ? ` · ${c.progress.repaired} repaired` : ""}
+              {rejected.length
+                ? ` - not kept: ${rejected.map(([why, n]) => `${why} ${n}`).join(", ")}`
+                : ""}
+            </div>
+          ) : null}
+          {c.finished && !c.going ? (
+            <div className="actions">
+              <button onClick={() => onOpenRun(c.finished as string)}>Open its designs</button>
+            </div>
+          ) : null}
+          {c.problem ? <div className="card-note warn">{c.problem}</div> : null}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+/** Every campaign launched for the project, newest first - each opened on Designs. */
 export function CampaignRuns(props: {
-  runs: KeptRun[];
+  launched: LaunchedCampaign[];
   going: string | null;
   onOpenRun: (run: string) => void;
 }) {
@@ -686,24 +708,35 @@ export function CampaignRuns(props: {
     <nav className="index">
       <section className="section">
         <header>
-          Runs kept <span className="count">{props.runs.length}</span>
+          Campaigns <span className="count">{props.launched.length}</span>
         </header>
         {props.going ? <div className="body card-note busy-note">A campaign is running.</div> : null}
-        {!props.runs.length ? (
+        {!props.launched.length ? (
           <div className="body card-note">
-            No campaign has run yet. Launch one on the right: its designs are kept in
+            No campaign launched yet. Compose one on the card: its designs are kept in
             _archived_designs beside the project.
           </div>
         ) : null}
-        {props.runs.map((run) => (
-          <button key={run.run} className="row run-row" onClick={() => props.onOpenRun(run.run)}>
-            <span className="run-name mono">{run.run}</span>
+        {props.launched.map((run) => (
+          <button
+            key={run.run}
+            className="row run-row"
+            onClick={() => props.onOpenRun(run.run)}
+            disabled={run.state !== "done"}
+            title={run.state === "done" ? "Open its designs" : "It did not finish"}
+          >
+            <span className="run-name">
+              <b>{run.name}</b> <span className="mono dim">{run.id}</span>
+            </span>
             <span className="run-detail">
-              {run.study} v{run.version} · {run.made.toLocaleString()} designs of{" "}
-              {run.tried.toLocaleString()} tried · {Math.round(run.seconds / 60)} min
+              {run.state === "done"
+                ? `${(run.made ?? 0).toLocaleString()} designs of ${(run.tried ?? 0).toLocaleString()} tried · ${durationSaid(run.seconds ?? 0)}`
+                : "unfinished"}
               {run.built ? ` · ${run.built} built` : ""}
             </span>
-            {offSaid(run.off) ? <span className="run-detail dim">{offSaid(run.off)}</span> : null}
+            <span className="run-detail dim">
+              {run.variants.map((v) => v.label).join(" + ")} · {run.card.method}
+            </span>
           </button>
         ))}
       </section>
@@ -711,14 +744,12 @@ export function CampaignRuns(props: {
   );
 }
 
-function offSaid(off: Partial<CampaignOff>): string {
-  const parts = [];
-  if (off.blocks?.length) parts.push(`blocks ${off.blocks.join(", ")} off`);
-  if (off.rules?.length) parts.push(`${off.rules.length} rules off`);
-  if (off.checks?.length) parts.push(`${off.checks.join(", ")} off`);
-  return parts.join(" · ");
+function designsSaid(count: number | null): string {
+  return count === null ? "no end of designs" : `${count.toLocaleString()} designs`;
 }
 
-function capital(text: string): string {
-  return text ? text[0].toUpperCase() + text.slice(1) : text;
+function durationSaid(seconds: number): string {
+  if (seconds < 90) return `${Math.max(1, Math.round(seconds))} s`;
+  if (seconds < 5400) return `${Math.round(seconds / 60)} min`;
+  return `${(seconds / 3600).toFixed(1)} h`;
 }

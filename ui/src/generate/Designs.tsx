@@ -60,6 +60,9 @@ export interface Designs {
   openRun: (run: string) => void;
   show: DesignShow;
   setShow: (show: DesignShow) => void;
+  /** Only the designs holding this variant, by code - or every design. */
+  variant: string | null;
+  setVariant: (variant: string | null) => void;
   listing: RunDesigns | null;
   selected: number | null;
   select: (index: number) => void;
@@ -85,6 +88,7 @@ export function useDesigns(active: boolean, project: string | null): Designs {
   const [runs, setRuns] = useState<KeptRun[]>([]);
   const [run, setRun] = useState<string | null>(null);
   const [show, setShow] = useState<DesignShow>({ kind: "varied", k: 30 });
+  const [variant, setVariant] = useState<string | null>(null);
   const [listing, setListing] = useState<RunDesigns | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [detail, setDetail] = useState<RunDesign | null>(null);
@@ -130,20 +134,22 @@ export function useDesigns(active: boolean, project: string | null): Designs {
           ? (["built", 30, 0] as const)
           : (["all", 30, show.offset] as const);
     api
-      .runDesigns(run, kind, k, offset, PAGE)
+      .runDesigns(run, kind, k, offset, PAGE, variant)
       .then((reply) => {
         if (!live) return;
         setListing(reply);
         setProblem(null);
         setSelected((was) =>
-          was !== null && was < reply.of ? was : (reply.rows[0]?.index ?? null),
+          was !== null && reply.rows.some((r) => r.index === was)
+            ? was
+            : (reply.rows[0]?.index ?? null),
         );
       })
       .catch((caught) => live && setProblem(plain(caught)));
     return () => {
       live = false;
     };
-  }, [active, run, show, stamp]);
+  }, [active, run, show, variant, stamp]);
 
   // The design picked, in full.
   useEffect(() => {
@@ -217,6 +223,7 @@ export function useDesigns(active: boolean, project: string | null): Designs {
   const openRun = useCallback((name: string) => {
     setRun(name);
     setSelected(null);
+    setVariant(null);
     setShow({ kind: "varied", k: 30 });
     setStamp((n) => n + 1);
   }, []);
@@ -254,6 +261,8 @@ export function useDesigns(active: boolean, project: string | null): Designs {
     openRun,
     show,
     setShow,
+    variant,
+    setVariant,
     listing,
     selected,
     select,
@@ -279,10 +288,11 @@ export function useDesigns(active: boolean, project: string | null): Designs {
 export function DesignsRail({ designs }: { designs: Designs }) {
   const { listing, show } = designs;
   const counts = listing?.counts;
+  const colours = useMemo(() => blockColours(listing?.blocks ?? {}), [listing]);
   return (
     <nav className="index designs-rail">
       <section className="section">
-        <header>Run</header>
+        <header>Campaign</header>
         <div className="body">
           {designs.runs.length ? (
             <select
@@ -292,12 +302,12 @@ export function DesignsRail({ designs }: { designs: Designs }) {
             >
               {designs.runs.map((run) => (
                 <option key={run.run} value={run.run}>
-                  {run.run} · {run.made.toLocaleString()} designs
+                  {run.name} · {run.made.toLocaleString()} designs
                 </option>
               ))}
             </select>
           ) : (
-            <div className="card-note">No campaign has run yet - launch one on Campaign.</div>
+            <div className="card-note">No campaign launched yet - compose one on Campaign.</div>
           )}
           {counts ? (
             <div className="stage-counts">
@@ -344,6 +354,29 @@ export function DesignsRail({ designs }: { designs: Designs }) {
               all
             </button>
           </span>
+          {listing && Object.keys(listing.labels).length ? (
+            <label className="variant-filter">
+              <span className="dim">holding</span>
+              <select
+                value={designs.variant ?? ""}
+                onChange={(e) => designs.setVariant(e.target.value || null)}
+                aria-label="only the designs holding this variant"
+              >
+                <option value="">any variant</option>
+                {Object.entries(listing.labels).map(([id, label]) => (
+                  <option key={id} value={id}>
+                    {id} · {label}
+                  </option>
+                ))}
+              </select>
+              {designs.variant ? (
+                <span className="dim">
+                  {" "}
+                  {listing.holding.toLocaleString()} of {listing.of.toLocaleString()}
+                </span>
+              ) : null}
+            </label>
+          ) : null}
         </div>
       </section>
       <section className="section design-list">
@@ -372,9 +405,23 @@ export function DesignsRail({ designs }: { designs: Designs }) {
             </span>
             <span className="design-detail">
               {row.ribs} ribs{row.holes ? ` · ${row.holes} holes` : ""}
-              {row.pads ? ` · ${row.pads} pads` : ""} · {Math.round(row.mass_kg)} kg ·{" "}
-              {row.material}
+              {row.pads ? ` · ${row.pads} pads` : ""} · {Math.round(row.mass_kg)} kg
+              {row.left_out ? ` · ${row.left_out} left out` : ""}
             </span>
+            {Object.keys(listing.labels).length ? (
+              <span className="design-variants">
+                {row.variants.map((id) => (
+                  <span
+                    key={id}
+                    className="variant-dot"
+                    style={{ background: colours[id] ?? "#888" }}
+                    title={`${id} · ${listing.labels[id] ?? ""}`}
+                  >
+                    {id}
+                  </span>
+                ))}
+              </span>
+            ) : null}
           </button>
         ))}
         {show.kind === "all" && listing ? (
@@ -387,11 +434,11 @@ export function DesignsRail({ designs }: { designs: Designs }) {
             </button>
             <span className="dim">
               {(show.offset + 1).toLocaleString()}–
-              {Math.min(show.offset + PAGE, listing.of).toLocaleString()} of{" "}
-              {listing.of.toLocaleString()}
+              {Math.min(show.offset + PAGE, listing.holding).toLocaleString()} of{" "}
+              {listing.holding.toLocaleString()}
             </span>
             <button
-              disabled={show.offset + PAGE >= listing.of}
+              disabled={show.offset + PAGE >= listing.holding}
               onClick={() => designs.setShow({ kind: "all", offset: show.offset + PAGE })}
             >
               next
@@ -436,7 +483,7 @@ export function DesignStage(props: { designs: Designs; showPart: boolean; onPart
   if (!designs.run) {
     return (
       <div className="stage-page">
-        <p className="card-note">No campaign has run yet. Launch one on Campaign.</p>
+        <p className="card-note">No campaign launched yet. Compose one on Campaign.</p>
       </div>
     );
   }
@@ -573,16 +620,31 @@ export function DesignReadout(props: { designs: Designs; onCollapse: () => void 
             </header>
             <div className="readout-made">
               {detail.short.map(([block, words]) => (
-                <div key={block}>
-                  <b style={{ color: colours[block] ?? "inherit" }}>{block}</b> {words}
+                <div key={block} className="made-row">
+                  <b style={{ color: colours[block] ?? "inherit" }}>{block}</b>
+                  {detail.labels[block] ? <span> {detail.labels[block]}</span> : null}
+                  <span className="dim"> - {words}</span>
+                  {detail.about[block] ? <div className="dim made-values">{detail.about[block]}</div> : null}
                 </div>
               ))}
+              {detail.absent.length ? (
+                <div className="dim">
+                  not in this design:{" "}
+                  {detail.absent.map((id) => `${id} ${detail.labels[id] ?? ""}`.trim()).join(", ")}
+                </div>
+              ) : null}
+              {detail.left_out_said ? <div className="card-note">{detail.left_out_said}</div> : null}
             </div>
             <div className="dim">
               {detail.ribs} ribs · {detail.pads} pads · {detail.holes} holes · {detail.mass_kg} kg{" "}
               {detail.material} · {detail.added_kg >= 0 ? "+" : ""}
               {detail.added_kg} kg on the part
             </div>
+            {detail.recipe ? (
+              <div className="dim mono recipe">
+                recipe {detail.recipe} · seed {detail.seed}
+              </div>
+            ) : null}
           </section>
           <section className="rib-slot">
             <header>
