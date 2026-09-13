@@ -260,7 +260,7 @@ def _text(message: Any) -> str:
 
 def _draft(message: ToolMessage) -> dict | None:
     """The study, changed by the agent and let through by the checks: what the pane says of it -
-    only what the agent asked the engineer to look at. The study card shows the rest."""
+    only what the agent asked the engineer to look at. The variant card shows the rest."""
     if message.name != "edit_study":
         return None
     try:

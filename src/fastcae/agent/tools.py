@@ -87,12 +87,17 @@ class BlockEdit(BaseModel):
         default=None,
         description="The block to change, as read_study names it; left out, a new one.",
     )
-    add: str | None = Field(default=None, description="What the block adds: ribs.")
+    add: str | None = Field(
+        default=None,
+        description="What the block adds: ribs; thicken - the faces in stand_on moved along their "
+        "normal, thicker or thinner; holes - through the plate in stand_on; material - what the "
+        "part is cast in.",
+    )
     stand_on: list[str] | None = Field(
         default=None,
         description="What its ribs stand on: the floor, as faces or features in one plane. An "
         "empty list: nothing under them - webs between what end_on names, standing along the "
-        "way all of it runs.",
+        "way all of it runs. For thicken, the faces moved; for holes, the plate.",
     )
     end_on: list[str] | None = Field(
         default=None,
@@ -153,7 +158,7 @@ class EditStudy(BaseModel):
         description="At most three short lines for the engineer to look at before accepting the "
         "draft as it will stand: a question only they can answer that would change every design, "
         "an assumption that matters, a rule nothing enforces yet - naming entities by id. Never "
-        "what the study card already shows. Left out, the lines already there stay; an empty "
+        "what the variant card already shows. Left out, the lines already there stay; an empty "
         "list clears them.",
     )
 
@@ -389,7 +394,7 @@ def build(ctx: Context) -> list[BaseTool]:
 
     @tool
     def read_study() -> str:
-        """The study's draft as the engineer sees it on the study card: each block - what its ribs
+        """The study's draft as the engineer sees it on the variant card: each block - what its ribs
         stand on, end on and keep clear of, its settings, fixed or what they may take and who said
         so, its rules with their ids - the rules for the whole study, what is needed and what
         cannot be built yet, whether it differs from the study as last accepted, and the words it
@@ -447,7 +452,7 @@ def build(ctx: Context) -> list[BaseTool]:
         if drawn.get("waiting"):
             out["waiting"] = drawn["waiting"]
         out["next"] = (
-            "The study card now shows all this to the engineer, with the attention lines above. "
+            "The variant card now shows all this to the engineer, with the attention lines above. "
             "If a line no longer holds for the draft as it now is, send attention again - an empty "
             "list clears it. End the turn with no text, unless a block makes no ribs or reads the "
             "words wrongly - then edit again, or ask in the attention lines."
