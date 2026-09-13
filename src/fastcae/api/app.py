@@ -44,13 +44,22 @@ from ..generate.primitives import Slab
 from ..generate.session import (
     Session,
     accept,
+    built_blob,
+    campaign_pipeline,
     design_from_spec,
     design_from_study,
     design_paths,
     drop_rule,
     go,
+    hand,
+    keep_built,
+    kept_of,
     paths,
+    run_design,
+    run_designs,
+    runs,
     undo,
+    varied,
     verdict,
     view,
 )
@@ -397,24 +406,27 @@ def get_field_voxels() -> Response:
     if _state.field is None:
         raise HTTPException(409, "no field has been built")
 
-    grid = _state.field.grid
-    faces = exposed_faces(_state.field.inside)
     return Response(
-        content=(
-            VOXEL_MAGIC
-            + struct.pack(
-                "<Ifiii fff",
-                faces.size,
-                grid.spacing_mm,
-                grid.shape[0],
-                grid.shape[1],
-                grid.shape[2],
-                *grid.origin,
-            )
-            + faces.astype("<u4").tobytes()
-        ),
+        content=_voxel_blob(_state.field.grid, exposed_faces(_state.field.inside)),
         media_type="application/octet-stream",
         headers={"Cache-Control": "no-cache"},
+    )
+
+
+def _voxel_blob(grid, faces: np.ndarray) -> bytes:
+    """Cells for the renderer: the grid, then one integer per visible cell face."""
+    return (
+        VOXEL_MAGIC
+        + struct.pack(
+            "<Ifiii fff",
+            faces.size,
+            grid.spacing_mm,
+            grid.shape[0],
+            grid.shape[1],
+            grid.shape[2],
+            *grid.origin,
+        )
+        + faces.astype("<u4").tobytes()
     )
 
 
@@ -969,21 +981,8 @@ def get_design_voxels(only: str = "added") -> Response:
         solid = field.inside
     else:
         raise HTTPException(400, f"{only!r} is not 'added' or 'all'")
-    faces = exposed_faces(solid)
     return Response(
-        content=(
-            VOXEL_MAGIC
-            + struct.pack(
-                "<Ifiii fff",
-                faces.size,
-                grid.spacing_mm,
-                grid.shape[0],
-                grid.shape[1],
-                grid.shape[2],
-                *grid.origin,
-            )
-            + faces.astype("<u4").tobytes()
-        ),
+        content=_voxel_blob(grid, exposed_faces(solid)),
         media_type="application/octet-stream",
         headers={"Cache-Control": "no-cache"},
     )
@@ -1474,7 +1473,7 @@ def get_study() -> dict:
 
 class StudyRule(BaseModel):
     id: str = Field(min_length=2)
-    """A rule, preference or objective of the draft, by the id the study card shows."""
+    """A rule, preference or objective of the draft, by the id Design a variant shows."""
 
 
 class StudyPaths(BaseModel):
@@ -1482,15 +1481,23 @@ class StudyPaths(BaseModel):
     """The draft's suggested design, rather than the study's as accepted."""
     design: int | None = None
     """One of the designs Go made, by its index, rather than a suggested one."""
+    run: str | None = None
+    """The kept run of Go the design is of; else the study as accepted."""
 
 
 class StudyGo(BaseModel):
-    n: int = Field(default=24, ge=1, le=400)
+    n: int | None = Field(default=None, ge=1, le=20000)
+    """How many designs to keep: the study's target when not given."""
+    seed: int | None = None
+    """Where the spread starts: the study's seed when not given."""
+    off: dict[Literal["blocks", "rules", "checks"], list[str]] = Field(default_factory=dict)
+    """What this campaign switches off for itself alone: blocks and rules by id, screening checks
+    by name. The study is left as it is."""
 
 
 @app.get("/api/study/draft")
 def get_study_draft() -> dict:
-    """The study card: the draft of the study's next version - every block by what its ribs stand
+    """Design a variant: the draft of the study's next version - every block by what its ribs stand
     on, end on and keep clear of, its settings and rules, what is needed and what cannot be built
     yet - each marked where it differs from the study as accepted."""
     return {"draft": view(_intent())}
@@ -1523,13 +1530,49 @@ def post_study_rule_drop(request: StudyRule) -> dict:
     return {"draft": view(context)}
 
 
+class StudyHand(BaseModel):
+    """Something done by hand on Design a variant: ``action`` - add, stand_on, end_on, setting,
+    keep_clear, remove, confirm, designs - and what it takes: ``block``, ``add``, ``refs``,
+    ``name`` with a ``value``, ``low``/``high``/``step`` or ``options``, ``clearance_mm``,
+    ``rule``, ``n``, ``seed``."""
+
+    action: str
+    block: str | None = None
+    add: str | None = None
+    refs: list[str] | None = None
+    name: str | None = None
+    value: float | str | None = None
+    low: float | None = None
+    high: float | None = None
+    step: float | None = None
+    options: list[float | str] | None = None
+    clearance_mm: float | None = None
+    rule: str | None = None
+    n: int | None = Field(default=None, ge=1, le=20000)
+    seed: int | None = None
+    selected: list[int] = Field(default_factory=list)
+    """The faces selected on the part, which the action takes when it names nothing."""
+
+
+@app.post("/api/study/hand")
+def post_study_hand(request: StudyHand) -> dict:
+    """The draft changed by hand on Design a variant - kept as the engineer's own, with what was
+    done said in words - and the card as it now is."""
+    context = _intent()
+    action = request.model_dump(exclude={"selected"}, exclude_none=True)
+    card = hand(context, action, request.selected)
+    if isinstance(card.get("refused"), str):
+        raise HTTPException(409, card["refused"])
+    return {"draft": card}
+
+
 @app.post("/api/study/paths")
 def post_study_paths(request: StudyPaths) -> dict:
     """Where ribs would go, as lines on the part, before anything is made: the draft's suggested
     design, the study's, or one of the designs Go made."""
     context = _intent()
     if request.design is not None:
-        reply = design_paths(context, request.design)
+        reply = design_paths(context, request.design, request.run)
     else:
         reply = paths(context, draft=request.draft)
     if "cannot" in reply:
@@ -1543,29 +1586,47 @@ class StudyDesign(BaseModel):
     """One of the designs Go made, by its index; else the study's suggested point."""
     values: dict[str, dict[str, Any]] = Field(default_factory=dict)
     """Free settings at other values than suggested, by block and name."""
+    run: str | None = None
+    """The kept run of Go the design is of, built from the study version it was made from."""
 
 
 @app.post("/api/study/design")
 def post_study_design(request: StudyDesign) -> dict:
     """A design from the study - the draft accepted first, if it differs - at its suggested point,
-    at one of the designs Go made, or at the values given; and its verdict."""
+    at one of the designs Go made, or at the values given; or one of a kept run's designs, from the
+    study version that run was made from; and its verdict."""
     context = _intent()
-    draft = view(context)
-    if draft.get("refused"):
-        raise HTTPException(409, draft["cannot"])
-    if draft["differs"]:
-        written = accept(context)
-        if "cannot" in written:
-            raise HTTPException(409, written["cannot"])
+    if request.run is None:
+        draft = view(context)
+        if draft.get("refused"):
+            raise HTTPException(409, draft["cannot"])
+        if draft["differs"]:
+            written = accept(context)
+            if "cannot" in written:
+                raise HTTPException(409, written["cannot"])
     values = request.values
     if request.design is not None:
-        if not 0 <= request.design < len(context.designs):
+        designs = kept_of(context, request.run)
+        if isinstance(designs, str):
+            raise HTTPException(404, designs)
+        if not 0 <= request.design < len(designs):
             raise HTTPException(404, f"there is no design {request.design}")
-        values = context.designs[request.design]["values"]
-    reply = design_from_study(context, request.fidelity, values)
+        values = designs[request.design]["values"]
+    reply = design_from_study(context, request.fidelity, values, request.run)
     if "cannot" in reply:
         raise HTTPException(409, reply["cannot"])
     _hold_design(context)
+    return reply
+
+
+@app.get("/api/study/varied")
+def get_study_varied(k: int = 30, run: str | None = None) -> dict:
+    """The designs Go kept that differ most from each other - ``k`` of them, 5 to 100, of the study
+    as accepted or of a kept ``run`` - each as a plan of its ribs, pads and holes over the outlines
+    of what the study names."""
+    reply = varied(_intent(), max(5, min(int(k), 100)), run)
+    if "cannot" in reply:
+        raise HTTPException(409, reply["cannot"])
     return reply
 
 
@@ -1576,13 +1637,101 @@ def post_study_go(request: StudyGo) -> StreamingResponse:
     context = _intent()
 
     def events():
-        for event in go(context, request.n):
+        for event in go(context, request.n, seed=request.seed, off=dict(request.off)):
             yield f"data: {json.dumps(event)}\n\n"
 
     return StreamingResponse(
         events(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# --- campaigns, and the designs of each run ------------------------------------------------------
+
+
+@app.get("/api/campaign")
+def get_campaign() -> dict:
+    """What a campaign runs, in the open: the checks every design is screened by and the rules of
+    thumb behind them with their sources, the materials, how designs are spread, the stages a
+    design goes through - and the runs kept so far. What the study asks for is its card."""
+    return campaign_pipeline(_intent())
+
+
+@app.get("/api/runs")
+def get_runs() -> list[dict]:
+    """Every run kept for the open project, newest first."""
+    return runs(_intent())
+
+
+@app.get("/api/runs/{run}/designs")
+def get_run_designs(
+    run: str,
+    show: Literal["varied", "built", "all"] = "varied",
+    k: int = 30,
+    offset: int = 0,
+    limit: int = 200,
+) -> dict:
+    """A run's designs as the list shows them - the ``k`` that differ most, those built, or a page
+    of all - each with where it is in its stages, and how many are at each."""
+    reply = run_designs(_intent(), run, show, k, offset, max(1, min(int(limit), 1000)))
+    if "cannot" in reply:
+        raise HTTPException(404, reply["cannot"])
+    return reply
+
+
+@app.get("/api/runs/{run}/designs/{index}")
+def get_run_design(run: str, index: int) -> dict:
+    """One design of a run in full, with its verdict at each fidelity it was built at."""
+    reply = run_design(_intent(), run, index)
+    if "cannot" in reply:
+        raise HTTPException(404, reply["cannot"])
+    return reply
+
+
+class RunBuild(BaseModel):
+    fidelity: Literal["preview", "full"] = "preview"
+
+
+@app.post("/api/runs/{run}/designs/{index}/build")
+def post_run_build(run: str, index: int, request: RunBuild) -> dict:
+    """One design of a run built - its field, from the study version the run was made from - and
+    checked; kept beside the run with the surfaces it changes and its new metal as cells, so its
+    field stage is done for good."""
+    context = _intent()
+    designs = kept_of(context, run)
+    if isinstance(designs, str):
+        raise HTTPException(404, designs)
+    if not 0 <= index < len(designs):
+        raise HTTPException(404, f"there is no design {index} in {run}")
+    reply = design_from_study(context, request.fidelity, designs[index]["values"], run)
+    if "cannot" in reply:
+        raise HTTPException(409, reply["cannot"])
+    assert context.made is not None
+    made = context.made.design
+    added = made.added_surface()
+    surface = _encode_mesh(added, normals=corner_normals(added.vertices, added.triangles))
+    new_metal = made.composition.field.inside & ~made.base.inside
+    cells = _voxel_blob(made.base.grid, exposed_faces(new_metal))
+    keep_built(context, run, index, request.fidelity, reply, {"mesh": surface, "cells": cells})
+    _hold_design(context)
+    _state.made_blob = surface
+    return run_design(context, run, index)
+
+
+@app.get("/api/runs/{run}/designs/{index}/{kind}")
+def get_run_built(
+    run: str, index: int, kind: Literal["mesh", "cells"], fidelity: str = "preview"
+) -> Response:
+    """What was kept of a built design: the surfaces it changes, in the format the part arrives
+    in, or its new metal as cells, in the format the field's arrive in."""
+    blob = built_blob(_intent(), run, index, fidelity, kind)
+    if blob is None:
+        raise HTTPException(404, f"design {index} of {run} has not been built at {fidelity}")
+    return Response(
+        content=blob,
+        media_type="application/octet-stream",
+        headers={"Content-Length": str(len(blob)), "Cache-Control": "no-cache"},
     )
 
 
