@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 from .. import cache
 from .. import spec as specs
 from .. import study as studies
+from .. import variants as variants_lib
 from ..extract import Extraction
 from ..extract import run as run_extract
 from ..features import extent as feature_extent
@@ -36,6 +37,11 @@ from ..features import neighbours as feature_neighbours
 from ..generate import Field as DistanceField
 from ..generate import designs as design_space
 from ..generate import field_for
+from ..generate.campaigns import Card as CampaignCard
+from ..generate.campaigns import campaigns as campaigns_of
+from ..generate.campaigns import estimate as campaign_estimate
+from ..generate.campaigns import go as launch_campaign
+from ..generate.campaigns import screen_sample
 from ..generate.cells import exposed_faces
 from ..generate.design import Design, Parameter, apply, host_from, rib_on
 from ..generate.field import field_key as key_of_field
@@ -43,22 +49,29 @@ from ..generate.formations import FORMATIONS
 from ..generate.primitives import Slab
 from ..generate.session import (
     Session,
+    _present,
     accept,
     built_blob,
     campaign_pipeline,
     design_from_spec,
     design_from_study,
     design_paths,
+    discard_variant,
     drop_rule,
     go,
     hand,
     keep_built,
     kept_of,
+    new_variant,
+    open_variant,
     paths,
     run_design,
     run_designs,
     runs,
+    save_variant,
     undo,
+    variant_sample,
+    variant_shown,
     varied,
     verdict,
     view,
@@ -1147,10 +1160,7 @@ def get_current_design_mesh() -> Response:
     if _state.made is None:
         raise HTTPException(409, "no design has been made")
     if _state.made_blob is None:
-        added = _state.made.added_surface()
-        _state.made_blob = _encode_mesh(
-            added, normals=corner_normals(added.vertices, added.triangles)
-        )
+        _state.made_blob = _changed_blob(_state.made)
     return Response(
         content=_state.made_blob,
         media_type="application/octet-stream",
@@ -1390,10 +1400,21 @@ def _selection(result: Extraction, face_ids, reason: str) -> dict:
 # --- mesh --------------------------------------------------------------------------------------
 
 
-def _encode_mesh(tess, normals: np.ndarray | None = None) -> bytes:
+def _encode_mesh(
+    tess, normals: np.ndarray | None = None, standing: np.ndarray | None = None
+) -> bytes:
     """Pack a surface for the renderer. The format, and why it is that format, is in
     :mod:`fastcae.api.mesh`."""
-    return mesh_format.encode(tess.vertices, tess.triangles, tess.face_id, normals)
+    return mesh_format.encode(tess.vertices, tess.triangles, tess.face_id, normals, standing)
+
+
+def _changed_blob(design) -> bytes:
+    """The surfaces a design changes, drawn down to the part, each vertex saying how far it stands
+    off it - what the viewer draws over the part it already has."""
+    changed, standing = design.changed_surface()
+    return _encode_mesh(
+        changed, normals=corner_normals(changed.vertices, changed.triangles), standing=standing
+    )
 
 
 # --- the spec, and designs made from it -----------------------------------------------------------
@@ -1531,8 +1552,8 @@ def post_study_rule_drop(request: StudyRule) -> dict:
 
 
 class StudyHand(BaseModel):
-    """Something done by hand on Design a variant: ``action`` - add, stand_on, end_on, setting,
-    keep_clear, remove, confirm, designs - and what it takes: ``block``, ``add``, ``refs``,
+    """Something done by hand on Design a variant: ``action`` - add, stand_on, end_on, other_side,
+    setting, keep_clear, remove, confirm, designs - and what it takes: ``block``, ``add``, ``refs``,
     ``name`` with a ``value``, ``low``/``high``/``step`` or ``options``, ``clearance_mm``,
     ``rule``, ``n``, ``seed``."""
 
@@ -1548,6 +1569,10 @@ class StudyHand(BaseModel):
     options: list[float | str] | None = None
     clearance_mm: float | None = None
     rule: str | None = None
+    kind: str | None = None
+    """For ``rule``: the kind of rule a variant holds - one the pipeline checks."""
+    params: dict[str, Any] | None = None
+    """For ``rule``: what the rule needs, by name - ``mm``, ``ratio``, ``radius_mm``."""
     n: int | None = Field(default=None, ge=1, le=20000)
     seed: int | None = None
     selected: list[int] = Field(default_factory=list)
@@ -1647,15 +1672,187 @@ def post_study_go(request: StudyGo) -> StreamingResponse:
     )
 
 
+# --- variants: authored on Design a variant, kept in the library ---------------------------------
+
+
+def _library(context: Session) -> list[dict]:
+    """Every variant kept, as the library lists it - with the campaigns that used each."""
+    used: dict[str, list[dict]] = {}
+    for launched in campaigns_of(context):
+        for kept in launched["variants"]:
+            used.setdefault(kept["id"], []).append(
+                {"run": launched["run"], "name": launched["name"], "version": kept["version"]}
+            )
+    return [variants_lib.listed(v, used.get(v.name)) for v in variants_lib.library(context.project)]
+
+
+@app.get("/api/variants")
+def get_variants() -> dict:
+    """The project's variants - code, name, kind, where, how many combinations each allows, which
+    campaigns used it - and the one being authored."""
+    context = _intent()
+    return {"variants": _library(context), "authoring": context.variant}
+
+
+@app.get("/api/variants/{vid}")
+def get_variant(vid: str) -> dict:
+    """A variant of the library, read only: what it adds and where, what it may vary, its rules."""
+    shown = variant_shown(_intent(), vid)
+    if shown is None:
+        raise HTTPException(404, f"there is no variant {vid}")
+    return shown
+
+
+@app.post("/api/variants/new")
+def post_variant_new() -> dict:
+    """A new variant to author, with nothing in it yet."""
+    return {"draft": new_variant(_intent())}
+
+
+@app.post("/api/variants/{vid}/open")
+def post_variant_open(vid: str) -> dict:
+    """A variant of the library, read back to change."""
+    card = open_variant(_intent(), vid)
+    if isinstance(card.get("refused"), str):
+        raise HTTPException(404, card["refused"])
+    return {"draft": card}
+
+
+@app.get("/api/variant/draft")
+def get_variant_draft() -> dict:
+    """The variant being authored - a new one when none is."""
+    context = _intent()
+    if context.variant is None:
+        return {"draft": new_variant(context)}
+    return {"draft": view(context)}
+
+
+@app.post("/api/variant/hand")
+def post_variant_hand(request: StudyHand) -> dict:
+    """The variant being authored, changed by hand on the card."""
+    context = _intent()
+    if context.variant is None:
+        new_variant(context)
+    action = request.model_dump(exclude={"selected"}, exclude_none=True)
+    card = hand(context, action, request.selected)
+    if isinstance(card.get("refused"), str):
+        raise HTTPException(409, card["refused"])
+    return {"draft": card}
+
+
+class VariantSample(BaseModel):
+    another: bool = False
+    """A point drawn at random from what the variant allows, rather than its suggested one."""
+    seed: int | None = None
+
+
+@app.post("/api/variant/sample")
+def post_variant_sample(request: VariantSample) -> dict:
+    """The variant being authored at a point that passes - placed alone, repaired and screened -
+    as lines on the part; or why none of the points tried does."""
+    reply = variant_sample(_intent(), request.another, request.seed)
+    if "cannot" in reply:
+        raise HTTPException(409, reply["cannot"])
+    return reply
+
+
+class VariantSave(BaseModel):
+    label: str | None = None
+
+
+@app.post("/api/variant/save")
+def post_variant_save(request: VariantSave) -> dict:
+    """The variant being authored, kept in the library - created, or its changes saved - once one
+    of its points passes."""
+    context = _intent()
+    reply = save_variant(context, request.label)
+    if "cannot" in reply:
+        raise HTTPException(409, reply["cannot"])
+    return {**reply, "draft": view(context), "variants": _library(context)}
+
+
+@app.post("/api/variant/discard")
+def post_variant_discard() -> dict:
+    """Forget what was not saved: the variant as kept, or nothing in it."""
+    return {"draft": discard_variant(_intent())}
+
+
+@app.post("/api/variants/{vid}/duplicate")
+def post_variant_duplicate(vid: str) -> dict:
+    context = _intent()
+    try:
+        copy = variants_lib.duplicate(context.project, vid)
+    except ValueError as error:
+        raise HTTPException(404, str(error)) from error
+    return {"id": copy, "variants": _library(context)}
+
+
+@app.delete("/api/variants/{vid}")
+def delete_variant(vid: str) -> dict:
+    """A variant taken out of the library - its file moved aside; campaigns keep their copies."""
+    context = _intent()
+    try:
+        variants_lib.delete(context.project, vid)
+    except ValueError as error:
+        raise HTTPException(404, str(error)) from error
+    if context.variant == vid:
+        new_variant(context)
+    return {"variants": _library(context)}
+
+
 # --- campaigns, and the designs of each run ------------------------------------------------------
 
 
 @app.get("/api/campaign")
 def get_campaign() -> dict:
-    """What a campaign runs, in the open: the checks every design is screened by and the rules of
-    thumb behind them with their sources, the materials, how designs are spread, the stages a
-    design goes through - and the runs kept so far. What the study asks for is its card."""
+    """What a campaign runs, in the open: the stages a design goes through with what each takes
+    and gives, the checks every design is screened and built by and the rules of thumb behind them
+    with their sources, how designs are placed and drawn, the materials - and the campaigns
+    launched so far."""
     return campaign_pipeline(_intent())
+
+
+@app.post("/api/campaign/estimate")
+def post_campaign_estimate(card: CampaignCard) -> dict:
+    """How many designs a card's variants allow, each variant's share, and whether every one of
+    them can be asked for."""
+    reply = campaign_estimate(_project(), card)
+    if "cannot" in reply:
+        raise HTTPException(409, reply["cannot"])
+    return reply
+
+
+@app.post("/api/campaign/screen")
+def post_campaign_screen(card: CampaignCard) -> dict:
+    """A hundred designs drawn as the card would draw them, placed, repaired and screened - nothing
+    kept: how many pass, why the rest do not, and how long the launch will take."""
+    reply = screen_sample(_intent(), card)
+    if "cannot" in reply:
+        raise HTTPException(409, reply["cannot"])
+    return reply
+
+
+@app.post("/api/campaign/go")
+def post_campaign_go(card: CampaignCard) -> StreamingResponse:
+    """A campaign launched from its card, as a stream of events: each variant pooled alone, each
+    design kept, then what it came to."""
+    context = _intent()
+
+    def events():
+        for event in launch_campaign(context, card):
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/api/campaigns")
+def get_campaigns() -> list[dict]:
+    """Every campaign launched for the open project, newest first."""
+    return campaigns_of(_intent())
 
 
 @app.get("/api/runs")
@@ -1671,10 +1868,12 @@ def get_run_designs(
     k: int = 30,
     offset: int = 0,
     limit: int = 200,
+    variant: str | None = None,
 ) -> dict:
     """A run's designs as the list shows them - the ``k`` that differ most, those built, or a page
-    of all - each with where it is in its stages, and how many are at each."""
-    reply = run_designs(_intent(), run, show, k, offset, max(1, min(int(limit), 1000)))
+    of all; only those holding one ``variant``, when asked - each with where it is in its stages,
+    and how many are at each."""
+    reply = run_designs(_intent(), run, show, k, offset, max(1, min(int(limit), 1000)), variant)
     if "cannot" in reply:
         raise HTTPException(404, reply["cannot"])
     return reply
@@ -1704,13 +1903,13 @@ def post_run_build(run: str, index: int, request: RunBuild) -> dict:
         raise HTTPException(404, designs)
     if not 0 <= index < len(designs):
         raise HTTPException(404, f"there is no design {index} in {run}")
-    reply = design_from_study(context, request.fidelity, designs[index]["values"], run)
+    design = designs[index]
+    reply = design_from_study(context, request.fidelity, design["values"], run, _present(design))
     if "cannot" in reply:
         raise HTTPException(409, reply["cannot"])
     assert context.made is not None
     made = context.made.design
-    added = made.added_surface()
-    surface = _encode_mesh(added, normals=corner_normals(added.vertices, added.triangles))
+    surface = _changed_blob(made)
     new_metal = made.composition.field.inside & ~made.base.inside
     cells = _voxel_blob(made.base.grid, exposed_faces(new_metal))
     keep_built(context, run, index, request.fidelity, reply, {"mesh": surface, "cells": cells})

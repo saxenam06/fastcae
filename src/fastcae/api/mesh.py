@@ -39,6 +39,7 @@ def encode(
     triangles: np.ndarray,
     face_id: np.ndarray,
     normals: np.ndarray | None = None,
+    standing: np.ndarray | None = None,
 ) -> bytes:
     """Pack a triangle surface for the renderer.
 
@@ -46,6 +47,10 @@ def encode(
     are averaged **within a CAD face**, which is what keeps a machined edge on the B-rep sharp. A
     contour passes its own, because the face ids it carries are borrowed for picking and would
     shatter the shading into thousands of patches.
+
+    ``standing`` is one value per vertex, 0 to 1: how far a surface drawn over the part stands off
+    it, so the viewer can blend the part's colour into the design's where the two meet. Given, it
+    follows the index buffer as a byte per vertex; a mesh without it ends there.
     """
     corners = triangles.ravel().astype(np.int64)
     if normals is None:
@@ -65,6 +70,10 @@ def encode(
     shared_normals = np.zeros((first.size, 4), dtype=np.int8)
     shared_normals[:, :3] = quantised[first]
     ids = np.repeat(face_id, 3)[first].astype("<u4")
+    tail = b""
+    if standing is not None:
+        tail = np.rint(np.clip(standing[corners[first]], 0.0, 1.0) * 255.0).astype(np.uint8)
+        tail = tail.tobytes()
 
     return b"".join(
         [
@@ -74,6 +83,7 @@ def encode(
             shared_normals.tobytes(),
             ids.tobytes(),
             index.astype("<u4").tobytes(),
+            tail,
         ]
     )
 
