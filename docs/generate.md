@@ -2,17 +2,22 @@
 
 **Being built.** The stage that produces design variants: how a design is represented, built,
 turned back into a surface and checked. How the engineer's intent decides *what* is built - the
-study, placements, the study card, the layout vocabulary - is in [ribs.md](ribs.md).
+study, placements, Design a variant, the layout vocabulary - is in [ribs.md](ribs.md).
 [status.md](status.md) says how much of it runs.
 
 ---
 
 ## What a design is
 
-**A spec version and a set of lever values, against a baseline**, and nothing else. Geometry is never
-stored, only regenerated. Identical inputs produce an identical field and surface bit for bit, which
-is the property the whole campaign rests on: two runs that differ must differ *because the design
-differs*, not because something was rebuilt slightly differently in between.
+**A study version and one value for each of its free settings, against a baseline**, and nothing
+else. Geometry is never stored, only regenerated. Identical inputs produce an identical field and
+surface bit for bit, which is the property the whole campaign rests on: two runs that differ must
+differ *because the design differs*, not because something was rebuilt slightly differently in
+between.
+
+A design holds every kind of block the study has: faces moved - walls, plates and bosses made
+thicker or thinner - ribs and webs with their pads, holes cut through plates, and the material it
+is cast in.
 
 That is the failure being engineered out. Re-meshing each variant makes every response the sum of a
 design effect and a discretisation effect, with no way to separate them, and a surrogate trained on
@@ -54,7 +59,10 @@ tight B-rep integration, built in 158 s.
 
 **The design grid is a quarter of the smallest root fillet** unless a grid is asked for: four voxels
 across the radius a design must hold. An R10 root gives 2.5 mm. Free-edge rounds smaller than the root
-are fewer voxels across and come out approximate, held only to the fillet floor.
+are fewer voxels across and come out approximate, held only to the fillet floor. A preview is twice
+that; every preview of one study shares one grid - the one its designs are placed on, set by its
+suggested design - so a design that chose a smaller fillet is previewed coarser than its own grid
+and held to its fillet only at full.
 
 A feature needs roughly **three voxels** across to exist in a field. At 2.5 mm a Ø21 hole is 8.4
 voxels and is reproduced well; Ø8 is marginal; Ø4.2 is gone.
@@ -148,6 +156,150 @@ baseline, so protected surfaces come out byte-identical and the check proves it 
 Protected areas are proposed from detected features - bores, holes, the faces a drawing controls -
 each with a clearance, and a person approves them. A rib cut short by one is reported with where.
 
+## Faces moved
+
+A wall, a plate or a boss made thicker or thinner is its faces moved along their own normal - one
+subtraction on the field:
+
+```
+phi = part - offset · weight
+```
+
+`weight` is one on the faces moved and nothing on the rest of the part, ramped between over the
+block's blend: a point belongs to the faces moved by how much nearer it is to them than to any other
+face, so a move never reaches through a wall to its far side. Moving further than the stored band
+would drag a clamped number, so the part's distance is computed again, exactly, in a window round
+the faces moved - out as far as they move, their blend and the band - and the move is made there.
+Blocks that move faces near each other move them together: each window sees every block's weight.
+
+**Interfaces stay as they are.** A cell within the clearance of a face kept closed - a bore, a
+hole - and nearer that face than any face moved keeps its base value. The closed face stays exactly
+where it is; what is added beside it meets it, so a boss thickened round a bore makes the bore
+longer, never narrower, and leaves no groove. A block that would move a closed face itself is
+refused.
+
+Ribs standing on or ending at a moved face are filleted to the surface where it now is: their
+blend reads the part's distance with the move taken off.
+
+## Pads, and floors thickened
+
+A rib is no thicker than the foundry's rule of thumb allows of the wall it meets - 0.8 of it,
+assumed, a rule the engineer can take out. Where a rib ends on a wall, the wall is measured square
+through it from where the rib meets it, with whatever the design moves its two faces by. A wall too
+thin gets a **pad**: a plate along the wall, half in it, standing out as far as the rule needs,
+as tall as the rib there and a good deal wider - never more than doubling the wall, a lump that
+size being a hot spot. A pad is composed like a rib and filleted like one; the checks measure it as
+wall, not as rib.
+
+A **floor** too thin for the ribs standing on it - measured under each rib - is thickened for them
+in that design: its faces moved, as a wall is, by what the thickest rib needs - never to more than
+twice what it was - and every block placed after stands on it as thickened. Without pads, the rib
+on a thin wall is left out, and a design whose ribs are too thick for their floor is screened out.
+
+## Holes
+
+A hole is a capped cylinder, square to the plate it goes through: from past the plate's face - past
+any thickening of it - to a little past its far side, measured at the hole. Cutting is a maximum,
+`max(part, −hole)`: metal stays where the hole is not. The hole's edge is sharp.
+
+Holes go on a lattice - square, or staggered with every other row shifted by half, both a pitch from
+each neighbour - laid from the middle of the plate at an angle. A point of the lattice is a hole
+only if the hole keeps an edge distance inside the plate - from its outline, the foot of every wall
+standing on it and every hole it has already - keeps a ligament of metal from what its block keeps
+clear of, from the ribs and holes of blocks placed before it, in three dimensions, over the plate or
+under it, and stands over plain plate: the metal under its rim runs no deeper than under its middle,
+else something stands under the plate there and the hole would cut into it. A lattice whose holes
+would leave less than a ligament between them makes none, and says so.
+
+## The order a design is built in
+
+1. **Faces moved**, exactly, as above - the study's own, and floors thickened for ribs.
+2. **Ribs and pads**, composed together: each filleted to the part where it now is with its own
+   block's root fillet, and to each other where they cross with the smaller of theirs.
+3. **Holes** cut.
+4. **One recontour** of every cell any of these changed, spliced into the baseline's surface.
+
+Then the checks, measured on the part as moved - what the ribs stand on and end on - and what
+screening found that the checks do not look at. The design's mass is its closed volume times its
+material's density, from the catalogue.
+
+## Screening
+
+Placing a design takes a fraction of a second; building one takes a minute or more. So every design
+a campaign places is **screened** on what placing it already knows, and only one that passes is
+kept:
+
+| screened for | rule |
+|---|---|
+| every block made something | ribs where the study asks for ribs, holes where it asks for holes |
+| rib on floor | a rib no thicker than 0.8 of the floor it stands on, as the design leaves the floor |
+| holes clear of ribs | a ligament of metal between each hole and the ribs its block keeps clear of; a hole through any other rib is a warning |
+| root gap | the clear gap between ribs standing in the open, past the junctions at their ends, at least twice the thinner - within each block, then between blocks |
+| wall kept | no wall thinned below the least its block allows - or its material, when that is more |
+
+**What it weighs.** Each rib as the plate it is, each pad half of its plate, each hole through its
+plate, each face moved by its area: an estimate to compare designs by, added to the base part's
+exact volume, times the density of the design's material.
+
+## Campaigns
+
+A campaign makes as many designs as asked - the study's target, 4,000 by default - in two phases:
+
+- **Each block alone.** Its free settings are spread over by a scrambled Sobol sequence, the other
+  blocks at their suggested points; every point is placed and screened, and the points at which the
+  block makes something and holds to its own rules are kept - a quarter as many as the designs asked
+  for, at most a thousand. How many worked, of how many, and why the rest did not, is said per
+  block: a block most of whose settings make nothing is a block to change. One that makes nothing at
+  all stops the campaign with why.
+- **Together.** A scrambled Sobol spread over which of each block's points to take, so every point
+  is taken about as often and no two blocks move in step. Every block of a design is placed at once,
+  each after those it keeps clear of, and screened for what one block alone cannot show: ribs of two
+  blocks with no room between them, holes with no room left by the ribs. A design screened out by
+  one block alone tries a few other of that block's points first.
+
+**What placing a block reads off the part is read once**: where it stands, what it keeps clear of,
+what its ribs end on - kept for every design. A block placed alike before - the same values, clear
+of the same things, on faces moved alike wherever placing it looked - is taken as it was. Ribs of a
+block placed later that would pass one placed earlier closer than the root gap are left out as
+crowded, so one near miss does not cost the design.
+
+**A campaign may switch parts of the study off** for itself alone - blocks and rules by id, screening
+checks by name - and spread from another seed. The study is left as it is: the campaign makes its
+designs from a copy of the version with those blocks left out, and every rule of theirs, and every
+rule keeping clear of what they would have made; the part's interfaces stay closed whatever is
+switched off. Everything a campaign runs is laid out on the Campaign tab, each part with its source,
+so what can be switched off is what is shown.
+
+**Runs are kept beside the project**, in `_archived_designs/<project>/<run>/` - output, not a
+decision, so not in the project folder. A run is named by its study and version, and by six
+characters more when it switched anything off or spread from another seed; the same campaign again
+is the same run, made again. Designs alike in every rib, pad, hole and face moved, and in material,
+are kept once. Every design kept is a line of `designs.jsonl` - its values, what each block made, how
+it screened, what it weighs, and everything it is made of in the part's coordinates: each rib's
+line, thickness, heights, pull, draft and radii, each pad, each hole, each face moved and by how
+much, the material. Beside it: `paths.jsonl`, a line a design in the same order - every stretch
+of path each block tried and what became of it, the lines a design is drawn by - so any design of the
+run is drawn on the part at once, nothing placed again; `study.json`, the version the designs were
+made from - a run read back needs nothing else - `campaign.json`, what was asked and switched off,
+`summary.json`, how many were tried, kept and screened out, by what, and how the kept ones spread
+over every setting; and `built/`, each design built so far. A run kept without its paths is placed
+again, design by design, on the grid the campaign placed it on - the part opened on that grid once,
+however many ask.
+
+## A design's stages
+
+Every design goes through the same stages, shown as letters: **P** its paths placed and screened -
+every design a run keeps has passed; **F** its field built and checked; **M** meshed; **S** the
+solver set up; **R** its results. Each shows how it came out - pass, warn or reject - or that it is
+not reached. Thousands are looked at by the few that differ most - farthest-point sampling over what
+each design is made of, each block weighed alike, so the first 20 of the 50 that differ most are the
+20 that do - by those built, or a page at a time.
+
+**Building a design's field** makes it from the study version its run was made from, at preview or
+in full, checks it, and keeps it beside the run in `built/<index>-<fidelity>`: the verdict, the
+surfaces it changes - new metal and metal taken away alike - in the format the part reaches the
+browser in, and its new metal as the field's own cells. F stays done; nothing is built twice.
+
 ## Checks
 
 Every design comes out pass, warn or reject, with the reason, the place, the rule used and where the
@@ -158,31 +310,51 @@ rule came from. Every check is shown to reject a part built to fail it before it
 | protected areas unchanged | every cell in every protected band equals the baseline | reject |
 | within the grid | no rib reaches the grid's outermost layer | reject |
 | nothing floating | every piece of rib touches the part, directly or through other ribs | reject |
-| rib thickness | inside the thickness window, and at least 4 voxels | reject |
-| rib against wall | thickness ≤ the rib-to-wall ratio × the wall under the root | warn |
-| root gap | clear gap between neighbouring ribs' flanks, away from crossings, ≥ the ratio × thickness | reject |
-| root fillet | the radius achieved, read off the surface, ≥ the fillet floor | reject; warn if > 20% off |
+| rib thickness | inside the thickness its block allows, and at least 4 voxels; pads are not ribs | reject |
+| rib against wall | thickness ≤ the rib-to-wall ratio × the wall under the root, a pad counted as wall | warn |
+| root gap | clear gap between neighbouring ribs' flanks, past their junctions and away from crossings, ≥ the ratio × thickness | reject |
+| root fillet | the radius achieved, read off the surface, ≥ the fillet floor | reject; warn if > 20% off its block's own |
+| rib ends | each rib's end meets the metal ahead of it, or stops at least the root gap short - no finger of sand between | reject |
 | blend bridging | fillet filling a gap to a surface the rib does not touch | warn |
 | blend clipped | a fillet cut short by a protected area | warn |
-| mould release | draft within the window, and nothing of the part above a rib's tip along the pull | reject |
+| mould release | draft within what its block allows - the platform's window where it says nothing - and nothing of the part above a rib's tip along the pull | reject |
 | thick spots | a junction section more than the ratio × the wall beside it | warn |
 | surface | closed and oriented, every edge in exactly two triangles | reject |
 
 **The achieved fillet is read off the surface.** On a fillet the two distances satisfy
 `(k − a)² + (k − b)² = k²`, so every contoured vertex on one says the radius it was built to:
-`k = a + b + √(2ab)`, `R = k / (1 − n_a · n_b)`. The median per rib, and the smallest of those, is
-what is reported - grid error and all.
+`k = a + b + √(2ab)`, `R = k / (1 − n_a · n_b)`, `a` measured to the part's surface where the design
+leaves it - a face it moved, where it moved it to. The median per rib, against the radius its block
+asked for, and the rib furthest from its own is what is reported - grid error and all; a pad's edge
+against its wall is no rib's root.
 
-Thresholds come from the spec. The part's own rules - rib section, root fillet, edge round, fillet
-floor - have no default; general rules of thumb (rib-to-wall 0.8, root gap 2×, thick spot 2×, draft
-0-2°) apply until replaced and are marked *assumed* wherever they are shown.
+**A part is cast in one material, which its designs do not change.** What they add, move and cut is
+theirs to vary; the alloy of the whole part is not. A study says which material the part is - or it
+is assumed until someone says, and marked so - and a block letting it vary over several is refused.
+
+**What a rib keeps clear of is held as it is, as far as the clearance kept from it**: cells within
+that distance of the feature come out exactly as the part had them, and a rib or fillet that would
+reach into them is cut back, and said so. Each feature is held by its own clearance - a face a rib
+must only not cross is not held at all, and a rib may meet it.
+
+Thresholds come from the study. **Each rib is held to its own block**: the thickness and draft its
+block's design space allows, and the root fillet it was made with - never one block's value for
+every rib, nor a window its own design space goes past. The part's own rules - rib section, root
+fillet, edge round, fillet floor - have no default; general rules of thumb (rib-to-wall 0.8, root
+gap 2×, thick spot 2×, draft 0-2° where a block says nothing, a hole's ligament one plate thickness,
+a wall no thinner than 8 mm) apply until replaced and are marked *assumed* wherever they are
+shown. They are data, not code: `knowledge/materials.json`
+holds each with its source, beside the catalogue of casting materials - grey and ductile irons, cast
+steel, cast aluminium - each with its density, stiffness, strength and least wall, from its
+standard.
 
 ## Looking at a field
 
 A field can be looked at directly; a contour is a reconstruction of it and can be wrong in ways the
-field is not. The Field tab draws three switchable layers - the **field cells** as stored, the
-**contour** fitted through them, and the **geometry** they were built from - because two of them
-occupy the same space and the only way to tell which is which is to turn one off.
+field is not. A built design's field is drawn in switchable layers - the **part** as its CAD
+describes it, the **surfaces the design changes**, contoured, and its **new metal as cells** as
+stored - because they occupy the same space and the only way to tell which is which is to turn one
+off.
 
 Surfaces travel **indexed and welded by normal**, normals as three signed bytes. Cells travel as one
 integer per visible face - only boundary cells, only the faces that show - which is forty times
@@ -192,5 +364,5 @@ smaller than the contour for the same picture, so cells are the default view.
 
 For each design: a closed, oriented surface with every triangle tagged by the baseline CAD face
 nearest it, so loads and supports can be placed; the field on the design grid, for a solve that
-immerses the part rather than meshing it; and the spec version, lever values, digests and verdict.
-How the part is then meshed or immersed is Simulate's decision.
+immerses the part rather than meshing it; its material; and the study version, values, digests and
+verdict. How the part is then meshed or immersed is Simulate's decision.

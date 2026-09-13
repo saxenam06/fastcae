@@ -27,7 +27,7 @@ engineer's part.
    fillets - and what the drawing controls.
 2. **Say what you want**, in words, clicks on the part, or both: *"ribs between the bearing boss and
    the outer wall, clear of the holes, no taller than the boss"*. A model writes it into the draft
-   of the **study**, in the part's named entities, shown on the study card; it asks only what blocks
+   of the **study**, in the part's named entities, shown on Design a variant; it asks only what blocks
    every design, and the engineer accepts what it wrote.
 3. **Screen.** Proposers lay out candidate designs across what the study leaves free; each is
    placed and checked against the rules in seconds.
@@ -149,8 +149,9 @@ refer to them.
 
 Cheapest first:
 
-1. **Screening**, seconds a design: placement, and every check that needs no geometry - the
-   engineer's rules, thickness, gaps between ribs, the draft part of mould release.
+1. **Screening**, a fraction of a second a design: placement, and every check that needs no
+   geometry - the engineer's rules, every block making something, ribs against the floor under
+   them, gaps between ribs, holes against ribs, walls thinned no further than they may be.
 2. **Building**, minutes a design: the part and its ribs as a distance field, a closed surface, and
    the checks on geometry - fillets achieved, thick spots, nothing floating, protected areas
    unchanged.
@@ -234,7 +235,7 @@ skill composing the same tools, or a new general tool if a job is missing. A dec
 settle - whether anything lies under the space between two things - belongs in a tool that
 computes it, not in a skill that tells the model how to guess it.
 
-What the agent changes shows on the study card, marked, for the engineer to accept or undo. Its own
+What the agent changes shows on Design a variant, marked, for the engineer to accept or undo. Its own
 words are the few lines it asks the engineer to look at - a question that blocks, an assumption
 that matters, a rule nothing enforces yet - never what the card already shows; they stand until it
 gives them again or clears them, and every edit shows them back to it to check they still hold. It
@@ -310,11 +311,24 @@ them must build, mesh and solve, so what keeps a design robust is a hard rule, n
   written from it is right and every design it yields follows every rule. The suite runs on every
   change; nothing is fixed for one case.
 
-## The study card
+## Design a variant
 
-The study card is the one structured view of the study: the draft of its next version, read back
-from the study when the project opens. It is written from the engineer's words by the agent; the
-engineer accepts it or undoes it.
+Design a variant - the variant card, on the CAD tab where the faces it names are - is the one
+structured view of the study: the draft of its next version, read back from the study when the
+project opens. **The engineer builds it by hand**; the agent, from their words in the bar above
+every tab, changes the same draft. The engineer accepts it or undoes it, and makes one variant of it
+at a time to look at; thousands at once are a campaign, on Generate.
+
+**By hand**: faces selected on the part become a block - ribs standing on them, webs between them
+with nothing under them, faces to thicken, a plate to cut holes in - or the material, from nothing.
+What a block stands on and ends on is taken from the selection, or ends are read off the part again.
+Every setting is fixed, ranged with a step, narrowed to some of its choices, or handed back to the
+part, where it shows. A block keeps a clearance from what is selected, or from another block's ribs
+or holes. A rule the part suggested is kept as the engineer's, or taken out; a block is taken out.
+Each is the engineer's own: what was done is said in words - *"By hand: b1 thickness from 15 to
+25"* - and kept among the study's words, the faces selected with it, so every entry cites what it
+rests on whichever way it came in. Until a face is selected, the card says that ribs, webs,
+thickening and holes come from faces, and the material from nothing.
 
 **Each block is its entities.** What its ribs **stand on** - a floor, as faces or features in one
 plane, or nothing, for webs that hang between what they join. What they **end on** - named, or read
@@ -334,8 +348,8 @@ Then the block's **settings** - pattern, what spokes turn about, angle, how many
 draft, height, section - each fixed, or what it may vary over and who suggested that; and its
 **rules**, each hard, assumed or learned, and whether anything enforces it yet. What a block still
 needs from the engineer, and what cannot be built yet, stays on it. After the blocks: rules for every
-block, what makes a design better, the pull direction, how many designs, and the part's interfaces,
-closed by the platform.
+block, what makes a design better, the pull direction, and the part's interfaces, closed by the
+platform; then what the study rests on - every word said, every version - folded.
 
 **What the draft changes is marked**; **Accept** writes it as the next version, checked as any
 version is, and **Undo** reads it back as the study has it. Nothing is written until then. A design
@@ -349,10 +363,26 @@ something not named (which it names), ending on one thing at both ends, too clos
 spokes, too short, or no room for its height. The words count lines, pieces and what each piece
 became, so the numbers add up.
 
-**Go** makes many designs at once: the draft accepted if it differs, then points spread over what
-every block leaves free - the suggested point first - each placed on the part and counted in
-seconds, listed as it is done; designs whose ribs all fall in the same places are made once. A click
-draws one on the part; Make builds it and checks it.
+**Preview and Full** make the study's suggested variant - the draft accepted first if it differs -
+and check it, the surfaces it changes drawn over the part.
+
+## A campaign
+
+A **campaign**, on Generate, makes as many designs as asked - thousands - the draft accepted if it
+differs: each block's settings tried alone first, then together, every design placed and screened,
+alike designs kept once, every one kept beside the project. Its tab lays out everything it runs -
+each block, where, what its settings may take; each rule and whose it is; the part's interfaces;
+the screening checks and the rules of thumb and materials behind them, with their sources; how ribs,
+pads and holes are placed; how designs are spread; the stages a design goes through - and any block,
+rule or check can be switched off there for this campaign alone, without touching the study. It
+counts designs as they come - how many of each block's points make something, how many designs are
+kept of how many tried, what screened the rest out, from what mass to what.
+
+**Designs** lists what a run kept: the ones that differ most, those built, or all, a page at a time,
+each with its stages - P its paths, F its field, M, S and R its mesh, setup and results - filled as
+each is done, in the colour of how it came out. A design's paths are drawn on the part - ribs, pads
+and holes each in their colour; Build field builds it from the version its run was made from,
+checks it and keeps it, so its field can be looked at again without building it twice.
 
 ## What is read off the part for ribs on a floor
 
@@ -369,6 +399,8 @@ they gave - or a default that says it is one:
 | how many | 4 to 16 ribs, or 5 to 16 thicknesses apart |
 | how tall | each end as tall as what it meets, the top sloping between; half to all of that |
 | thickness | 0.6 to 1.0 of the plate they stand on, measured through it |
+| thickness against the wall | no thicker than 0.8 of the wall they meet, assumed - a rule the engineer may take out |
+| pads | on: a wall too thin for a rib is thickened round its end, and a floor too thin for its ribs under them, rather than the rib left out |
 | root fillet, edge round | from the smallest radius the part allows up to half the thickness |
 | draft | half a degree to three |
 | section | flat, unless the words ask for a T; a T's flange 2 to 4 times the web wide |
@@ -392,38 +424,51 @@ rest is read off what they join:
 | root fillet, edge round, draft | as for ribs on a floor |
 
 Each web runs from one of them to another - never from one to itself - and is buried in both. Spokes
-may meet at their roots, but one that would run into another past them is left out.
+may meet at their roots, but past them each leaves twice its thickness clear of the next - room for
+the mould between them - or is left out. So is a rib that would pass one of an earlier block that
+close.
 
 ## Beyond ribs
 
 The recipe that makes ribs makes other variations: a kind of block - where it goes, what may vary,
 its rules - a way to build it on the distance field, its checks, and what is read off the part for
-it. The kinds after ribs:
+it. Ribs, faces moved, holes and the material are built; the rest are to come:
 
 | kind | where | what varies | built as | checked for |
 |---|---|---|---|---|
-| wall offset | a panel of faces | how far it moves along its normal, how it blends into what is round it | the selection's weight in the field, times the offset | the wall left thick enough; protected faces unchanged |
+| **thicken** (built) | faces - a wall, a plate, a boss | how far they move along their normal, from a few mm thinner to 10 mm thicker unless the engineer says; the blend | the faces' weight in the field, times the offset, exactly in a window round them | the wall left at least its least - the block's, or the material's |
+| **holes** (built) | a plate | square or staggered lattice; diameter, one to four plate thicknesses; pitch; angle, from the plate's longest direction; edge distance | capped cylinders cut away, through the plate and no further | a ligament of metal - one plate thickness - between holes, from edges, ribs, holes the plate has, and nothing standing under the plate |
+| **material** (built) | the part | none: the one the part is cast in, chosen from the catalogue - a part's material is not varied | not geometry: every design's mass and least wall | its least wall |
 | bulge or crown | a panel | how high, where, how wide | the same weight, times a smooth bump | draft; clearance envelopes kept |
 | boss transition | a boss and the floor it rises from | the transition radius, the boss's wall | a local growth and fillet at its foot | the bore unchanged; thick spots |
-| hole pattern | a plate or web | count, diameter, spacing, edge distance | cylinders cut away | ligaments wide enough; clear of ribs and bolts |
 | existing rib | a rib the part already has | its height and thickness, scaled | its region offset | as for ribs |
-| material | the study | a choice among those permitted | not geometry: a property of every design | castability; allowables |
 
-Blocks are built in one order - what changes the shape (offsets, bulges, transitions), then what
-adds to it (ribs, webs), then what cuts it (holes), then fillets - and rules run across kinds: holes
-keep clear of ribs, ribs are sized from the wall as offset. A customer's own part, ribs and all, is
-a baseline to vary like any other - never a reference to match.
+What is read off the part for each: for faces to thicken, the metal under them, so thinning never
+goes below the least a wall may be; for holes, the plate's thickness, its longest direction, and the
+holes it has already, kept a ligament clear.
+
+Blocks are built in one order - what changes the shape (faces moved), then what adds to it (ribs,
+webs and their pads), then what cuts it (holes) - and rules run across kinds: holes keep a ligament
+clear of every block's ribs unless the engineer has those ribs keep clear of the holes instead; a
+rib meets a wall as the design moves it, and a thin wall is padded, or thickened by a block of the
+study; a floor is thickened for ribs too thick for it; a wall is never thinned below what its
+material allows. A face the part keeps closed - a bore - cannot be moved; faces round it can. A
+customer's own part, ribs and all, is a baseline to vary like any other - never a reference to
+match.
 
 **Three generations of variation.** Same-shape changes to what the part already has - offsets,
 bulges, transitions, existing ribs - are the most often valid, and come first. Features from
 templates - ribs, webs, holes - change the part's topology within rules. Free exploration on the
 field changes it further, and a design found there is rebuilt as features only when it is worth it.
 
-**How variants are made.** The study holds every block. Go samples them together - continuous
-settings spread evenly, choices balanced - checks each design cheapest first, makes alike designs
-once, keeps the most spread out, and records every margin, so a proposed rule shows its kill count
-before it is confirmed. A chosen few are then meshed and solved, a surrogate learns from them, the
-search runs on the surrogate, and the best are solved for real before anyone calls them good.
+**How variants are made.** The study holds every block. A campaign tries each block's settings alone - so a
+block whose settings mostly make nothing says so, and only settings that work are combined - then
+samples them together, continuous settings spread evenly and choices balanced, screens each design
+cheapest first, and keeps alike designs once. To come: keeping the most spread out, every margin
+recorded so a proposed rule shows its kill count before it is confirmed, and a solver that repairs a
+combination - leaving out the one rib or hole in the way - instead of discarding it. A chosen few
+are then meshed and solved, a surrogate learns from them, the search runs on the surrogate, and the
+best are solved for real before anyone calls them good.
 
 ## Reading the part
 

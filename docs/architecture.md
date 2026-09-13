@@ -85,12 +85,17 @@ provenance.py  Evidence, Fact, Conflict. How anything is known.
 study.py       the study: what the engineer wants, as a design space in the part's named
                entities - blocks, constraints with strength and source, preferences, objectives,
                the pull, the target - versioned. Generation reads nothing else.
-generate/      the part as a distance field; the part read for ribs - what stands where, what
-               rises round a floor; a block of the study filled round what the words gave; the
-               study's draft; ribs placed and composed into the field; the checks.
-spec.py        the spec, the study's first form; the words and fingerprints both share.
+knowledge/     design knowledge as data, each with its source: the rules designs are screened
+               with, and the catalogue of casting materials.
+generate/      the part as a distance field; the part read for each kind of block - what stands
+               where, what rises round a floor, the metal under a face, a plate's thickness; a
+               block of the study filled round what was given; the study's draft, changed by hand
+               or by the agent; ribs, pads and holes placed; faces moved, ribs composed and holes
+               cut in the field; designs screened, made by the thousand, and checked.
+spec.py        a design's pieces - placements of ribs, faces moved, holes, the material - and the
+               words and fingerprints the study shares.
 agent/         a model with a few general tools over the engine, and skills on composing them:
-               it reads the part and writes the study.
+               it reads the part and writes the same draft the card does.
 cli.py         batches of designs, run without the interface.
 api/app.py     HTTP surface. Routes contain no logic.
 ```
@@ -99,7 +104,9 @@ api/app.py     HTTP surface. Routes contain no logic.
 decisions - which CAD designs grow from, which study is active, which protected areas a person
 approved. The system proposes each one; nothing in it is written except through an approval.
 Studies live beside it in `studies/`, one file each with every version, written only when the
-engineer accepts the draft on the study card.
+engineer accepts the draft on Design a variant. What campaigns make is output, not a decision, and
+lives outside the project in `_archived_designs/<project>/<run>/` beside `assets/`: every design a
+run kept, the study version and switches it used, its summary, and each design built so far.
 
 ## Nothing derived is computed twice
 
@@ -158,44 +165,62 @@ do.
 
 ## The interface
 
-Six stages, always shown. `available` gates interaction, never display.
+**Five tabs, in the order the work happens**, in the bar at the top: **Drawing**, **CAD**,
+**Generate**, **Learn**, **Optimize**. Every one is shown whether or not it is built yet - a shell
+that hides its unbuilt stages describes a tool, one that shows them describes a product - and each
+names its *subject*: the rail on the left holds that subject's detail, the stage in the middle the
+subject itself, and the pane on the right what is done to it.
 
-**Three tabs on the stage, one per thing there is to look at.** Drawing, Geometry and Field name
-the *subject*, and the left rail holds that subject's own detail:
-
-| tab | rail | stage |
-|---|---|---|
-| **Drawing** | callout kinds, and the steps that read them, warnings included | every callout beside the literal text it was parsed from |
-| **Geometry** | what the CAD yielded, its steps, axes, feature kinds | the tessellated surface, pickable |
-| **Field** | layers, the field's own statistics, the contour's | the field, its contour and the CAD, as switchable layers |
-| **Generate** | what the engineer says to the agent; the words and versions the study rests on | the design's new surfaces over the part, and where the study would put ribs |
+| tab | rail | stage | right |
+|---|---|---|---|
+| **Drawing** | callout kinds, and the steps that read them, warnings included | every callout beside the literal text it was parsed from | - |
+| **CAD** | what the CAD yielded, its steps, axes, feature kinds; the selection | the part, pickable; where the study would put ribs; a variant's new surfaces | **Design a variant** |
+| **Generate · Campaign** | the runs kept | the pipeline in the open, every part of it switchable | launching, and the campaign as it runs |
+| **Generate · Designs** | a run's designs, each with its stages | the design at a stage - its paths, its field; mesh, setup, results - or the plans of those that differ most | the design: what it is made of, how it screened, its verdict; Build field |
+| **Learn**, **Optimize** | - | what each will do, and what it waits for | - |
 
 The pipeline report has no tab of its own because it does not need one: every step belongs to an
-artifact, so it appears in that artifact's rail. Putting the tabs in the rail instead lets a tab and
-its detail disagree about the subject.
+artifact, so it appears in that artifact's rail.
 
-**Layers rather than one picture.** Where two things occupy the same space - the field's cells and
-the surface fitted through them and the B-rep both were built from - each is a layer with a colour
-that can be switched off. That is the only honest way to answer "which of these am I looking at",
-and it is what keeps a reconstruction from being mistaken for the thing it reconstructs.
+**The agent is above the tabs.** One conversation, whichever tab is open: a line to say something
+in - the faces selected go with it - and a drawer under it with what was said, what the agent is
+doing and its answer, folded away at a click. What it writes lands on Design a variant, marked, and
+says where that is when the card is not in view.
 
-**Switching a layer off does not throw it away.** Whether something is visible and whether it is
-loaded are separate: uploading a surface to the GPU takes about as long as downloading it, so
-tearing one down to hide it makes a checkbox cost what a fetch costs, in both directions. Layers are
-uploaded once and drawn conditionally.
+**Design a variant is the design space, by hand.** The one structured view of the study - the
+draft of its next version - on the CAD tab, where the faces it names are. Each block says what its
+ribs stand on, end on and keep clear of - the part's named entities, or another block's ribs - then
+its settings and rules; what the draft changes is marked, and nothing is written until the engineer
+accepts it. It makes one variant at a time, at preview or in full, with its verdict; many at once
+are a campaign.
 
-**Two columns, both movable.** The left column carries the current tab's detail and, under it,
-whatever is selected - a selection belongs beside the features it was made from, and it applies to
-two tabs of the three, so a pane that sits empty on the third is a pane in the wrong place. The
-right column is the **study card**, open by default and closed from its mark in the bar to get the
-width back: the one structured view of the study, whichever tab is showing. Each block says what
-its ribs stand on, end on and keep clear of - the part's named entities, or another block's ribs -
-then its settings and rules; what the draft changes is marked, and nothing is written until the
-engineer accepts it. Go lists many designs there, each drawn on the part at a click.
+**A campaign shows everything it runs.** What varies - each block, where, what its settings may
+take; what must hold - each block's rules, the study's, the part's interfaces; the screening checks
+every design passes before it is kept, the rules of thumb they rest on and their sources, the
+materials; how ribs, pads and holes are placed; how designs are spread; the stages each design goes
+through and what a built design is checked for. Any block, rule or check can be switched off for one
+campaign without touching the study: the run keeps the version and the switches beside its designs,
+and another set of switches - or another seed - is a run of its own. The interfaces stay closed
+whatever is switched off.
 
-**Nothing is said twice.** The study card shows what the study holds; the rail shows only what it
-does not - the conversation, and the words the study rests on. When the agent writes the study, its
-only words are the few lines it asks the engineer to look at.
+**A design's stages are letters.** P its paths placed and screened, F its field built and checked, M
+meshed, S the solver set up, R results - each filled once done, green, amber or red for how it came
+out. Thousands are listed by the few that differ most, by those built, or a page at a time; a built
+design's field is kept beside its run, so F stays done.
+
+**Layers rather than one picture.** Where two things occupy the same space - the part and a design's
+new surfaces, or those surfaces and the design's new metal as cells - each is a layer with a colour
+that can be switched off. That is the only honest way to answer "which of these am I looking at".
+
+**Switching a layer off does not throw it away**, and nor does changing tab: the part is loaded into
+the 3D view once and kept while any tab that shows it is open, and a page over it - the campaign,
+the plans - leaves it where it was. Uploading a surface takes about as long as downloading it.
+
+**Columns that move and fold.** The left and right columns are dragged to width, and the right one
+folds to a strip at the edge with its name on it, a click from open again.
+
+**Nothing is said twice.** The card shows what the study holds; the agent's answer only the few
+lines it asks the engineer to look at.
 
 **The agent composes a few general tools.** It finds entities, describes them, relates them to the
 part - what one stands on, what rises round a floor, what shares an axis, what lies across the open
@@ -203,11 +228,12 @@ space in front of it, what lies between several - measures them, searches the dr
 and edits the study. How to compose them for a kind of request is in skills: short recipes it reads
 when needed, holding no ids, numbers or example sentences. No tool is made for one kind of request.
 It knows what those tools answer, and nothing more: the part's regions carry no roles yet, and
-design knowledge is constants in code rather than data it can read - what it lacks is in
-[ribs.md](ribs.md).
+design knowledge is data only for the rules and materials designs are screened with - what it lacks
+is in [ribs.md](ribs.md). Design a variant writes the same draft by hand; the agent is the second
+way in.
 
-**Every face can be named.** Hovering a face on any 3D tab shows its one name, `face:N`, and what it
-is, so an engineer can refer to it - on the card, in words or as a chip.
+**Every face can be named.** Hovering a face in the 3D view shows its one name, `face:N`, and what
+it is, so an engineer can refer to it - on the card, in words or as a chip.
 
 The card vocabulary is the test of whether the model is general — each card renders one *kind of
 thing the platform knows about*, never one kind of part:

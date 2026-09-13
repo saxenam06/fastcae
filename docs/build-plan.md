@@ -13,9 +13,10 @@ follow their rules, with solver decks. A surrogate trained on them finds groups 
 well on several objectives at once - each a real, castable design - and shows which choices matter
 for the next design.
 
-The engineer brings a plain STEP file and its drawing, says what they want in words and clicks, and
-reviews about 20 designs a round. The 4,000 behind them are the surrogate's training set, which
-nobody browses.
+The engineer brings a plain STEP file and its drawing, builds the study on Design a variant by
+hand - or says what they want in words, and the agent writes the same draft - launches a campaign,
+and reviews about 20 designs a round, the ones that differ most. The 4,000 behind them are the
+surrogate's training set, each followed through its stages, which nobody browses one by one.
 
 ## What is agreed
 
@@ -50,9 +51,11 @@ nobody browses.
    to three readings, each with its kill count; the engineer confirms one. Learned rules belong to
    the study; making one a rule for a family of parts is a deliberate act. Designs rejected for taste
    stay in the physics set.
-10. **The model** writes the study from words, grounds names, asks only what blocks every design,
-    explains why a request is impossible, and turns objections into readings. It never makes
-    geometry and is never called once per design. Its tools are study-level.
+10. **Design a variant writes the study by hand**: blocks from the faces selected, their entities,
+    settings and rules, each the engineer's own and said in words in the study. **The model** writes
+    the same draft from words, grounds names, asks only what blocks every design, explains why a
+    request is impossible, and turns objections into readings - where words are worth more than a
+    form. It never makes geometry and is never called once per design. Its tools are study-level.
 11. **No code is written for one part or one request.** What the study cannot express is added to
     the library as a general piece - a rule kind, a proposer, a feature kind, a query - and every old
     study must reproduce its designs exactly afterwards.
@@ -117,7 +120,7 @@ design knowledge as cited data - is described in [ribs.md](ribs.md) and not buil
 Each step names what is built and what shows it done. Every step keeps all tests passing and every
 earlier study reproducing its designs.
 
-**1. The study** - the document, and the study card as its one structured view.
+**1. The study** - the document, and Design a variant as its one structured view.
 - The study: entities by fingerprint, blocks (what to add, where, span), the pull direction, free
   ranges with steps and sources, constraints with strength and source, preferences, objectives, the
   target (how many, spread how, how different, the seed). Written only through one function that
@@ -130,11 +133,11 @@ earlier study reproducing its designs.
 - A block is read off the part round what the words gave - on a floor, or webs between what it
   joins with nothing under them: its settings ranged round a suggested point, the rules the part
   suggests for it marked as the part's, and what the words said always winning.
-- The study card is the draft of the study's next version, read back from the study when the
-  project opens: block by block, what its ribs stand on, end on and keep clear of - any entity, each
-  a chip - then its settings and rules, each with what the study makes of it; what the draft
-  changes marked, Accept and Undo. The agent changes the study only through the draft, and says
-  only what needs the engineer's attention.
+- Design a variant, on the CAD tab, is the draft of the study's next version, read back from the
+  study when the project opens: block by block, what its ribs stand on, end on and keep clear of -
+  any entity, each a chip - then its settings and rules, each with what the study makes of it; what
+  the draft changes marked, Accept and Undo. The agent, above every tab, changes the study only
+  through the draft, and says only what needs the engineer's attention.
 - Preview and Full make the design at the study's suggested point, accepting the draft first.
 - *Done when* a request on the housing writes a study, the study reads back the same draft, and
   every refusal and open item is tested.
@@ -148,10 +151,15 @@ earlier study reproducing its designs.
   candidate names its rule.
 
 **3. Choosing, sizing, screening, the archive**
-- CP-SAT over the candidates with the combination rules as constraints and the assumed ones as
-  switches; random objectives; spread over which entities are tied; each design differing from the
-  last by at least *d* ribs. Sobol sizes. Screening. The archive: every design with its margin
-  against every constraint, keyed by study version and seed.
+- Built: Sobol over every block's free settings - each block alone first, then which of each block's
+  workable points to combine; screening in a fraction of a second a design; alike designs kept once;
+  the archive of every design kept, in `designs/`, with what it is made of, how it screened and what
+  it weighs, keyed by study version.
+- To build: CP-SAT over the candidates with the combination rules as constraints and the assumed
+  ones as switches - choosing the ribs of a design so every rule about sets of ribs holds, and
+  repairing a combination by leaving out the one rib or hole in the way rather than discarding it;
+  random objectives; spread over which entities are tied; each design differing from the last by at
+  least *d* ribs; every margin against every constraint kept, for kill counts.
 - *Done when* one study gives 40,000 screened candidates in minutes, the same version and seed give
   the same archive bit for bit, and an impossible request names the assumed rules to blame.
 
@@ -179,21 +187,23 @@ earlier study reproducing its designs.
 - *Done when* it gives 20 valid representatives, and the time from files to designs is known.
 
 **8. Speed**
-- Build and check fast enough for 4,000 designs overnight on one workstation: windows reused,
-  cheaper checks, every core.
+- Placing and screening are fast enough: 4,000 designs of a ten-block study in about a quarter of an
+  hour on one core. Building and checking each is still a minute or more: to go overnight on one
+  workstation, windows reused, cheaper checks, every core.
 
 **9. Simulate and Learn**
 - Decks for every design; Code_Aster with the repeatability gate; analysis on the distance field;
   the surrogate; MAP-Elites; real solves before a design is called good.
 
 **10. The next kinds of feature**
-- Same-shape changes to what the part already has, first: wall offsets along the normal, bulges and
-  crowns, bearing-boss transitions, ribs the part already has varied in height and thickness. Then
-  hole patterns, and their combinations with ribs; pockets; material as a choice of the study among
-  those permitted. Each through the same recipe: a kind of block, a way to build it on the field,
-  its checks, what is read off the part for it - in [ribs.md](ribs.md), *Beyond ribs*.
-- *Done when* one study varies several kinds at once, built in their order - shape changes, then
-  additions, then cuts - with rules across kinds, and Go spreads designs over all of them.
+- Built: faces moved along their normal - walls, plates, bosses thicker or thinner; hole patterns
+  through plates, clear of ribs; the material the part is cast in, one, never varied; pads where
+  a rib meets a wall too thin for it, and floors thickened for ribs too thick for them. One study
+  varies them all at once, built in their order - shape changes, then additions, then cuts - with
+  rules across kinds, and a campaign spreads designs over all of them.
+- To come: bulges and crowns, bearing-boss transitions, ribs the part already has varied in height
+  and thickness, pockets. Each through the same recipe: a kind of block, a way to build it on the
+  field, its checks, what is read off the part for it - in [ribs.md](ribs.md), *Beyond ribs*.
 
 ## Always
 
@@ -207,24 +217,28 @@ earlier study reproducing its designs.
 - **A second housing** with a drawing, allowed to be used - from the engineer, or a public model
   with a clear licence.
 - **The requirement suite**, to vet once drafted, and the client's own requirements.
-- **A density** for added mass in kg: the drawing names the material only as the existing housing.
+- **Which material the housing is cast in**: one, never varied - assumed the ductile iron
+  wind-turbine housings are cast in by default, EN-GJS-400-18-LT; the drawing names the material
+  only as the existing housing's.
 - **The client's solver deck**, when there is one.
 - **Employment and IP terms** to check before any commercial step with driveline suppliers - for a
   lawyer.
 
+**Decided:** the study is built by hand on the card; the agent is kept, writing the same draft from
+words, and will be moved to what no form reaches - documents, briefs, objections, explanation over
+many designs - judged on a fixed set of such requests by how often it gives the right study, how
+alike repeated runs are, and its time and cost against an engineer doing the same by hand.
+
 **Proposed, not yet decided:**
 
-1. **Where the agent sits.** The card writes the study directly too - a region selected, a kind of
-   block added, its settings set - and the agent becomes the way in for what no form reaches:
-   documents, briefs, objections, explanation over many designs. It is judged on a fixed set of such
-   requests, each with the study it should give, by how often it gives it, how alike repeated runs
-   are, and its time and cost against an engineer doing the same by hand - not on five sentences
-   that name faces by id.
-2. **What comes next: the model of the part's regions and what they are for.** Computed from the
+1. **What comes next: the model of the part's regions and what they are for.** Computed from the
    geometry and the drawing, proposed by the model where it cannot be computed, approved by the
-   engineer; the names the card, the agent and the simulation's result regions share.
-3. **The baseline.** Keep adding ribs to a part without them, and vary any part as it is - a
+   engineer; the names the card, the agent and the simulation's result regions share. A first
+   piece of it: where a kind of block fits at a given size - which floors take 15 to 25 mm ribs -
+   asked of the part, not found by trying.
+2. **The baseline.** Keep adding ribs to a part without them, and vary any part as it is - a
    customer's own ribbed part among them, as the thing to vary, never as a reference.
-4. **The order after that.** The same-shape kinds of step 10 - wall offset, bulge, boss transition -
-   then a thin slice of step 9 - mesh, static and modal - on some twenty designs Go placed, so the
-   loop closes on real numbers; then hole patterns and materials.
+3. **The order after that.** CP-SAT choosing and repairing combinations; then a thin slice of step
+   9 - mesh, static and modal - on some twenty designs a campaign kept, so the loop closes on real
+   numbers, each design's M, S and R filled in;
+   then bulges, boss transitions and existing ribs.
