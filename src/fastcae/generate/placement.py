@@ -28,24 +28,48 @@ of it is present. The paths are drawn on the plane square to it there, across th
 between them: where the part is not, in the pieces of open space that reach two or more of them.
 Each web runs from one of them to another, never from one to itself, and is carried into both as
 any rib is.
+
+**A rib is no thicker than the wall it meets allows.** Where a rib ends on a wall, the wall is
+measured square through it, where the rib meets it - with whatever a design moves its faces by. A
+wall thinner than the rib may meet is thickened round the rib's end by a pad, when the placement
+allows pads - never to more than twice what it was - or the rib is not placed.
+
+**Holes go through a plate on a lattice**, square or staggered, each a whole ligament of metal from
+the next, from the plate's edges, from what they keep clear of, and from the ribs of blocks placed
+before them - in three dimensions: a rib under the plate is as much in the way as one on it. A hole
+over something standing under the plate, where it would cut into more than the plate, is not
+placed.
+
+**What a block reads off the part is read once.** Where a block's ribs stand, what they keep clear
+of and what they end on do not change from one design to the next; a ``memo`` kept by the caller
+holds them, so many designs of one study each pay only for their own paths.
 """
 
 from __future__ import annotations
 
+import copy
+import json
 import math
+from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 
+from .. import knowledge
 from ..features import Feature, FeatureKind, FeatureSet, extent
 from ..geometry.atlas import Atlas
 from ..geometry.brep import Tessellation
-from ..spec import Placement
+from ..spec import HoleSet, Placement
 from .field import Field
+from .holes import Hole
 from .ribs import Rib
 
 # How far past the end of a stretch of path the walk looks for what the rib would meet, as a
-# multiple of the root fillet: a wall stands where the fillet at its foot ends.
+# multiple of the root fillet: a wall stands where the fillet at its foot ends. And never less than
+# room for the sand between metal - the root gap - so a rib ends on what is that near, or clear of
+# it.
 LOOK_PAST = 3.0
 
 # A stretch shorter than this many rib thicknesses is a stub, not a rib.
@@ -54,6 +78,14 @@ SHORTEST = 2.0
 # How deep a rib's end may go into what it meets, as a multiple of how deep it is buried at least:
 # far enough to stay inside a wall with draft to the wall's top.
 DEEPEST = 10.0
+
+# The most a pad may thicken a wall, as a multiple of the wall: past that the rib is too thick for
+# it, and a lump that size is a hot spot in the casting.
+PAD_MOST = 1.0
+
+# A hole is over plain plate when the metal under its rim runs no deeper than this much of the
+# metal under its middle - and a grid cell more.
+UNDER_PLATE = 1.3
 
 
 @dataclass(frozen=True)
@@ -93,6 +125,15 @@ class Placed:
     ended_on: dict[str, int] = field(default_factory=dict)
     """What pieces that ended on something not named to run between ended on, by feature - what
     could be named to make ribs of them."""
+    pads: list[Rib] = field(default_factory=list)
+    """Walls thickened round the ends of ribs that met them thinner than they may be."""
+    raised_mm: float = 0.0
+    """How much the floor the ribs stand on is thickened, for ribs too thick for it as it is."""
+    raised_faces: tuple[int, ...] = ()
+
+    def made(self) -> list[Rib]:
+        """The metal it adds: its ribs and their pads - what a later block keeps clear of."""
+        return [*self.ribs, *self.pads]
 
     def tally(self) -> str:
         """What became of every path, in counts that add up. Keep-outs and gaps cut a path into
@@ -121,6 +162,10 @@ class Placed:
                 said += f" ({', '.join(named[:3])}{more})"
             became.append(said)
         words += ": " + ", ".join(became)
+        if self.pads:
+            words += f" ({_many(len(self.pads), 'wall')} padded)"
+        if self.raised_mm:
+            words += f" (the floor thickened by {self.raised_mm:g} mm for them)"
         if missed:
             miss = "line misses" if missed == 1 else "lines miss"
             words += f"; {missed} more {miss} where ribs stand"
@@ -136,11 +181,88 @@ NOT_PLACED = {
     "no_height": "with no room for a rib's height",
     "one_thing": "ending on one thing at both ends",
     "crowded": "too close to another of its spokes",
+    "thin_wall": "ending on a wall too thin for it",
+}
+
+
+@dataclass
+class Drilled:
+    """The holes a set of holes made, and what became of every place the lattice offered."""
+
+    holes: list[Hole]
+    diameter_mm: float = 0.0
+    pitch_mm: float = 0.0
+    plate_mm: float | None = None
+    offered: int = 0
+    """How many points of the lattice fell on the plate. Each became a hole, or is counted in
+    ``dropped`` with why."""
+    dropped: dict[str, int] = field(default_factory=dict)
+    tried: list[dict] = field(default_factory=list)
+    """Each hole made, as a ring of short lines just off the plate - ``a``, ``b`` - to see before
+    anything is made."""
+    problems: list[str] = field(default_factory=list)
+    frame: HostFrame | None = None
+    """The plate's plane, and how far along its normal the holes run: from and to."""
+    band: tuple[float, float] = (0.0, 0.0)
+
+    def made(self) -> list[Hole]:
+        return list(self.holes)
+
+    def clear_of(self, ribs: list[Rib]) -> float | None:
+        """The least metal between a hole's edge and the side of any of ``ribs`` beside it - over
+        or under the plate, where the holes run. None when no rib is beside a hole."""
+        if self.frame is None or not self.holes:
+            return None
+        keeps = [_RibKeep.of(rib, self.frame, 0.0, far_side=True) for rib in ribs]
+        least = None
+        for hole in self.holes:
+            centre = self.frame.to_plane(np.asarray(hole.centre, dtype=float).reshape(1, 3))[0]
+            for keep in keeps:
+                if keep is None or keep.low > self.band[1] or keep.high < self.band[0]:
+                    continue
+                gap = keep.gap(centre, centre, hole.radius_mm)
+                least = gap if least is None else min(least, gap)
+        return least
+
+    def tally(self) -> str:
+        """What became of every point of the lattice, in counts that add up."""
+        if self.problems:
+            return self.problems[0]
+        if not self.offered:
+            return "the lattice lays no point on the plate"
+        size = f"Ø{self.diameter_mm:g} at {self.pitch_mm:g} mm pitch"
+        words = f"{_many(len(self.holes), 'hole')} {size}"
+        rest = sorted(self.dropped.items())
+        if rest:
+            words += " - " + ", ".join(f"{n} {NOT_DRILLED.get(why, why)}" for why, n in rest)
+        return words
+
+
+# Why a point of the lattice did not become a hole.
+NOT_DRILLED = {
+    "edge": "too near the plate's edge",
+    "keep_out": "on something to keep clear of",
+    "made": "on the ribs or holes of another block",
+    "under": "over something standing under the plate",
 }
 
 
 def _many(n: int, thing: str) -> str:
     return f"no {thing}s" if n == 0 else f"{n} {thing}" + ("" if n == 1 else "s")
+
+
+def _memo(memo: dict | None, key: tuple, make: Callable[[], Any]) -> Any:
+    """What ``make`` gives, kept in ``memo`` under ``key`` - once for every design that asks."""
+    if memo is None:
+        return make()
+    if key not in memo:
+        memo[key] = make()
+    return memo[key]
+
+
+def _base_key(base: Field) -> Any:
+    """What tells one part's field from another's, for the memo."""
+    return base.key or id(base)
 
 
 def place_all(
@@ -149,19 +271,254 @@ def place_all(
     atlas: Atlas,
     tess: Tessellation,
     placements: list[Placement],
-) -> dict[str, Placed]:
-    """Ribs for every placement, each placed after those whose ribs it keeps clear of - their
-    ribs its keep-outs. Returned in the order the placements were given."""
-    ids = {p.id for p in placements}
-    pending = list(placements)
-    done: dict[str, Placed] = {}
+    holes: list[HoleSet] | tuple = (),
+    *,
+    offsets: dict[int, float] | None = None,
+    finder: _Faces | None = None,
+    memo: dict | None = None,
+) -> dict[str, Placed | Drilled]:
+    """Ribs for every placement and holes for every set of holes, each placed after the blocks it
+    keeps clear of - their ribs and holes its keep-outs. ``offsets`` moves faces of the part, by
+    face, as the design moves them. Returned in the order given, ribs first."""
+    items: list[Placement | HoleSet] = [*placements, *holes]
+    ids = {item.id for item in items}
+    finder = finder or _Faces(tess)
+    offsets = dict(offsets or {})
+    pending = list(items)
+    done: dict[str, Placed | Drilled] = {}
+    # Where each rib stands in the open past its junctions - kept for every design placing it alike.
+    known: dict[tuple, list[np.ndarray]] = memo.setdefault("runs", {}) if memo is not None else {}
+    if len(known) > PLACED_KEPT * 16:
+        known.clear()
+    runs: dict[Rib, list[np.ndarray]] = {}
     while pending:
         ready = [p for p in pending if all(o in done or o not in ids for o in p.clear_of)]
         chosen = ready[0] if ready else pending[0]
         pending.remove(chosen)
-        avoid = [rib for other in chosen.clear_of if other in done for rib in done[other].ribs]
-        done[chosen.id] = place(base, features, atlas, tess, chosen, avoid)
-    return {p.id: done[p.id] for p in placements}
+        avoid = [made for other in chosen.clear_of if other in done for made in done[other].made()]
+        # A block placed alike before - the same block, clear of the same things, on faces the
+        # design moves alike where it looked - is what it was.
+        kept = _placed_memo(memo)
+        key = (type(chosen).__name__, chosen.model_dump_json(), tuple(avoid))
+        seen = kept.setdefault(key, [])
+        kept.move_to_end(key)
+        result = next(
+            (
+                earlier
+                for asked, moved, earlier in seen
+                if all(offsets.get(f, 0.0) == v for f, v in zip(asked, moved, strict=True))
+            ),
+            None,
+        )
+        if result is None:
+            watched = _Watched(offsets)
+            if isinstance(chosen, HoleSet):
+                result = drill(
+                    base, features, atlas, tess, chosen, avoid,
+                    finder=finder, offsets=watched, memo=memo,
+                )  # fmt: skip
+            else:
+                result = place(
+                    base, features, atlas, tess, chosen, avoid,
+                    finder=finder, offsets=watched, memo=memo,
+                )  # fmt: skip
+            asked = tuple(sorted(f for f in watched.asked if isinstance(f, int)))
+            seen.append((asked, tuple(offsets.get(f, 0.0) for f in asked), result))
+            del seen[:-PLACED_ALIKE]
+            while len(kept) > PLACED_KEPT:
+                kept.popitem(last=False)
+        if isinstance(result, Placed):
+            # Ribs of blocks placed before stand where they stand: a rib that would pass one closer
+            # than room for the mould between them is left out, whichever blocks they belong to.
+            assert isinstance(chosen, Placement)
+            junction = chosen.section.root_fillet_mm
+            earlier = [r for p in done.values() if isinstance(p, Placed) for r in p.ribs]
+            for rib in result.ribs:
+                trim = junction + rib.thickness_mm
+                if (rib, trim) not in known:
+                    known[(rib, trim)] = _exposed_runs(base, rib, trim)
+                runs[rib] = known[(rib, trim)]
+            result = _without(result, _crowding(result.ribs, earlier, runs), "crowded")
+            # A floor thickened for its ribs is thicker for every block placed after.
+            for face in result.raised_faces:
+                offsets[face] = offsets.get(face, 0.0) + result.raised_mm
+        done[chosen.id] = result
+    return {item.id: done[item.id] for item in items}
+
+
+def described() -> list[dict]:
+    """The rules ribs, pads and holes are placed to, in words - as the pipeline shows them."""
+    return [
+        {
+            "name": "what a rib ends on",
+            "value": LOOK_PAST,
+            "says": "a rib's end looks this many root fillets past its path for what it meets - "
+            "or as far as room for the sand needs, the root gap, when that is further - and ends "
+            "on it",
+        },
+        {
+            "name": "stubs",
+            "value": SHORTEST,
+            "says": "a stretch of path shorter than this many rib thicknesses is a stub, left out",
+        },
+        {
+            "name": "into what it meets",
+            "value": DEEPEST,
+            "says": "a rib's end goes into a wall at most this many times as deep as it must",
+        },
+        {
+            "name": "pads",
+            "value": PAD_MOST,
+            "says": "a wall too thin for a rib is thickened round its end by at most this many "
+            "times itself; past that the rib is left out as meeting a thin wall",
+        },
+        {
+            "name": "floors",
+            "value": None,
+            "says": "a floor too thin for the ribs standing on it is thickened for them, whole "
+            "millimetres, blended out over 20 mm",
+        },
+        {
+            "name": "holes over plate",
+            "value": UNDER_PLATE,
+            "says": "a hole goes only over plain plate: the metal under its rim no deeper than "
+            "this many times that under its middle",
+        },
+        {
+            "name": "ribs of other blocks",
+            "value": None,
+            "says": "a rib closer to a rib placed before it than the root gap is left out, "
+            "blocks placed in the order they keep clear of each other",
+        },
+    ]
+
+
+# How many blocks placed are kept for designs that place them again alike, and how many ways of
+# moving faces each is kept for.
+PLACED_KEPT = 4096
+PLACED_ALIKE = 32
+
+
+def _placed_memo(memo: dict | None) -> OrderedDict:
+    if memo is None:
+        return OrderedDict()
+    return memo.setdefault("placed", OrderedDict())
+
+
+class _Watched(dict):
+    """A design's faces moved, that remembers which faces placing a block asked about - so a block
+    placed again where the design moves those alike is known to come out the same."""
+
+    def __init__(self, moved: dict[int, float]):
+        super().__init__(moved)
+        self.asked: set[int] = set()
+
+    def get(self, key, default=None):  # type: ignore[override]
+        self.asked.add(key)
+        return super().get(key, default)
+
+    def __contains__(self, key) -> bool:
+        self.asked.add(key)
+        return super().__contains__(key)
+
+    def __getitem__(self, key):
+        self.asked.add(key)
+        return super().__getitem__(key)
+
+
+def _exposed_runs(base: Field, rib: Rib, trim: float) -> list[np.ndarray]:
+    from .checks import _exposed
+
+    return _exposed(base, rib, trim)
+
+
+def _crowding(ribs: list[Rib], earlier: list[Rib], runs: dict[Rib, list[np.ndarray]]) -> set[int]:
+    """Which of ``ribs`` pass one of ``earlier`` closer than the root gap - room for the sand
+    between them - where both stand in the open past their junctions, and do not cross."""
+    from .checks import _polyline_distance
+
+    if not ribs or not earlier:
+        return set()
+    gap, _ = knowledge.rule("root_gap")
+    crowded = set()
+    for index, rib in enumerate(ribs):
+        for other in earlier:
+            reach = (rib.thickness_mm + other.thickness_mm) / 2.0
+            least = gap * min(rib.thickness_mm, other.thickness_mm)
+            for mine in runs.get(rib, []):
+                for theirs in runs.get(other, []):
+                    distance, _ = _polyline_distance(mine, theirs)
+                    if reach < distance < reach + least:
+                        crowded.add(index)
+                        break
+                if index in crowded:
+                    break
+            if index in crowded:
+                break
+    return crowded
+
+
+def _without(placed: Placed, drop: set[int], why: str) -> Placed:
+    """What a block placed, less the ribs at ``drop`` - their pads and lines with them - counted as
+    left out ``why``."""
+    if not drop:
+        return placed
+    out = copy.copy(placed)
+    out.ribs = [r for i, r in enumerate(placed.ribs) if i not in drop]
+    out.spans = [s for i, s in enumerate(placed.spans) if i not in drop]
+    out.pads, cursor = [], 0
+    out.tried = [dict(line) for line in placed.tried]
+    for index, span in enumerate(placed.spans):
+        count = len(span.get("pads_mm", []))
+        if index in drop:
+            first = span.get("line")
+            if first is not None:
+                for line in out.tried[first : first + 1 + count]:
+                    line["outcome"] = why
+        else:
+            out.pads += placed.pads[cursor : cursor + count]
+        cursor += count
+    out.dropped = {**placed.dropped, why: placed.dropped.get(why, 0) + len(drop)}
+    return out
+
+
+@dataclass
+class _Ground:
+    """What a block of ribs reads off the part before any path is drawn: the plane its paths are
+    drawn on, where they may go, and - for webs - where what they join is. Or why nothing can."""
+
+    frame: HostFrame | None = None
+    footprint: _Footprint | None = None
+    between: dict[str, np.ndarray] | None = None
+    host_faces: frozenset[int] = frozenset()
+    probe_height: float = 0.0
+    problem: str = ""
+
+
+def _ground(
+    base: Field,
+    features: FeatureSet,
+    tess: Tessellation,
+    placement: Placement,
+    step: float,
+    probe_height: float,
+    reach: float,
+) -> _Ground:
+    if not placement.host:
+        hang, problem = hang_frame(features, tess, placement.supports, placement.pull)
+        if hang is None:
+            return _Ground(problem=problem)
+        probe_height = min(probe_height, hang.band / 2.0)
+        footprint, between = _gap(
+            base, features, tess, list(hang.joins), hang.frame, hang.band, step, probe_height, reach
+        )
+        return _Ground(hang.frame, footprint, between, frozenset(), probe_height)
+    host, problem = host_of(features, placement.host)
+    if host is None:
+        return _Ground(problem=problem)
+    frame = _frame(host)
+    footprint = _Footprint.of(tess, host.face_ids, frame, step)
+    return _Ground(frame, footprint, None, frozenset(host.face_ids), probe_height)
 
 
 def place(
@@ -170,10 +527,14 @@ def place(
     atlas: Atlas,
     tess: Tessellation,
     placement: Placement,
-    avoid: list[Rib] | tuple = (),
+    avoid: list[Rib | Hole] | tuple = (),
+    *,
+    finder: _Faces | None = None,
+    offsets: dict[int, float] | None = None,
+    memo: dict | None = None,
 ) -> Placed:
-    """Ribs for ``placement`` on the part ``base`` samples, clear of the ribs in ``avoid``. See the
-    module note."""
+    """Ribs for ``placement`` on the part ``base`` samples, clear of the ribs and holes in
+    ``avoid``, on the part with its faces moved by ``offsets``. See the module note."""
     section = placement.section
     thickness = section.thickness_mm
     tee = section.shape == "T" and section.flange_width_mm > thickness
@@ -182,44 +543,59 @@ def place(
     spacing = base.grid.spacing_mm
     step = max(min(spacing / 2.0, 1.0), features.diagonal_mm * 2e-4)
     probe_height = max(2.0 * spacing, 0.5 * section.root_fillet_mm)
-    reach = LOOK_PAST * section.root_fillet_mm + spacing
+    # Whatever is nearer a rib's end than room for the sand is what it ends on.
+    room = knowledge.rule("root_gap")[0] * section.thickness_mm
+    reach = max(LOOK_PAST * section.root_fillet_mm, room) + spacing
+    offsets = offsets or {}
+    finder = finder or _Faces(tess)
+    site = (_base_key(base), tuple(placement.host), tuple(placement.supports))
 
     hanging = not placement.host
-    between = None
-    if hanging:
-        hang, problem = hang_frame(features, tess, placement.supports, placement.pull)
-        if hang is None:
-            return Placed(ribs=[], problems=[problem])
-        frame, band = hang.frame, hang.band
-        probe_height = min(probe_height, band / 2.0)
-        footprint, between = _gap(
-            base, features, tess, list(hang.joins), frame, band, step, probe_height, reach
-        )
-        host_faces: set[int] = set()
-    else:
-        host, problem = host_of(features, placement.host)
-        if host is None:
-            return Placed(ribs=[], problems=[problem])
-        frame = _frame(host)
-        footprint = _Footprint.of(tess, host.face_ids, frame, step)
-        host_faces = set(host.face_ids)
-    keep: list = _keep_outs(features, atlas, tess, placement, frame, host_faces, step)
+    pull = tuple(placement.pull) if placement.pull is not None else None
+    ground = _memo(
+        memo,
+        ("ground", *site, pull, step, probe_height, reach),
+        lambda: _ground(base, features, tess, placement, step, probe_height, reach),
+    )
+    if ground.problem:
+        return Placed(ribs=[], problems=[ground.problem])
+    frame, footprint, between = ground.frame, ground.footprint, ground.between
+    probe_height = ground.probe_height
+    host_faces = set(ground.host_faces)
+    keep: list = _memo(
+        memo,
+        ("keep", *site, pull, step, json.dumps([k.model_dump() for k in placement.keep_out])),
+        lambda: _keep_outs(features, atlas, tess, placement, frame, host_faces, step),
+    )
     rows = [{**k.row(), "rule": k.rule} for k in keep]
-    # Other blocks' ribs are kept clear of in three dimensions, rib by rib, once each rib's height
-    # is known: one standing over or under another is no obstacle to it.
+    # Other blocks' ribs and holes are kept clear of in three dimensions, one by one, once each
+    # rib's height is known: one standing over or under another is no obstacle to it.
     others = [
         kept
-        for kept in (_RibKeep.of(rib, frame, placement.clear_of_mm) for rib in avoid)
+        for kept in (_kept_clear(thing, frame, placement.clear_of_mm) for thing in avoid)
         if kept is not None
     ]
     # How far a rib's end is buried in what it meets: set by the rib, not by the grid, so a
     # preview and a full design end in the same place.
     bury = max(section.root_fillet_mm, 2.0 * spacing)
-    finder = _Faces(tess)
-    support_of = _supports_by_face(features, atlas, placement.supports)
+    support_of = _memo(
+        memo,
+        ("supports", tuple(placement.supports)),
+        lambda: _supports_by_face(features, atlas, placement.supports),
+    )
+    # A floor the design moves: ribs on it start where it now is. Thinned, they reach down to it.
+    host_offset = min((offsets[f] for f in host_faces if f in offsets), default=0.0)
+    sink = 0.0 if hanging else spacing + max(0.0, -host_offset)
+    # How far a wall measured through its facets may fall short of what a rib needs and still be
+    # enough: what the tessellation can be off by, both faces.
+    slack = max(0.5, 2.0 * tess.deflection_mm)
 
     placed = Placed(ribs=[], keep_outs=rows)
-    caps = _caps(features, tess, placement, frame)
+    caps = _memo(
+        memo,
+        ("caps", *site, pull, tuple(placement.height.not_above), placement.height.max_mm),
+        lambda: _caps(features, tess, placement, frame),
+    )
     placed.caps = caps
     # Why stretches had no room for a rib. A problem only if no rib had room at all; otherwise
     # they are counted among what was not placed, like any other stretch dropped.
@@ -229,8 +605,11 @@ def place(
     lift = max(spacing / 2.0, 0.5)
 
     # Spokes close in on each other toward what they turn about, where their roots may meet; past
-    # that they must not run into each other.
+    # that they leave room for the mould between them.
     root_zone = section.root_fillet_mm + thickness
+    crowd = knowledge.rule("root_gap")[0] * thickness
+    # The wall a rib meets must be this thick, when a rule holds ribs to it.
+    need = thickness / placement.rib_to_wall if placement.rib_to_wall else 0.0
 
     def tried(p: np.ndarray, q: np.ndarray, outcome: str) -> None:
         a, b = frame.to_world(np.array([p, q]), lift)
@@ -335,21 +714,51 @@ def place(
                 _count(placed, "keep_out")
                 tried(uv[first], uv[last], "keep_out")
                 continue
-            # A spoke that would run into another past their roots is left out. Straight families
-            # cross by design.
+            # A spoke that would come closer to another past their roots than room for the mould
+            # between them is left out. Straight families cross by design.
+            spoke = None
             if placement.layout.kind == "radial":
                 p, q = _inset(uv[first], uv[last], root_zone)
-                if any(s.gap(p, q, half) < 0.0 for s in spokes):
+                if any(s.gap(p, q, half) < crowd for s in spokes):
                     _count(placed, "crowded")
                     tried(uv[first], uv[last], "crowded")
                     continue
-                spokes.append(_RibKeep(a=p, b=q, half=half, clearance=0.0))
+                spoke = _RibKeep(a=p, b=q, half=half, clearance=0.0)
+            # Each end on a wall no thinner than the rib may meet: padded where the placement allows
+            # it, never to more than twice the wall - else the rib is not placed.
+            pads: list[Rib] = []
+            thin = False
+            for met, height, sense in ((mets[0], heights[0], -1.0), (mets[1], heights[1], 1.0)):
+                if not need:
+                    break
+                measured = _wall(finder, features, frame, met, sense * direction, offsets)
+                if measured is None or measured[0] >= need - slack:
+                    continue
+                wall, inward = measured
+                depth = float(math.ceil(need - wall))
+                if not placement.pads or depth > PAD_MOST * wall:
+                    thin = True
+                    break
+                assert met.surface is not None
+                pads.append(_pad(frame, met.surface, inward, depth, thickness, height + sink, sink))
+            if thin:
+                _count(placed, "thin_wall")
+                tried(uv[first], uv[last], "thin_wall")
+                continue
+            if spoke is not None:
+                spokes.append(spoke)
             a = mets[0].end_for(heights[0]) if mets[0].ends is not None else uv[first]
             b = mets[1].end_for(heights[1]) if mets[1].ends is not None else uv[last]
+            # A wall the design thins stands back from the rib's end, which reaches it still.
+            a = a - direction * max(0.0, -offsets.get(mets[0].face, 0.0))
+            b = b + direction * max(0.0, -offsets.get(mets[1].face, 0.0))
+            line_index = len(placed.tried)
             tried(a, b, "rib")
+            for pad in pads:
+                line = frame.to_plane(np.array([pad.start, pad.end]))
+                tried(line[0], line[1], "pad")
             # Sunk into the floor, so the two are one; a web with nothing under it starts where it
             # starts.
-            sink = 0.0 if hanging else spacing
             rib = Rib(
                 start=tuple(float(v) for v in frame.to_world(a, -sink)[0]),
                 end=tuple(float(v) for v in frame.to_world(b, -sink)[0]),
@@ -363,6 +772,7 @@ def place(
                 flange_thickness_mm=section.flange_thickness_mm if tee else 0.0,
             )
             placed.ribs.append(rib)
+            placed.pads.extend(pads)
             placed.spans.append(
                 {
                     "path": path_id,
@@ -377,11 +787,301 @@ def place(
                     "clear_by_rule": _clearances(
                         keep, uv[first], uv[last], half, len(placement.keep_out)
                     ),
+                    "pads_mm": [pad.thickness_mm / 2.0 for pad in pads],
+                    # The floor it stands on, measured under it - before the design moves it.
+                    "floor_mm": None if hanging else _floor(finder, frame, uv[first], uv[last]),
+                    "line": line_index,
                 }
             )
     if not placed.ribs:
         placed.problems.extend(no_room)
+    elif not hanging and placement.pads and need:
+        # A floor thinner than its ribs may stand on is thickened for them, where pads may be:
+        # never to more than twice what it was.
+        floors = [s["floor_mm"] for s in placed.spans if s.get("floor_mm")]
+        floor = min(floors) + host_offset if floors else None
+        if floor is not None and need - floor > slack and need - floor <= PAD_MOST * floor:
+            placed.raised_mm = float(math.ceil(need - floor))
+            placed.raised_faces = tuple(sorted(host_faces))
     return placed
+
+
+def _floor(finder: _Faces, frame: HostFrame, a: np.ndarray, b: np.ndarray) -> float | None:
+    """How thick the floor under a rib is: the least metal under three points along it."""
+    points = a + np.outer([0.25, 0.5, 0.75], b - a)
+    depth = finder.exits_along(frame.to_world(points, -0.05), -frame.normal)
+    depth = depth[np.isfinite(depth)]
+    return round(float(depth.min()) + 0.05, 1) if depth.size else None
+
+
+def _wall(
+    finder: _Faces,
+    features: FeatureSet,
+    frame: HostFrame,
+    met: _Met,
+    toward: np.ndarray,
+    offsets: dict[int, float],
+) -> tuple[float, np.ndarray] | None:
+    """How thick the wall a rib's end meets is - square through it from where the rib meets it,
+    with what the design moves its two faces by - and which way is into it. None where the end
+    meets no wall, or where it cannot be told."""
+    if met.kind != "support" or met.surface is None or met.face is None:
+        return None
+    way = toward[0] * frame.e1 + toward[1] * frame.e2
+    inward = _inward(features, met.face, met.surface, way)
+    distance, far = finder.through((met.surface + 0.05 * inward).reshape(1, 3), inward)
+    if not np.isfinite(distance[0]):
+        return None
+    moved = offsets.get(met.face, 0.0) + (offsets.get(int(far[0]), 0.0) if far[0] >= 0 else 0.0)
+    return float(distance[0]) + 0.05 + moved, inward
+
+
+def _inward(features: FeatureSet, face_id: int, point: np.ndarray, toward: np.ndarray):
+    """Square into the metal at a point on a face: against a flat face's normal, toward or away
+    from a round face's axis - or the way a rib runs into it, for a face that says neither or does
+    not face the rib."""
+    face = features.faces.get(face_id)
+    inward = None
+    if face is not None and face.surface_type == "plane" and face.normal is not None:
+        inward = -np.asarray(face.normal, dtype=float)
+    elif face is not None and face.axis is not None and face.axis_point is not None:
+        axis = np.asarray(face.axis, dtype=float)
+        offset = np.asarray(point, dtype=float) - np.asarray(face.axis_point, dtype=float)
+        radial = offset - (offset @ axis) * axis
+        length = float(np.linalg.norm(radial))
+        if length > 1e-9:
+            inward = radial / length if face.concave else -radial / length
+    if inward is None or float(inward @ toward) < 0.2:
+        inward = np.asarray(toward, dtype=float)
+    return inward / np.linalg.norm(inward)
+
+
+def _pad(
+    frame: HostFrame,
+    surface: np.ndarray,
+    inward: np.ndarray,
+    depth: float,
+    thickness: float,
+    height: float,
+    sink: float,
+) -> Rib:
+    """A pad where a rib meets a wall too thin for it: a plate along the wall, half in it, standing
+    ``depth`` out of it, as tall as the rib there and as wide as two ribs and itself twice over."""
+    along = np.cross(-inward, frame.normal)
+    if float(np.linalg.norm(along)) < 1e-6:
+        along = frame.e1
+    across = frame.to_plane((surface + along).reshape(1, 3))[0]
+    across = across - frame.to_plane(surface.reshape(1, 3))[0]
+    across = across / max(float(np.linalg.norm(across)), 1e-12)
+    centre = frame.to_plane(surface.reshape(1, 3))[0]
+    half = thickness + depth
+    a, b = centre - half * across, centre + half * across
+    return Rib(
+        start=tuple(float(v) for v in frame.to_world(a, -sink)[0]),
+        end=tuple(float(v) for v in frame.to_world(b, -sink)[0]),
+        thickness_mm=2.0 * depth,
+        height_mm=height,
+        pull=tuple(float(v) for v in frame.normal),
+        pad=True,
+    )
+
+
+# --- holes ---------------------------------------------------------------------------------------
+
+
+@dataclass
+class _Plate:
+    """What a set of holes reads off the part before any is placed: the plate's plane, where it
+    is, how far each point on it is from its edge, and how thick it is. Or why nothing can."""
+
+    frame: HostFrame | None = None
+    footprint: _Footprint | None = None
+    edge: np.ndarray | None = None
+    host_faces: frozenset[int] = frozenset()
+    thickness: float | None = None
+    problem: str = ""
+
+    def edge_at(self, uv: np.ndarray) -> np.ndarray:
+        """How far points on the plate are from its edge - nothing, off it."""
+        assert self.footprint is not None and self.edge is not None
+        index = np.round((np.atleast_2d(uv) - self.footprint.lo) / self.footprint.step).astype(int)
+        ok = np.all((index >= 0) & (index < np.asarray(self.edge.shape)), axis=1)
+        out = np.zeros(index.shape[0])
+        out[ok] = self.edge[index[ok, 0], index[ok, 1]]
+        return out
+
+
+def _plate_of(
+    features: FeatureSet, tess: Tessellation, finder: _Faces, refs: list[str], step: float
+) -> _Plate:
+    from scipy import ndimage
+
+    host, problem = host_of(features, refs)
+    if host is None:
+        return _Plate(problem=problem)
+    frame = _frame(host)
+    footprint = _Footprint.of(tess, host.face_ids, frame, step)
+    # How far each cell of the plate is from the nearest cell off it: from its edge, the foot of a
+    # wall standing on it, a hole it has already.
+    edge = ndimage.distance_transform_edt(footprint.mask) * step
+    mine = np.flatnonzero(np.isin(tess.face_id, list(host.face_ids)))
+    corners = tess.vertices[tess.triangles[mine]]
+    areas = np.linalg.norm(
+        np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0]), axis=1
+    )
+    # Through the plate from its largest facet - on the face, not at its centroid, which may be in
+    # a hole.
+    start = corners[int(np.argmax(areas))].mean(axis=0) - frame.normal * 0.05
+    through = finder.exit_along(start, -frame.normal)
+    thickness = None if through is None else through + 0.05
+    return _Plate(frame, footprint, edge, frozenset(host.face_ids), thickness)
+
+
+def drill(
+    base: Field,
+    features: FeatureSet,
+    atlas: Atlas,
+    tess: Tessellation,
+    holes: HoleSet,
+    avoid: list[Rib | Hole] | tuple = (),
+    *,
+    finder: _Faces | None = None,
+    offsets: dict[int, float] | None = None,
+    memo: dict | None = None,
+) -> Drilled:
+    """Holes for ``holes`` through the plate it names - clear of its edges, of what it keeps clear
+    of and of the ribs and holes in ``avoid`` - on the part with its faces moved by ``offsets``.
+    See the module note."""
+    spacing = base.grid.spacing_mm
+    step = max(spacing / 2.0, 1.0)
+    finder = finder or _Faces(tess)
+    offsets = offsets or {}
+    radius = holes.diameter_mm / 2.0
+    ligament = holes.ligament_mm
+    drilled = Drilled(holes=[], diameter_mm=holes.diameter_mm, pitch_mm=holes.pitch_mm)
+    plate = _memo(
+        memo,
+        ("plate", _base_key(base), tuple(holes.host), step),
+        lambda: _plate_of(features, tess, finder, holes.host, step),
+    )
+    if plate.problem:
+        drilled.problems.append(plate.problem)
+        return drilled
+    if plate.thickness is None:
+        drilled.problems.append(f"how thick {', '.join(holes.host)} is could not be measured")
+        return drilled
+    drilled.plate_mm = round(plate.thickness, 1)
+    between = holes.pitch_mm - holes.diameter_mm
+    if between < ligament - 1e-9:
+        drilled.problems.append(
+            f"holes Ø{holes.diameter_mm:g} mm at {holes.pitch_mm:g} mm pitch leave {between:g} mm "
+            f"of metal between them - less than the {ligament:g} mm each needs"
+        )
+        return drilled
+    frame = plate.frame
+    footprint = plate.footprint
+    assert frame is not None and footprint is not None
+    host_faces = set(plate.host_faces)
+    keep: list = _memo(
+        memo,
+        ("keep", _base_key(base), tuple(holes.host), step, "holes")
+        + (json.dumps([k.model_dump() for k in holes.keep_out]),),
+        lambda: _keep_outs(features, atlas, tess, holes, frame, host_faces, step),
+    )
+    clearance = max(holes.clear_of_mm, ligament)
+    others = [
+        kept
+        for kept in (_kept_clear(thing, frame, clearance, far_side=True) for thing in avoid)
+        if kept is not None
+    ]
+    # The plate as the design has it: its face moved, and so what a hole runs through.
+    host_offset = min((offsets[f] for f in host_faces if f in offsets), default=0.0)
+    low, high = -(plate.thickness + spacing), max(0.0, host_offset) + spacing
+    drilled.frame, drilled.band = frame, (low, high)
+
+    # The lattice, from the middle of the plate: rows a pitch apart - or, staggered, every other
+    # row shifted by half a pitch, the rows closer so every hole is a pitch from the next.
+    cells = footprint.cells()
+    centre = cells.mean(axis=0)
+    angle = math.radians(holes.angle_deg)
+    d = np.array([math.cos(angle), math.sin(angle)])
+    m = np.array([-d[1], d[0]])
+    along, across = (cells - centre) @ d, (cells - centre) @ m
+    pitch = holes.pitch_mm
+    staggered = holes.pattern == "staggered"
+    row = pitch * (math.sqrt(3.0) / 2.0 if staggered else 1.0)
+    lattice = []
+    for j in range(math.floor(float(across.min()) / row), math.ceil(float(across.max()) / row) + 1):
+        shift = pitch / 2.0 if staggered and j % 2 else 0.0
+        first = math.floor((float(along.min()) - shift) / pitch)
+        last = math.ceil((float(along.max()) - shift) / pitch)
+        for i in range(first, last + 1):
+            lattice.append(centre + (i * pitch + shift) * d + j * row * m)
+    points = np.array(lattice).reshape(-1, 2)
+    points = points[footprint.covers(points)]
+    drilled.offered = len(points)
+
+    def drop(bad: np.ndarray, why: str) -> np.ndarray:
+        if bad.any():
+            drilled.dropped[why] = drilled.dropped.get(why, 0) + int(bad.sum())
+        return points[~bad]
+
+    # A whole edge distance from the plate's edge - the raster overstates the plate by a cell.
+    points = drop(plate.edge_at(points) - step < radius + holes.edge_mm, "edge")
+    blocked = np.zeros(len(points), dtype=bool)
+    for k in keep:
+        blocked |= k.blocks(points, radius)
+    points = drop(blocked, "keep_out")
+    if others and len(points):
+        clash = np.array([any(o.near(p, p, radius, low, high) for o in others) for p in points])
+        points = drop(clash, "made")
+    if not len(points):
+        return drilled
+
+    # Over plain plate: the metal under its rim runs no deeper than under its middle - else
+    # something stands under the plate there, and the hole would cut into it.
+    turns = np.linspace(0.0, 2.0 * math.pi, 8, endpoint=False)
+    ring = np.concatenate(
+        [np.zeros((1, 2)), np.stack([np.cos(turns), np.sin(turns)], axis=1) * (radius + ligament)]
+    )
+    samples = (points[:, None, :] + ring[None, :, :]).reshape(-1, 2)
+    depth, far = finder.through(frame.to_world(samples, -0.05), -frame.normal)
+    depth = (depth + 0.05).reshape(len(points), len(ring))
+    far = far.reshape(len(points), len(ring))
+    known = np.isfinite(depth).all(axis=1)
+    safe = np.where(np.isfinite(depth), depth, 0.0)
+    middle = safe[:, 0]
+    plain = (
+        known
+        & (safe.max(axis=1) <= UNDER_PLATE * middle + spacing)
+        & (safe.min(axis=1) >= middle / UNDER_PLATE - spacing)
+    )
+    kept = np.flatnonzero(plain)
+    points = drop(~plain, "under")
+    lift = max(spacing / 2.0, 0.5)
+    circle = np.linspace(0.0, 2.0 * math.pi, 11)
+    for point, index in zip(points, kept, strict=True):
+        # Through the plate and a little past its far side, however far the design moves it.
+        pushed = max((offsets.get(int(f), 0.0) for f in far[index] if f >= 0), default=0.0)
+        hole = Hole(
+            centre=tuple(float(v) for v in frame.to_world(point, 0.0)[0]),
+            axis=tuple(float(v) for v in frame.normal),
+            radius_mm=radius,
+            depth_mm=float(safe[index].max()) + max(0.0, pushed) + 2.0 * spacing,
+            above_mm=max(0.0, host_offset) + 2.0 * spacing,
+        )
+        drilled.holes.append(hole)
+        rim = point + radius * np.stack([np.cos(circle), np.sin(circle)], axis=1)
+        world = frame.to_world(rim, lift)
+        for a, b in zip(world[:-1], world[1:], strict=True):
+            drilled.tried.append(
+                {
+                    "a": [round(float(v), 2) for v in a],
+                    "b": [round(float(v), 2) for v in b],
+                    "outcome": "hole",
+                }
+            )
+    return drilled
 
 
 # --- the host -------------------------------------------------------------------------------------
@@ -855,8 +1555,26 @@ class _Faces:
         self.mesh = trimesh.Trimesh(tess.vertices, tess.triangles, process=False)
 
     def nearest(self, point: np.ndarray) -> int:
-        _, _, triangle = self.mesh.nearest.on_surface(np.asarray(point, dtype=float).reshape(1, 3))
-        return int(self.tess.face_id[int(triangle[0])])
+        return self.nearest_point(point)[0]
+
+    def nearest_point(self, point: np.ndarray) -> tuple[int, np.ndarray]:
+        """The face nearest a point, and the nearest point on it."""
+        closest, _, triangle = self.mesh.nearest.on_surface(
+            np.asarray(point, dtype=float).reshape(1, 3)
+        )
+        return int(self.tess.face_id[int(triangle[0])]), np.asarray(closest[0], dtype=float)
+
+    def facing(
+        self, start: np.ndarray, direction: np.ndarray, within: float
+    ) -> tuple[int, np.ndarray] | None:
+        """The face a ray from ``start`` along ``direction`` meets first, within ``within``, and
+        where it meets it - exactly, on the tessellation. None when it meets none so near."""
+        origin = np.asarray(start, dtype=float).reshape(1, 3)
+        way = np.asarray(direction, dtype=float).reshape(1, 3)
+        hits, _, triangles = self.mesh.ray.intersects_location(origin, way, multiple_hits=False)
+        if not len(hits) or float(np.linalg.norm(hits[0] - origin[0])) > within:
+            return None
+        return int(self.tess.face_id[int(triangles[0])]), np.asarray(hits[0], dtype=float)
 
     def exit_along(self, inside: np.ndarray, direction: np.ndarray) -> float | None:
         """How far from a point inside the metal, along ``direction``, the metal ends."""
@@ -865,15 +1583,26 @@ class _Faces:
 
     def exits_along(self, inside: np.ndarray, direction: np.ndarray) -> np.ndarray:
         """The same for many points at once, in one cast: NaN where nothing is met."""
+        return self.through(inside, direction)[0]
+
+    def through(self, inside: np.ndarray, direction: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """How far from points inside the metal, along ``direction`` - one for all, or one each -
+        the metal ends, and the face it ends at: NaN and -1 where nothing is met."""
         origins = np.asarray(inside, dtype=float).reshape(-1, 3)
         out = np.full(len(origins), np.nan)
+        faces = np.full(len(origins), -1, dtype=np.int64)
         if not len(origins):
-            return out
-        directions = np.tile(np.asarray(direction, dtype=float), (len(origins), 1))
-        hits, rays, _ = self.mesh.ray.intersects_location(origins, directions, multiple_hits=False)
+            return out, faces
+        directions = np.asarray(direction, dtype=float)
+        if directions.ndim == 1:
+            directions = np.tile(directions, (len(origins), 1))
+        hits, rays, triangles = self.mesh.ray.intersects_location(
+            origins, directions, multiple_hits=False
+        )
         if len(hits):
             out[rays] = np.linalg.norm(hits - origins[rays], axis=1)
-        return out
+            faces[rays] = self.tess.face_id[triangles]
+        return out, faces
 
 
 def _supports_by_face(features: FeatureSet, atlas: Atlas, supports: list[str]) -> dict[int, str]:
@@ -903,6 +1632,8 @@ class _Met:
     ends: np.ndarray | None = None
     tops: np.ndarray | None = None
     ref: str | None = None
+    surface: np.ndarray | None = None
+    """Where the path meets it, on its face, in the part's coordinates."""
 
     @property
     def top(self) -> float | None:
@@ -948,8 +1679,19 @@ def _end(
     metal = base.sample(frame.to_world(probes, probe_height)) < 0.0
     if not metal.any():
         return _Met("edge")
-    hit = probes[int(np.argmax(metal))]
-    face = finder.nearest(frame.to_world(hit, probe_height)[0])
+    first = int(np.argmax(metal))
+    hit = probes[first]
+    # The face the path runs into: a ray along the path from a grid cell back into the air - the
+    # field finds the metal to within half a cell - exactly on the tessellation. Where the ray finds
+    # none so near, the face nearest where the metal starts.
+    spacing = base.grid.spacing_mm
+    before = (probes[first - 1] if first else at) - spacing * outward
+    way = outward[0] * frame.e1 + outward[1] * frame.e2
+    met = finder.facing(frame.to_world(before, probe_height)[0], way, 2.0 * (step + spacing))
+    if met is None:
+        face, surface = finder.nearest_point(frame.to_world(hit, probe_height)[0])
+    else:
+        face, surface = met
     ref = support_of.get(face)
     kind = "support" if ref is not None else "elsewhere"
 
@@ -968,11 +1710,12 @@ def _end(
     width = int(round(bury / step))
     if run <= width:
         # Thinner than the burial: as deep as it goes, as tall as all of it allows.
-        return _Met(kind, face, into[run - 1 : run], np.array([probe_height + rises.min()]), ref)
+        tops = np.array([probe_height + rises.min()])
+        return _Met(kind, face, into[run - 1 : run], tops, ref, surface)
     # An end at a depth keeps the last ``bury`` of the rib at the depths behind it inside, so it
     # stands as tall as the lowest of those columns of metal.
     held = np.lib.stride_tricks.sliding_window_view(rises, width + 1).min(axis=1)
-    return _Met(kind, face, into[width:run], probe_height + held, ref)
+    return _Met(kind, face, into[width:run], probe_height + held, ref, surface)
 
 
 # --- keep-outs ------------------------------------------------------------------------------------
@@ -1071,14 +1814,15 @@ class _RibKeep:
     high: float = math.inf
 
     @staticmethod
-    def of(rib: Rib, frame: HostFrame, clearance: float) -> _RibKeep | None:
-        """None for a rib wholly on the far side of the host, where nothing standing here goes."""
+    def of(rib: Rib, frame: HostFrame, clearance: float, far_side: bool = False) -> _RibKeep | None:
+        """None for a rib wholly on the far side of the host, where nothing standing here goes -
+        unless ``far_side`` asks for those too, as a hole through the host does."""
         base = np.asarray([rib.start, rib.end], dtype=float)
         up = np.asarray(rib.pull, dtype=float)
         tops = base + np.outer(rib.heights, up)
         level = float(frame.origin @ frame.normal)
         along = np.concatenate([base @ frame.normal, tops @ frame.normal]) - level
-        if float(along.max()) < -1.0:
+        if float(along.max()) < -1.0 and not far_side:
             return None
         a, b = frame.to_plane(base)
         return _RibKeep(
@@ -1090,10 +1834,32 @@ class _RibKeep:
             high=float(along.max()),
         )
 
+    @staticmethod
+    def of_hole(hole: Hole, frame: HostFrame, clearance: float) -> _RibKeep:
+        """A hole of another block, kept clear of like a rib: its run seen square to the host, as
+        wide as it is, and how far along the host's normal it goes."""
+        centre, axis = np.asarray(hole.centre, dtype=float), np.asarray(hole.axis, dtype=float)
+        ends = np.array([centre + hole.above_mm * axis, centre - hole.depth_mm * axis])
+        along = ends @ frame.normal - float(frame.origin @ frame.normal)
+        a, b = frame.to_plane(ends)
+        return _RibKeep(
+            a=a,
+            b=b,
+            half=hole.radius_mm,
+            clearance=clearance,
+            low=float(along.min()),
+            high=float(along.max()),
+        )
+
     def clashes(self, a: np.ndarray, b: np.ndarray, half_width: float, top: float) -> bool:
         """Whether a rib along ``a``-``b`` standing ``top`` tall comes nearer this one than the
         clearance: beside it, and at a height it reaches too."""
-        if self.low > top + self.clearance or self.high < -self.clearance:
+        return self.near(a, b, half_width, 0.0, top)
+
+    def near(self, a: np.ndarray, b: np.ndarray, half_width: float, low: float, high: float):
+        """Whether something along ``a``-``b``, reaching from ``low`` to ``high`` along the
+        host's normal, comes nearer this one than the clearance."""
+        if self.low > high + self.clearance or self.high < low - self.clearance:
             return False
         return self.gap(a, b, half_width) < self.clearance
 
@@ -1110,11 +1876,20 @@ class _RibKeep:
         return float(np.min(self._distance(points))) - self.half - half_width
 
 
+def _kept_clear(
+    thing: Rib | Hole, frame: HostFrame, clearance: float, far_side: bool = False
+) -> _RibKeep | None:
+    """Another block's rib, pad or hole, as a block placed after it keeps clear of it."""
+    if isinstance(thing, Hole):
+        return _RibKeep.of_hole(thing, frame, clearance)
+    return _RibKeep.of(thing, frame, clearance, far_side)
+
+
 def _keep_outs(
     features: FeatureSet,
     atlas: Atlas,
     tess: Tessellation,
-    placement: Placement,
+    placement: Placement | HoleSet,
     frame: HostFrame,
     host_faces: set[int],
     step: float,

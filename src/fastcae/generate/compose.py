@@ -28,6 +28,7 @@ kept, and a check rejects the design with where.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -131,11 +132,19 @@ def window_between(
     hi: np.ndarray,
     margin_mm: float,
     allowed: np.ndarray | None = None,
-    protected_faces: set[int] | None = None,
+    protected_faces: set[int] | dict[int, float] | None = None,
     clearance_mm: float = 0.0,
     region: Region | None = None,
+    around: list[tuple[np.ndarray, np.ndarray]] | None = None,
 ) -> Window:
-    """A window over the box ``lo`` to ``hi``, grown by the margin and snapped to the lattice."""
+    """A window over the box ``lo`` to ``hi``, grown by the margin and snapped to the lattice.
+
+    ``protected_faces`` are held as they are within a clearance of them: ``clearance_mm`` for every
+    one, or each its own. A face held at none is only not crossed, and a rib may meet it.
+
+    ``around``, when given, is the boxes of what will be composed in it - each rib's: the part's
+    distance is exact within the margin of them, where a fillet reads it, and clamped elsewhere, so
+    ribs spread over a whole part pay for the part near them, not for the box round them all."""
     grid = base.grid
     origin = np.asarray(grid.origin)
     last_index = np.asarray(grid.shape) - 1
@@ -148,12 +157,18 @@ def window_between(
         spacing_mm=grid.spacing_mm,
         shape=tuple(int(v) for v in last - first + 1),
     )
+    protected = np.zeros(window.n_cells, dtype=bool)
     if protected_faces:
-        # Strictly inside: a cell out of reach comes back clamped to exactly the clearance.
-        near = _part_distance(tess, window, clearance_mm, faces=protected_faces)
-        protected = near < clearance_mm
-    else:
-        protected = np.zeros(window.n_cells, dtype=bool)
+        clearance_of = (
+            protected_faces
+            if isinstance(protected_faces, dict)
+            else dict.fromkeys(protected_faces, clearance_mm)
+        )
+        for clearance in sorted({c for c in clearance_of.values() if c > 0.0}):
+            faces = {f for f, c in clearance_of.items() if c == clearance}
+            # Strictly inside: a cell out of reach comes back clamped to exactly the clearance.
+            near = _part_distance(tess, window, clearance, faces=faces)
+            protected |= near < clearance
     if allowed is None:
         allowed = np.ones(window.n_cells, dtype=bool)
     out = Window(
@@ -166,7 +181,7 @@ def window_between(
         margin_mm=margin_mm,
         region=region,
     )
-    unsigned = _part_distance(tess, window, margin_mm)
+    unsigned = _part_distance(tess, window, margin_mm, around=around)
     solid = base.inside.ravel()[out.samples_of(np.arange(window.n_cells))]
     out.part = np.where(solid, -unsigned, unsigned).astype(np.float32)
     return out
@@ -189,16 +204,24 @@ def window_around(
     return window
 
 
-def compose(base: Field, window: Window, ribs: list, radius_mm: float) -> Composition:
-    """``base`` with ``ribs`` joined to it by root fillets of ``radius_mm``, inside ``window``."""
+def compose(
+    base: Field, window: Window, ribs: list, radius_mm: float | Sequence[float], shift=None
+) -> Composition:
+    """``base`` with ``ribs`` joined to it by root fillets of ``radius_mm``, inside ``window`` - one
+    radius for every rib, or each rib's own: ribs of different blocks ask for different radii.
+
+    ``shift``, when given, says how far the design has moved the part's surface out at any points
+    - faces thickened or thinned - so ribs are filleted to the surface where it now is."""
     if not ribs:
         return Composition(field=base, changed=np.empty(0, dtype=np.int64))
 
     margin = window.margin_mm
     points_of = window.grid.centres
+    radii = np.broadcast_to(np.asarray(radius_mm, dtype=np.float64), (len(ribs),))
 
-    # The ribs, as one solid: joined to each other with the same radius where they cross. Which rib
-    # is nearest is kept, because the fillet against the part needs that rib's own normal.
+    # The ribs, as one solid: joined to each other where they cross, rounded to the smaller of
+    # their radii. Which rib is nearest is kept, because the fillet against the part is that rib's
+    # own - its normal, and its radius.
     ribs_distance = np.full(window.grid.n_cells, np.inf)
     nearest = np.full(window.grid.n_cells, -1, dtype=np.int32)
     for index, rib in enumerate(ribs):
@@ -208,8 +231,10 @@ def compose(base: Field, window: Window, ribs: list, radius_mm: float) -> Compos
             continue
         d = rib.distance(points_of(cells))
         current = ribs_distance[cells]
-        nearest[cells] = np.where(d < current, index, nearest[cells])
-        ribs_distance[cells] = np.where(np.isinf(current), d, _crossing(current, d, radius_mm))
+        before = nearest[cells]
+        pair = np.minimum(radii[index], radii[np.maximum(before, 0)])
+        nearest[cells] = np.where(d < current, index, before)
+        ribs_distance[cells] = np.where(np.isinf(current), d, _crossing(current, d, pair))
 
     reached = np.flatnonzero(np.isfinite(ribs_distance))
     if window.region is not None and reached.size:
@@ -218,19 +243,22 @@ def compose(base: Field, window: Window, ribs: list, radius_mm: float) -> Compos
 
     touched = np.flatnonzero(ribs_distance < margin)
     a = window.part[touched].astype(np.float64)
+    if shift is not None and touched.size:
+        a = a - shift(points_of(touched))
     b = ribs_distance[touched]
 
     # The blend acts only within 2R of both; everywhere else it is the plain union and needs no
     # normal. Inside that strip the rib's normal is its own, exact - a finite difference across the
-    # grid would reach past the rib's root into the part and tilt it.
+    # grid would reach past the rib's root into the part and tilt it. R is the nearest rib's.
+    radius_at = radii[nearest[touched]]
     ribs_normal = np.zeros((touched.size, 3))
-    strip = np.flatnonzero((a < 2.0 * radius_mm) & (b < 2.0 * radius_mm))
+    strip = np.flatnonzero((a < 2.0 * radius_at) & (b < 2.0 * radius_at))
     owner = nearest[touched[strip]]
     for index in np.unique(owner):
         rows = strip[owner == index]
         ribs_normal[rows] = ribs[index].normal(points_of(touched[rows]))
 
-    value = round_union(a, window.normal_at(touched), b, ribs_normal, radius_mm)
+    value = round_union(a, window.normal_at(touched), b, ribs_normal, radius_at)
     solid = value < 0.0
     held = window.protected[touched]
     clipped = np.empty(0, dtype=np.int64)
@@ -269,7 +297,7 @@ def _on_grid_edge(samples: np.ndarray, shape: tuple[int, int, int]) -> np.ndarra
     return edge
 
 
-def _crossing(x: np.ndarray, y: np.ndarray, radius: float) -> np.ndarray:
+def _crossing(x: np.ndarray, y: np.ndarray, radius: float | np.ndarray) -> np.ndarray:
     """Where two ribs cross: their union, rounded to ``radius``; exact where either is far."""
     u = np.maximum(radius - x, 0.0)
     w = np.maximum(radius - y, 0.0)
@@ -334,16 +362,30 @@ def _arc_distance(region: Region, points: np.ndarray) -> np.ndarray:
 
 
 def _part_distance(
-    tess: Tessellation, window: Grid, reach: float, faces: set[int] | None = None
+    tess: Tessellation,
+    window: Grid,
+    reach: float,
+    faces: set[int] | None = None,
+    around: list[tuple[np.ndarray, np.ndarray]] | None = None,
 ) -> np.ndarray:
     """Unsigned distance from each window sample to the part (or some of its faces), exactly, out
-    to ``reach`` and clamped there."""
+    to ``reach`` and clamped there - or, given the boxes ``around``, exactly within ``reach`` of
+    them and clamped beyond: only the facets that near can matter there."""
     lo = np.asarray(window.origin) - reach
     hi = np.asarray(window.origin) + (np.asarray(window.shape) - 1) * window.spacing_mm + reach
     corners = tess.vertices[tess.triangles]
-    keep = np.all(corners.max(axis=1) >= lo, axis=1) & np.all(corners.min(axis=1) <= hi, axis=1)
+    top, bottom = corners.max(axis=1), corners.min(axis=1)
+    keep = np.all(top >= lo, axis=1) & np.all(bottom <= hi, axis=1)
     if faces is not None:
         keep &= np.isin(tess.face_id, list(faces))
+    if around:
+        # A cell within reach of a box has its nearest facets within twice the reach of it.
+        near = np.zeros(len(keep), dtype=bool)
+        for box_lo, box_hi in around:
+            near |= np.all(top >= np.asarray(box_lo) - 2.0 * reach, axis=1) & np.all(
+                bottom <= np.asarray(box_hi) + 2.0 * reach, axis=1
+            )
+        keep &= near
     if not keep.any():
         return np.full(window.n_cells, reach)
     local = Tessellation(

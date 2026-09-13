@@ -112,6 +112,10 @@ class Rib(_Shape):
     ``end_height_mm`` its top slopes, straight, from ``height_mm`` at its start to that at its end.
     With ``flange_width_mm`` wider than the web, a flange ``flange_thickness_mm`` deep runs along
     its top, following the slope: the rib is a T.
+
+    A ``pad`` is the same plate lying along a wall where a rib meets it, half in the wall: the wall
+    made thicker round the rib's end. It is metal like any rib, but no rib, and the checks on ribs
+    leave it out.
     """
 
     start: tuple[float, float, float]
@@ -124,6 +128,7 @@ class Rib(_Shape):
     end_height_mm: float | None = None
     flange_width_mm: float = 0.0
     flange_thickness_mm: float = 0.0
+    pad: bool = False
 
     @property
     def tee(self) -> bool:
@@ -299,9 +304,10 @@ class ArcRib(_Shape):
 
 
 def round_union(
-    a: np.ndarray, n_a: np.ndarray, b: np.ndarray, n_b: np.ndarray, radius_mm: float
+    a: np.ndarray, n_a: np.ndarray, b: np.ndarray, n_b: np.ndarray, radius_mm: float | np.ndarray
 ) -> np.ndarray:
-    """The union of two solids, rounded where they meet as a ball of ``radius_mm`` would round it.
+    """The union of two solids, rounded where they meet as a ball of ``radius_mm`` would round it -
+    one radius, or one at each point.
 
     ``a`` and ``b`` are signed distances to the two solids at the same points, ``n_a`` and ``n_b``
     their unit normals there. See the module note for where it touches and where it changes nothing.

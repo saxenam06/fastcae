@@ -28,6 +28,7 @@ from typing import Any, Literal
 import numpy as np
 from pydantic import BaseModel, Field
 
+from .. import knowledge
 from ..extract import Extraction
 from ..features import (
     AXIS_DISTANCE_TOL_FRACTION,
@@ -469,6 +470,15 @@ class Slots:
         constraints.append({"kind": "within_what_it_meets", "strength": "assumed"})
         if self.get("supports").refs:
             constraints.append({"kind": "ends_on", "strength": "assumed"})
+        ratio, rule_of_thumb = knowledge.rule("rib_to_wall")
+        constraints.append(
+            {
+                "kind": "rib_to_wall",
+                "params": {"ratio": ratio},
+                "strength": "assumed",
+                "basis": rule_of_thumb,
+            }
+        )
         reference = orientation.basis.get("from")
         if reference and not orientation.basis.get("spokes"):
             constraints.append(

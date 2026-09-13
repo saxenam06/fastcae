@@ -38,3 +38,6 @@ tests/
 
 # Credentials. Read from the environment, never committed.
 .env
+
+# Designs Go kept: generated data, a folder per project and run - rebuilt by running Go again.
+_archived_designs/

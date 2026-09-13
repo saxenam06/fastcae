@@ -124,12 +124,63 @@ class Placement(BaseModel):
     clear_of: list[str] = Field(default_factory=list)
     """Other placements whose ribs these keep clear of - placed first, their ribs keep-outs."""
     clear_of_mm: float = Field(default=0.0, ge=0.0)
+    pads: bool = False
+    """Where a rib meets a wall thinner than it may be - thicker than ``rib_to_wall`` of the wall -
+    the wall is thickened round the rib's end, enough that it may, rather than the rib dropped."""
+    rib_to_wall: float | None = Field(default=0.8, gt=0.0)
+    """The most a rib may be of the wall it meets; None: any."""
     cites: list[str] = Field(default_factory=list)
 
     @field_validator("host", mode="before")
     @classmethod
     def _one_or_many(cls, value: Any) -> Any:
         return [value] if isinstance(value, str) else value
+
+
+class Offset(BaseModel):
+    """Faces moved along their own normal: a wall, a plate or a boss made thicker - or thinner.
+
+    ``faces`` are what move; ``offset_mm`` how far, material added when positive and taken away when
+    negative; ``blend_mm`` how wide the join to the faces round them ramps; ``min_wall_mm`` the
+    least a wall thinned may keep."""
+
+    id: str
+    kind: Literal["thicken"] = "thicken"
+    faces: list[str] = Field(min_length=1)
+    offset_mm: float
+    blend_mm: float = Field(default=20.0, ge=0.0)
+    min_wall_mm: float = Field(default=0.0, ge=0.0)
+    cites: list[str] = Field(default_factory=list)
+
+
+class HoleSet(BaseModel):
+    """Holes through a plate on a lattice: ``diameter_mm`` across, ``pitch_mm`` apart, the lattice
+    square or staggered at ``angle_deg``; none nearer an edge of the plate than ``edge_mm``, nor
+    nearer each other, a rib or a keep-out than ``ligament_mm`` of metal."""
+
+    id: str
+    kind: Literal["holes"] = "holes"
+    host: list[str] = Field(min_length=1)
+    pattern: Literal["grid", "staggered"] = "grid"
+    diameter_mm: float = Field(gt=0.0)
+    pitch_mm: float = Field(gt=0.0)
+    angle_deg: float = 0.0
+    edge_mm: float = Field(default=0.0, ge=0.0)
+    ligament_mm: float = Field(default=0.0, ge=0.0)
+    keep_out: list[KeepOut] = Field(default_factory=list)
+    clear_of: list[str] = Field(default_factory=list)
+    """Placements whose ribs these holes keep clear of - placed first."""
+    clear_of_mm: float = Field(default=0.0, ge=0.0)
+    cites: list[str] = Field(default_factory=list)
+
+
+class MaterialChoice(BaseModel):
+    """What the part is cast in: an id from the catalogue of materials."""
+
+    id: str
+    kind: Literal["material"] = "material"
+    material: str
+    cites: list[str] = Field(default_factory=list)
 
 
 class Lever(BaseModel):
@@ -157,6 +208,9 @@ class Version(BaseModel):
     created: str
     words: list[Words]
     placements: list[Placement]
+    offsets: list[Offset] = Field(default_factory=list)
+    holes: list[HoleSet] = Field(default_factory=list)
+    material: MaterialChoice | None = None
     rules: dict[str, Any] = Field(default_factory=dict)
     levers: list[Lever] = Field(default_factory=list)
     measured: list[Measured] = Field(default_factory=list)

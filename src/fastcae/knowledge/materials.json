@@ -1,0 +1,87 @@
+{
+  "about": "Casting materials a housing may be made of: the values a design needs before it is simulated - density for mass, stiffness and strength for later - each with where it comes from. Minimum values from the standards; density and modulus typical. Check against the foundry's own before a design is released.",
+  "default": {
+    "id": "EN-GJS-400-18-LT",
+    "source": "the ductile iron wind-turbine gearbox housings are cast in, when nothing says otherwise (assumed)"
+  },
+  "materials": [
+    {
+      "id": "EN-GJL-250",
+      "name": "grey cast iron EN-GJL-250",
+      "density_kg_m3": 7200,
+      "modulus_gpa": 110,
+      "yield_mpa": null,
+      "tensile_mpa": 250,
+      "min_wall_mm": 8,
+      "source": "EN 1561:2011 - minimum tensile strength; density and modulus typical"
+    },
+    {
+      "id": "EN-GJS-400-18-LT",
+      "name": "ductile cast iron EN-GJS-400-18-LT",
+      "density_kg_m3": 7100,
+      "modulus_gpa": 169,
+      "yield_mpa": 240,
+      "tensile_mpa": 400,
+      "min_wall_mm": 8,
+      "source": "EN 1563:2018 - minimum 0.2% proof and tensile strength; the grade wind-turbine housings are cast in for low-temperature toughness"
+    },
+    {
+      "id": "EN-GJS-500-7",
+      "name": "ductile cast iron EN-GJS-500-7",
+      "density_kg_m3": 7100,
+      "modulus_gpa": 169,
+      "yield_mpa": 320,
+      "tensile_mpa": 500,
+      "min_wall_mm": 8,
+      "source": "EN 1563:2018 - minimum 0.2% proof and tensile strength"
+    },
+    {
+      "id": "EN-GJS-600-3",
+      "name": "ductile cast iron EN-GJS-600-3",
+      "density_kg_m3": 7200,
+      "modulus_gpa": 174,
+      "yield_mpa": 370,
+      "tensile_mpa": 600,
+      "min_wall_mm": 8,
+      "source": "EN 1563:2018 - minimum 0.2% proof and tensile strength"
+    },
+    {
+      "id": "G20Mn5",
+      "name": "cast steel G20Mn5, quenched and tempered",
+      "density_kg_m3": 7850,
+      "modulus_gpa": 210,
+      "yield_mpa": 300,
+      "tensile_mpa": 500,
+      "min_wall_mm": 10,
+      "source": "EN 10213:2016 - minimum 0.2% proof and tensile strength"
+    },
+    {
+      "id": "EN-AC-42100-T6",
+      "name": "cast aluminium EN AC-42100 (AlSi7Mg0.3), T6",
+      "density_kg_m3": 2680,
+      "modulus_gpa": 71,
+      "yield_mpa": 210,
+      "tensile_mpa": 290,
+      "min_wall_mm": 5,
+      "source": "EN 1706:2020 - typical T6 values for sand casting"
+    }
+  ],
+  "rules": {
+    "min_wall_mm": {
+      "value": 8,
+      "source": "a minimum for large sand castings in iron, when no material is chosen (assumed)"
+    },
+    "rib_to_wall": {
+      "value": 0.8,
+      "source": "foundry rule of thumb: a rib no thicker than 0.8 of the wall it joins"
+    },
+    "hole_ligament": {
+      "value": 1.0,
+      "source": "metal left between two holes, or between a hole and a rib or an edge, at least one plate thickness (assumed)"
+    },
+    "root_gap": {
+      "value": 2.0,
+      "source": "clear gap between two ribs standing in the open at least twice the thinner: room for the sand between them (assumed)"
+    }
+  }
+}

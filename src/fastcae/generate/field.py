@@ -223,7 +223,10 @@ class Field:
         field knows about a distant cell, which is which side of the surface it is on.
         """
         flat = np.asarray(flat)
-        position = np.clip(np.searchsorted(self.band_index, flat), 0, self.band_index.size - 1)
+        # Searched in the band's own type: numpy would otherwise widen the whole band - millions of
+        # indices - for every lookup, however few cells are asked about.
+        wanted = flat.astype(self.band_index.dtype, copy=False) if flat.size else flat
+        position = np.clip(np.searchsorted(self.band_index, wanted), 0, self.band_index.size - 1)
         on_band = self.band_index[position] == flat
         far = np.where(self.inside.ravel()[flat], -self.reach_mm, self.reach_mm)
         return np.where(on_band, self.band_mm[position], far).astype(np.float32)
@@ -392,6 +395,13 @@ def _unsigned_distance(tess: Tessellation, grid: Grid, reach: float) -> np.ndarr
     a = tess.vertices[tess.triangles[:, 0]]
     b = tess.vertices[tess.triangles[:, 1]]
     c = tess.vertices[tess.triangles[:, 2]]
+    # A cell further from a triangle's plane than ``reach`` is further than that from the triangle,
+    # so the plane is asked first - one dot product - and the exact distance only for cells near
+    # it. A long triangle at a slant has a box far bigger than the slab round it.
+    normal = np.cross(b - a, c - a)
+    length = np.linalg.norm(normal, axis=1, keepdims=True)
+    normal = np.divide(normal, length, out=np.zeros_like(normal), where=length > 1e-12)
+    slack = reach * (1.0 + 1e-6) + 1e-9
 
     lo = np.floor((np.minimum(np.minimum(a, b), c) - origin - reach) / spacing).astype(np.int64)
     hi = np.ceil((np.maximum(np.maximum(a, b), c) - origin + reach) / spacing).astype(np.int64)
@@ -424,6 +434,9 @@ def _unsigned_distance(tess: Tessellation, grid: Grid, reach: float) -> np.ndarr
             axis=1,
         )
         points = cell * spacing + origin
+        across = np.abs(np.einsum("ij,ij->i", points - a[owner], normal[owner]))
+        slab = np.flatnonzero(across <= slack)
+        points, owner, cell = points[slab], owner[slab], cell[slab]
         d = _point_triangle_distance(points, a[owner], b[owner], c[owner])
 
         index = np.ravel_multi_index((cell[:, 0], cell[:, 1], cell[:, 2]), grid.shape)

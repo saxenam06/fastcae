@@ -23,6 +23,7 @@ from typing import Any
 import numpy as np
 from pydantic import ValidationError
 
+from .. import knowledge
 from ..extract import Extraction
 from ..features import FeatureKind
 from .placement import _way, hang_frame
@@ -59,6 +60,32 @@ FIELD_OF = {
 FLANGE_WIDTH = (2.0, 3.0, 4.0)
 FLANGE_THICKNESS = (0.5, 0.75, 1.0)
 
+# How far faces may move when nothing says: thinned by at most this much - and never below the
+# least a wall may be - or thickened by up to this much.
+THIN_MOST = 4.0
+THICK_MOST = 10.0
+
+
+def described() -> list[dict]:
+    """What a block is read off the part as when nothing says, in words - as the pipeline shows."""
+    return [
+        {
+            "name": "faces moved",
+            "value": None,
+            "says": f"thinned by at most {THIN_MOST:g} mm - never below the least a wall may be "
+            f"- or thickened by up to {THICK_MOST:g} mm",
+        },
+        {
+            "name": "T-section ribs",
+            "value": None,
+            "says": "a flange "
+            + ", ".join(f"{w:g}" for w in FLANGE_WIDTH)
+            + " times the web wide and "
+            + ", ".join(f"{t:g}" for t in FLANGE_THICKNESS)
+            + " times it thick",
+        },
+    ]
+
 
 def fill(
     extraction: Extraction,
@@ -77,8 +104,15 @@ def fill(
     support = list(block.get("support") or [])
     anchors = list(block.get("anchors") or [])
     given: dict[str, dict] = dict(block.get("given") or {})
+    kind = block.get("add") or "ribs"
+    if kind == "thicken":
+        return _thicken(extraction, exit_along, support, given)
+    if kind == "holes":
+        return _holes(extraction, exit_along, support, given)
+    if kind == "material":
+        return _material(given)
     if not support:
-        return _hanging(extraction, exit_along, anchors, given, floor_radius)
+        return _pads(_hanging(extraction, exit_along, anchors, given, floor_radius), given)
 
     values: dict[str, Any] = {"host": support}
     if anchors:
@@ -116,20 +150,272 @@ def fill(
         if not (floor_radius is not None and rule["kind"] == "smallest_radius")
     ]
     measured_anchors = [] if anchors else _grouped(extraction, read["where"]["anchors"])
-    return {
-        "where": {
-            "support": support,
-            "anchors": anchors or measured_anchors,
-            "read_off": [] if anchors else ["anchors"],
+    return _pads(
+        {
+            "where": {
+                "support": support,
+                "anchors": anchors or measured_anchors,
+                "read_off": [] if anchors else ["anchors"],
+            },
+            "free": free,
+            "rules": rules,
+            "measured": entries["measured"],
+            "pull": entries["pull"],
+            "needed": [],
+            "problems": [],
+            "cannot": None,
+            "note": notes,
         },
+        given,
+    )
+
+
+def _pads(filled: dict[str, Any], given: dict[str, dict]) -> dict[str, Any]:
+    """A block of ribs is held to the wall it meets - no rib thicker than the foundry's rule of
+    thumb allows of it - and may thicken a wall round a rib's end, where the wall is thinner than
+    that, rather than lose the rib: pads on, unless the words say otherwise."""
+    if filled.get("free") is None or filled.get("needed"):
+        return filled
+    ratio, source = knowledge.rule("rib_to_wall")
+    if not any(rule["kind"] == "rib_to_wall" for rule in filled.get("rules", [])):
+        filled["rules"] = [
+            *filled.get("rules", []),
+            {
+                "kind": "rib_to_wall",
+                "params": {"ratio": ratio},
+                "strength": "assumed",
+                "by": "part",
+                "basis": source,
+            },
+        ]
+    if "pads" not in given:
+        filled["free"]["pads"] = {
+            "options": ["on", "off"],
+            "suggested": "on",
+            "source": "default",
+            "basis": f"a wall thickened round a rib's end where the rib is thicker than {ratio:g} "
+            "of it, rather than the rib left out",
+        }
+    return filled
+
+
+def _thicken(
+    extraction: Extraction, exit_along, faces: list[str], given: dict[str, dict]
+) -> dict[str, Any]:
+    """Faces moved along their own normal - a wall, a plate or a boss made thicker or thinner:
+    thinned no further than the least a wall may be, measured through the faces, or thickened by
+    up to a plate's worth; blended into what is round them."""
+    if not faces:
+        return _unfilled([], [], given, [], ["the faces to move"])
+    least, least_source = knowledge.rule("min_wall_mm")
+    walls = [w for w in (_through(extraction, exit_along, ref) for ref in faces) if w]
+    wall = min(walls) if walls else None
+    thinnest = -float(min(THIN_MOST, max(0, math.floor(wall - least)))) if wall else 0.0
+    notes = {}
+    if wall is not None:
+        notes["wall"] = f"{wall:.1f} mm of metal under them, measured through them"
+    free: dict[str, dict] = {
+        "offset_mm": {
+            "low": thinnest,
+            "high": THICK_MOST,
+            "step": 1.0,
+            "unit": "mm",
+            "suggested": 0.0,
+            "source": "measured" if wall is not None else "default",
+            "basis": (
+                f"thinned to no less than {least:g} mm from the {wall:.1f} mm under them, or "
+                f"thickened by up to {THICK_MOST:g} mm"
+                if wall is not None
+                else f"thickened by up to {THICK_MOST:g} mm; the wall under them was not measured"
+            ),
+        },
+        "blend_mm": {
+            "options": [10.0, 20.0, 30.0],
+            "suggested": 20.0,
+            "unit": "mm",
+            "source": "default",
+            "basis": "how wide the join to the faces round them ramps",
+        },
+        "min_wall_mm": {
+            "low": least,
+            "high": least,
+            "step": 1.0,
+            "unit": "mm",
+            "suggested": least,
+            "source": "default",
+            "basis": least_source,
+        },
+    }
+    free.update(given)
+    rules = [
+        {
+            "kind": "wall_at_least",
+            "params": {"mm": least},
+            "strength": "assumed",
+            "by": "part",
+            "basis": least_source,
+        }
+    ]
+    measured = []
+    if wall is not None:
+        measured.append(
+            {
+                "what": "wall under the faces moved, measured",
+                "value": round(wall, 1),
+                "on": faces[0],
+                "confirmed": False,
+            }
+        )
+    return {
+        "where": {"support": faces, "anchors": [], "read_off": []},
         "free": free,
         "rules": rules,
-        "measured": entries["measured"],
-        "pull": entries["pull"],
+        "measured": measured,
+        "pull": None,
         "needed": [],
         "problems": [],
         "cannot": None,
         "note": notes,
+    }
+
+
+def _holes(
+    extraction: Extraction, exit_along, host_refs: list[str], given: dict[str, dict]
+) -> dict[str, Any]:
+    """Holes through a plate, read off the plate: across from one to four plate thicknesses,
+    a lattice square or staggered, set out along the plate's longest direction, kept a plate
+    thickness of metal from each other, from what the plate holds already and from its edges."""
+    from .placement import host_of
+    from .slots import _holes_on, _long_axis_deg, _plate
+
+    if not host_refs:
+        return _unfilled([], [], given, [], ["the plate to cut holes in"])
+    features = extraction.features
+    host, why = host_of(features, host_refs)
+    if host is None:
+        return _unfilled(host_refs, [], given, [why])
+    normal = np.asarray(host.normal, dtype=float)
+    plate = _plate(extraction, host, normal, exit_along)
+    if not plate:
+        return _unfilled(host_refs, [], given, [], ["how thick the plate is - it was not measured"])
+    factor, ligament_source = knowledge.rule("hole_ligament")
+    ligament = round(factor * plate)
+    smallest = max(10.0, 5.0 * math.ceil(plate / 5.0))
+    largest = max(smallest + 10.0, 5.0 * math.floor(4.0 * plate / 5.0))
+    suggested = min(largest, max(smallest, 5.0 * round(2.0 * plate / 5.0)))
+    angle = round(_long_axis_deg(extraction, host) / 15.0) * 15.0 % 180.0
+    free: dict[str, dict] = {
+        "pattern": {
+            "options": ["grid", "staggered"],
+            "suggested": "staggered",
+            "source": "default",
+            "basis": "a square lattice, or every other row shifted by half",
+        },
+        "diameter_mm": {
+            "low": smallest,
+            "high": largest,
+            "step": 5.0,
+            "unit": "mm",
+            "suggested": suggested,
+            "source": "measured",
+            "basis": f"one to four times the {plate:.1f} mm plate",
+        },
+        "pitch_mm": {
+            "low": 2.0 * smallest,
+            "high": 5.0 * largest,
+            "step": 10.0,
+            "unit": "mm",
+            "suggested": 10.0 * round(3.0 * suggested / 10.0),
+            "source": "default",
+            "basis": "two to five diameters between centres",
+        },
+        "angle_deg": {
+            "low": 0.0,
+            "high": 165.0,
+            "step": 15.0,
+            "unit": "°",
+            "suggested": angle,
+            "source": "measured",
+            "basis": "the plate's longest direction",
+        },
+        "edge_mm": {
+            "low": float(ligament),
+            "high": float(3 * ligament),
+            "step": 5.0,
+            "unit": "mm",
+            "suggested": float(2 * ligament),
+            "source": "default",
+            "basis": "one to three plate thicknesses from the plate's edges and the walls round it",
+        },
+        "ligament_mm": {
+            "low": float(ligament),
+            "high": float(ligament),
+            "step": 1.0,
+            "unit": "mm",
+            "suggested": float(ligament),
+            "source": "default",
+            "basis": ligament_source,
+        },
+    }
+    free.update(given)
+    rules: list[dict[str, Any]] = []
+    holes, _ = _holes_on(features, host_refs)
+    if holes:
+        rules.append(
+            {
+                "kind": "keep_clear_of",
+                "refs": holes,
+                "params": {"clearance_mm": float(ligament)},
+                "strength": "assumed",
+                "by": "part",
+                "text": f"{len(holes)} holes the plate has already, {ligament} mm clear",
+                "basis": ligament_source,
+            }
+        )
+    return {
+        "where": {"support": host_refs, "anchors": [], "read_off": []},
+        "free": free,
+        "rules": rules,
+        "measured": [
+            {
+                "what": "plate the holes go through, measured",
+                "value": round(plate, 1),
+                "on": host_refs[0],
+                "confirmed": False,
+            }
+        ],
+        "pull": None,
+        "needed": [],
+        "problems": [],
+        "cannot": None,
+        "note": {"plate": f"{plate:.1f} mm thick, measured through it"},
+    }
+
+
+def _material(given: dict[str, dict]) -> dict[str, Any]:
+    """What the part is cast in: one material, which its designs do not change - the one the words
+    name, else the one assumed until someone says which."""
+    default, why = knowledge.default_material()
+    free: dict[str, dict] = {
+        "material": {
+            "options": [default],
+            "suggested": default,
+            "source": "default",
+            "basis": "a part is cast in one material, which its designs do not change; "
+            f"assumed until someone says which: {why}",
+        }
+    }
+    free.update(given)
+    return {
+        "where": {"support": [], "anchors": [], "read_off": []},
+        "free": free,
+        "rules": [],
+        "measured": [],
+        "pull": None,
+        "needed": [],
+        "problems": [],
+        "cannot": None,
+        "note": {},
     }
 
 

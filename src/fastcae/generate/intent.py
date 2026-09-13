@@ -22,16 +22,20 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .. import cache
+from .. import cache, knowledge
 from ..extract import Extraction
 from ..project import Project
-from ..spec import Placement, Version
+from ..spec import HoleSet, Placement, Version
+from ..study import INTERFACE_CLEARANCE_MM
 from .checks import Finding, Rules, check
 from .compose import CODE_COMPOSE, Composition, compose, margin_for, window_between
 from .designs import Design, _worst
 from .field import Field, field_for
-from .placement import Placed, place_all
+from .holes import cut
+from .placement import Drilled, Placed, _Faces, place_all
+from .screen import face_offsets, measure_walls, raised_floors, screen
 from .surface import Surface, recontour, surface_for
+from .thicken import move_faces, moved_faces
 
 FIDELITIES = ("preview", "full")
 CODE = (
@@ -39,6 +43,9 @@ CODE = (
     "generate/placement.py",
     "generate/intent.py",
     "generate/checks.py",
+    "generate/holes.py",
+    "generate/thicken.py",
+    "generate/screen.py",
     "spec.py",
 )
 
@@ -56,6 +63,8 @@ class Opened:
     fidelity: str
     base: Field
     surface: Surface
+    patches: dict = field(default_factory=dict)
+    """The faces each block of faces moved samples, kept for every design that moves them."""
 
     @staticmethod
     def open(
@@ -71,8 +80,11 @@ class Opened:
             raise IntentError(f"fidelity is one of {', '.join(FIDELITIES)}")
         if extraction.tess is None:
             raise IntentError("no geometry was read")
-        smallest = min(p.section.root_fillet_mm for p in version.placements)
-        full = (radius or smallest) / 4.0
+        if radius is None:
+            if not version.placements:
+                raise IntentError("nothing in the spec says how finely to open the part")
+            radius = min(p.section.root_fillet_mm for p in version.placements)
+        full = radius / 4.0
         spacing = full if fidelity == "full" else 2.0 * full
         base, _ = field_for(
             project.root, extraction.tess, extraction.cad_digest, spacing_mm=spacing
@@ -92,40 +104,120 @@ class Made:
     fidelity: str = "preview"
 
 
-def make(opened: Opened, version: Version, levers: dict[str, float] | None = None) -> Made:
-    """The design ``version`` describes with ``levers`` applied. See the module note."""
+def make(
+    opened: Opened,
+    version: Version,
+    levers: dict[str, float] | None = None,
+    *,
+    finder: _Faces | None = None,
+    memo: dict | None = None,
+) -> Made:
+    """The design ``version`` describes with ``levers`` applied. See the module note.
+
+    In order: the faces it moves, exactly; its ribs and their pads, filleted to the part where it
+    now is; its holes, cut. Then the checks - on the part as moved, what ribs stand on and end on -
+    and what screening found besides."""
     started = time.perf_counter()
     levers = dict(levers or {})
     placements = _apply(version, levers)
     extraction = opened.extraction
-    assert extraction.features is not None and extraction.atlas is not None
-    assert extraction.tess is not None
-    rules = _rules(version)
+    features, tess = extraction.features, extraction.tess
+    assert features is not None and extraction.atlas is not None and tess is not None
+    rules = _rules(version) if placements else None
+    finder = finder or _Faces(tess)
 
-    # Each placement after those whose ribs it keeps clear of.
+    # Each block after those it keeps clear of, on the part with its faces moved.
     placed = place_all(
-        opened.base, extraction.features, extraction.atlas, extraction.tess, placements
+        opened.base,
+        features,
+        extraction.atlas,
+        tess,
+        placements,
+        version.holes,
+        offsets=face_offsets(features, version.offsets),
+        finder=finder,
+        memo=memo,
     )
-    ribs = [rib for result in placed.values() for rib in result.ribs]
-    radius = min(p.section.root_fillet_mm for p in placements)
+    ribs = [rib for p in placements for rib in placed[p.id].ribs]
+    pads = [pad for p in placements for pad in placed[p.id].pads]
+    holes = [hole for hs in version.holes for hole in placed[hs.id].holes]
+    solids = [*ribs, *pads]
+    # Which block each rib and pad is of: it is joined to the part with that block's fillet, and
+    # held to that block's rules.
+    owner_of = [p.id for p in placements for _ in placed[p.id].ribs]
+    owner_of += [p.id for p in placements for _ in placed[p.id].pads]
+    fillet_of = {p.id: p.section.root_fillet_mm for p in placements}
+    radii = [fillet_of[owner] for owner in owner_of]
+    radius = max(radii, default=0.0)
 
     constraints = [f for p in placements for f in _constraints(p, placed[p.id])]
-    if not ribs:
-        reasons = "; ".join(_why_none(placed[p.id]) for p in placements)
-        composition = Composition(field=opened.base, changed=np.empty(0, dtype=np.int64))
-        findings = [
-            *constraints,
-            Finding("ribs placed", "reject", f"no rib could be placed: {reasons}", "", False),
-        ]
-        surface = opened.surface
-    else:
-        window = _window(opened, placements, placed, ribs, radius)
-        composition = compose(opened.base, window, ribs, radius)
-        surface = recontour(
-            opened.surface, composition.field, composition.changed, face_ids_from=extraction.tess
-        )
-        findings = [*constraints, *check(opened.base, window, composition, ribs, surface, rules)]
+    constraints += [f for hs in version.holes for f in _hole_constraints(hs, placed[hs.id])]
+    screened = screen(
+        features,
+        opened.base,
+        placements,
+        version.holes,
+        version.offsets,
+        version.material,
+        placed,
+        measure_walls(extraction, finder.exit_along, version.offsets),
+        opened.surface.volume_mm3,
+    )
+    # What screening holds a design to that the checks do not: the rest the checks say again.
+    constraints += [
+        Finding(f["check"], f["outcome"], f["reason"], f["rule"], True, section="check")
+        for f in screened.findings
+        if f["check"] in SCREENED_ONLY
+    ]
 
+    field = opened.base
+    changed: list[np.ndarray] = []
+    shift = None
+    # The faces the design moves: its own, and floors thickened for ribs too thick for them.
+    offsets = [*version.offsets, *raised_floors(features, placed)]
+    if offsets:
+        kept_closed = _interface_faces(features) - moved_faces(features, offsets)
+        moved = move_faces(
+            opened.base,
+            tess,
+            features,
+            offsets,
+            kept_closed,
+            INTERFACE_CLEARANCE_MM,
+            opened.patches,
+        )
+        field, shift = moved.field, moved.shift
+        changed.append(moved.changed)
+    composition = Composition(field=field, changed=np.empty(0, dtype=np.int64))
+    findings: list[Finding] = [*constraints]
+    if placements and not ribs:
+        reasons = "; ".join(_why_none(placed[p.id]) for p in placements)
+        findings.append(
+            Finding("ribs placed", "reject", f"no rib could be placed: {reasons}", "", False)
+        )
+    window = None
+    if solids:
+        window = _window(opened, placements, placed, solids, radius)
+        composition = compose(field, window, solids, radii, shift=shift)
+        changed.append(composition.changed)
+    if holes:
+        cutting = cut(composition.field, holes)
+        composition.field = cutting.field
+        changed.append(cutting.changed)
+    every = np.unique(np.concatenate(changed)) if changed else np.empty(0, dtype=np.int64)
+    surface = opened.surface
+    if every.size:
+        surface = recontour(opened.surface, composition.field, every, face_ids_from=tess)
+    if solids and window is not None and rules is not None:
+        owners = dict(zip(solids, owner_of, strict=True))
+        findings += check(field, window, composition, solids, surface, rules, owners, shift)
+    else:
+        findings.append(_surface_check(surface))
+
+    chosen = knowledge.material(
+        version.material.material if version.material else knowledge.default_material()[0]
+    )
+    density = float((chosen or {}).get("density_kg_m3", 0.0))
     settings = {"spec_version": version.version, "levers": levers, "fidelity": opened.fidelity}
     design = Design(
         settings=settings,
@@ -136,16 +228,62 @@ def make(opened: Opened, version: Version, levers: dict[str, float] | None = Non
         findings=_worst([findings]),
         stats={
             "ribs": len(ribs),
+            "pads": len(pads),
+            "holes": len(holes),
             "fidelity": opened.fidelity,
             "spacing_mm": opened.base.grid.spacing_mm,
             "volume_cm3": surface.volume_mm3 / 1e3,
             "base_volume_cm3": opened.surface.volume_mm3 / 1e3,
             "added_cm3": (surface.volume_mm3 - opened.surface.volume_mm3) / 1e3,
+            "material": (chosen or {}).get("id"),
+            "mass_kg": round(surface.volume_mm3 * density * 1e-9, 1),
             "seconds": round(time.perf_counter() - started, 1),
         },
         ribs=ribs,
     )
     return Made(design, placed, version.version, levers, opened.fidelity)
+
+
+# What screening finds that the checks of a built design do not look at.
+SCREENED_ONLY = ("rib on floor", "wall kept", "holes placed", "holes clear of ribs")
+
+
+def _interface_faces(features) -> set[int]:
+    """The faces of every hole and bore on the part - its interfaces, kept as they are."""
+    from ..features import FeatureKind
+
+    return {
+        face
+        for kind in (FeatureKind.HOLE, FeatureKind.BORE)
+        for feature in features.of_kind(kind)
+        for face in feature.face_ids
+    }
+
+
+def _surface_check(surface: Surface) -> Finding:
+    from .checks import _surface
+
+    return _surface(surface)
+
+
+def _hole_constraints(holes: HoleSet, drilled: Drilled) -> list[Finding]:
+    """A set of holes, verified on the holes it actually cut."""
+    rule = (
+        f"Ø{holes.diameter_mm:g} at {holes.pitch_mm:g} mm pitch, {holes.edge_mm:g} mm from the "
+        f"plate's edges, {holes.ligament_mm:g} mm of metal from anything else"
+    )
+    outcome = "pass" if drilled.holes else "reject"
+    return [
+        Finding(
+            f"holes ({holes.id})",
+            outcome,
+            drilled.tally(),
+            rule,
+            False,
+            section="constraint",
+            cites=tuple(holes.cites),
+        )
+    ]
 
 
 # --- levers ------------------------------------------------------------------------------------
@@ -191,16 +329,25 @@ def _set(data: dict, path: str, value: float) -> None:
 
 
 def _rules(version: Version) -> Rules:
-    """The checks' thresholds: the part's own from the spec, the rest general and marked so."""
+    """The checks' thresholds: the part's own from the spec - each block's own where it has them,
+    and the fillet each was made with - the rest general and marked so."""
     first = version.placements[0].section
     given = dict(version.rules)
     thickness = given.get("thickness_mm", [first.thickness_mm, first.thickness_mm])
+    windows = given.get("per_block") or {}
+    per_block = {}
+    for placement in version.placements:
+        spans = windows.get(placement.id, {})
+        own = {name: tuple(map(float, span)) for name, span in spans.items()}
+        per_block[placement.id] = {**own, "root_fillet_mm": placement.section.root_fillet_mm}
     rules = Rules(
         thickness_mm=(float(thickness[0]), float(thickness[1])),
         edge_round_mm=first.edge_round_mm,
-        root_fillet_mm=first.root_fillet_mm,
+        # How far a fillet reaches, for the checks that look round a rib's root: the largest.
+        root_fillet_mm=max(p.section.root_fillet_mm for p in version.placements),
         fillet_floor_mm=given.get("fillet_floor_mm"),
         draft_used_deg=first.draft_deg,
+        per_block=per_block,
         **{k: given[k] for k in ("rib_to_wall", "root_gap", "thick_spot") if k in given},
     )
     if rules.missing():
@@ -219,15 +366,28 @@ def _window(opened: Opened, placements, placed, ribs, radius: float):
     # Snapped outward so small changes to the ribs reuse one window.
     snap = 8.0 * base.grid.spacing_mm
     lo, hi = np.floor(lo / snap) * snap, np.ceil(hi / snap) * snap
-    held = sorted({k["feature"] for result in placed.values() for k in result.keep_outs})
-    faces = {f for ref in held for f in features.get(ref).face_ids}
-    clearance = max((k.clearance_mm for p in placements for k in p.keep_out), default=0.0)
+    # Each face kept clear of is held as far as the clearance kept from it - the widest, when
+    # several blocks keep clear of it - not as far as the widest any keep-out asks for anywhere.
+    clearance_of: dict[int, float] = {}
+    for placement in placements:
+        result = placed.get(placement.id)
+        if not isinstance(result, Placed):
+            continue
+        for row in result.keep_outs:
+            clearance = placement.keep_out[row["rule"]].clearance_mm
+            for face in features.get(row["feature"]).face_ids:
+                clearance_of[face] = max(clearance_of.get(face, 0.0), clearance)
+    # The part's distance is exact near each rib - where its fillet reads it - and nowhere else.
+    around = [
+        (np.floor(box[0] / snap) * snap, np.ceil(box[1] / snap) * snap)
+        for box in (rib.bounds() for rib in ribs)
+    ]
     key = cache.key_for(
         base.key,
         ",".join(f"{v:.3f}" for v in (*lo, *hi)),
         f"{radius:.6f}",
-        f"{clearance:.6f}",
-        ",".join(map(str, sorted(faces))),
+        ",".join(f"{face}:{clearance:g}" for face, clearance in sorted(clearance_of.items())),
+        ";".join(",".join(f"{v:.0f}" for v in (*a, *b)) for a, b in sorted(map(_listed, around))),
         code=CODE_COMPOSE,
     )
     window, _ = cache.memoise(
@@ -238,11 +398,15 @@ def _window(opened: Opened, placements, placed, ribs, radius: float):
             lo,
             hi,
             margin_for(base, radius),
-            protected_faces=faces,
-            clearance_mm=clearance,
+            protected_faces=clearance_of,
+            around=around,
         ),
     )
     return window
+
+
+def _listed(box: tuple[np.ndarray, np.ndarray]) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    return tuple(float(v) for v in box[0]), tuple(float(v) for v in box[1])
 
 
 # --- your constraints ----------------------------------------------------------------------------

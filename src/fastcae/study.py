@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -57,8 +58,10 @@ Origin = Literal["you", "selected", "words", "drawing", "cad", "default", "rejec
 # part's interfaces - or, left empty, whoever wrote the version.
 By = Literal["", "words", "part", "platform"]
 
-# What the engine can add. A block asking for anything else is kept, and listed as open.
-ADDS = ("ribs",)
+# What the engine can add: ribs; faces moved along their normal - a wall, a plate or a boss made
+# thicker or thinner; holes through a plate; and what the part is cast in. A block asking for
+# anything else is kept, and listed as open.
+ADDS = ("ribs", "thicken", "holes", "material")
 
 # The free settings a block of ribs is made from. Any other is kept, and listed as open.
 USED = (
@@ -77,7 +80,16 @@ USED = (
     "section",
     "flange_width_mm",
     "flange_thickness_mm",
+    "pads",
 )
+
+# The free settings each kind of block is made from.
+USED_BY = {
+    "ribs": USED,
+    "thicken": ("offset_mm", "blend_mm", "min_wall_mm"),
+    "holes": ("pattern", "diameter_mm", "pitch_mm", "angle_deg", "edge_mm", "ligament_mm"),
+    "material": ("material",),
+}
 
 # The shapes a rib's section may take: a plain web, or a web with a flange along its free edge.
 SECTIONS = ("flat", "T")
@@ -373,6 +385,8 @@ KINDS: dict[str, Kind] = {
     "thickness_to_wall": Kind(
         "{low:g} to {high:g} of the wall met", ("low", "high"), stage="sizes"
     ),
+    "wall_at_least": Kind("no wall thinned below {mm:g} mm", ("mm",), stage="sizes"),
+    "rib_to_wall": Kind("no rib thicker than {ratio:g} of the wall it meets", ("ratio",)),
 }
 
 # Which step of the build enforces each stage, for a rule whose stage is not built yet.
@@ -578,17 +592,28 @@ def _refs(version: StudyVersion) -> set[str]:
     if version.pull is not None and version.pull.along:
         refs.add(version.pull.along)
     refs |= {m.on for m in version.measured}
-    return {r for r in refs if not r.startswith(RIBS)}
+    return {r for r in refs if made_by(r) is None}
 
 
 # The ribs of a block, named like any other entity - ``ribs:b1`` - so any rule that names entities
 # can name them: kept clear of, stayed below.
 RIBS = "ribs:"
+HOLES = "holes:"
 
 
 def ribs_of(ref: str) -> str | None:
     """The block whose ribs a ref names, or None for an entity of the part."""
     return ref[len(RIBS) :] if ref.startswith(RIBS) else None
+
+
+def holes_of(ref: str) -> str | None:
+    """The block whose holes a ref names - ``holes:b3`` - or None."""
+    return ref[len(HOLES) :] if ref.startswith(HOLES) else None
+
+
+def made_by(ref: str) -> str | None:
+    """The block whose features - ribs or holes - a ref names, or None for an entity of the part."""
+    return ribs_of(ref) or holes_of(ref)
 
 
 def _problems(version: StudyVersion, word_ids: set[str], features: FeatureSet) -> list[str]:
@@ -611,9 +636,43 @@ def _problems(version: StudyVersion, word_ids: set[str], features: FeatureSet) -
         if doubled:
             problems.append(f"{', '.join(doubled)} is used twice")
     block_ids = {b.id for b in version.blocks}
+    casting = [b.id for b in version.blocks if b.add == "material"]
+    for block in version.blocks:
+        chosen = block.free.get("material") if block.add == "material" else None
+        if chosen is not None and chosen.options is not None and len(chosen.options) > 1:
+            problems.append(
+                f"{block.id} lets what the part is cast in vary over {len(chosen.options)} "
+                "materials - a part is cast in one, which its designs do not change: choose it"
+            )
+    if len(casting) > 1:
+        problems.append(
+            f"{' and '.join(casting)} each choose what the part is cast in - a part is cast in one "
+            "material: narrow the choices of one, and take the other out"
+        )
+    closed = {
+        face: ref
+        for c in version.constraints
+        if c.kind == "interface"
+        for ref in c.refs
+        if features.get(ref) is not None
+        for face in features.get(ref).face_ids
+    }
     for b in version.blocks:
         if not b.cites:
             problems.append(f"{b.id} cites no words")
+        if b.add == "thicken":
+            moved = {
+                closed[face]
+                for ref in b.where.support
+                if features.get(ref) is not None
+                for face in features.get(ref).face_ids
+                if face in closed
+            }
+            if moved:
+                problems.append(
+                    f"{b.id} moves {', '.join(sorted(moved))}, which the part keeps as it is - "
+                    "move the faces round it instead"
+                )
         unknown_cites(b.id, b.cites)
         for name, domain in b.free.items():
             if domain.source in ASKED and not domain.cites:
@@ -632,13 +691,18 @@ def _problems(version: StudyVersion, word_ids: set[str], features: FeatureSet) -
         unknown_cites(c.id, c.cites)
         if c.block is not None and c.block not in block_ids:
             problems.append(f"{c.id} applies to {c.block}, which is not a block")
-        for other in (ribs_of(r) for r in c.refs):
+        kinds = {b.id: b.add for b in version.blocks}
+        for ref in c.refs:
+            other = made_by(ref)
             if other is None:
                 continue
+            what = "ribs" if ribs_of(ref) else "holes"
             if other not in block_ids:
-                problems.append(f"{c.id} names the ribs of {other}, but there is no block {other}")
+                problems.append(f"{c.id} names the {what} of {other}: there is no block {other}")
             elif other == c.block:
-                problems.append(f"{c.id}: {other} cannot keep clear of its own ribs")
+                problems.append(f"{c.id}: {other} cannot keep clear of its own {what}")
+            elif kinds[other] != what:
+                problems.append(f"{c.id} names the {what} of {other}, which adds {kinds[other]}")
         kind = KINDS.get(c.kind)
         if kind is not None:
             lacking = [p for p in kind.needs if p not in c.params]
@@ -668,7 +732,7 @@ def open_items(version: StudyVersion) -> list[str]:
             items.append(f"{b.id}: nothing can add {b.add} yet")
             continue
         for name in b.free:
-            if name not in USED:
+            if name not in USED_BY[b.add]:
                 items.append(f"{b.id} {name}: nothing uses this setting yet")
     for c in version.constraints:
         kind = KINDS.get(c.kind)
@@ -782,9 +846,10 @@ def layout_of(
 def point(
     version: StudyVersion, block: str, values: dict[str, Any] | None = None
 ) -> dict[str, Any]:
-    """The placement one design of a block is made from: each free setting at the value given, or
-    at its suggested value, and the constraints enforced today as the placement holds them. A
-    straight pattern takes its spacing when the block has one, and its count otherwise."""
+    """What one design of a block is made from: each free setting at the value given, or at its
+    suggested value, and the constraints enforced today as the block's kind holds them - a
+    placement of ribs, faces to move, holes to cut, or the material. A straight pattern of ribs
+    takes its spacing when the block has one, and its count otherwise."""
     found = next((b for b in version.blocks if b.id == block), None)
     if found is None:
         raise StudyError(f"there is no block {block}")
@@ -792,14 +857,28 @@ def point(
         raise StudyError(f"nothing can add {found.add} yet")
     chosen: dict[str, Any] = {name: d.suggested for name, d in found.free.items()}
     chosen.update(values or {})
-    lacking = [n for n in ("generator", "thickness_mm", "root_fillet_mm") if chosen.get(n) is None]
-    if lacking:
-        raise StudyError(f"{block} has no value for {', '.join(lacking)}")
     rules = [
         c
         for c in version.constraints
         if c.block in (None, found.id) and c.kind in KINDS and KINDS[c.kind].enforced
     ]
+    if found.add == "material":
+        if not chosen.get("material"):
+            raise StudyError(f"{block} has no material")
+        return {
+            "id": found.id,
+            "kind": "material",
+            "material": str(chosen["material"]),
+            "cites": list(found.cites),
+        }
+    if found.add == "thicken":
+        return _thicken_point(found, chosen)
+    keep_out, clear_of = _keeps(found, rules)
+    if found.add == "holes":
+        return _holes_point(found, chosen, keep_out, clear_of)
+    lacking = [n for n in ("generator", "thickness_mm", "root_fillet_mm") if chosen.get(n) is None]
+    if lacking:
+        raise StudyError(f"{block} has no value for {', '.join(lacking)}")
 
     generator = str(chosen["generator"])
     angle = float(chosen.get("angle_deg") or 0.0)
@@ -816,32 +895,6 @@ def point(
     else:
         layout = layout_of(generator, angle, count=chosen.get("count"))
 
-    # What ribs keep clear of: every feature at the largest clearance any rule asks for it - and
-    # the ribs of other blocks, which a design places first.
-    widest: dict[str, float] = {}
-    cited: dict[float, list[str]] = {}
-    clear_of: dict[str, float] = {}
-    for c in (c for c in rules if c.kind == "keep_clear_of"):
-        clearance = float(c.params["clearance_mm"])
-        for ref in c.refs:
-            other = ribs_of(ref)
-            if other is not None:
-                if other != found.id:
-                    clear_of[other] = max(clear_of.get(other, clearance), clearance)
-                continue
-            widest[ref] = max(widest.get(ref, clearance), clearance)
-        cited.setdefault(clearance, [])
-        cited[clearance] += [x for x in c.cites if x not in cited[clearance]]
-    keep_out = []
-    for clearance in sorted({*widest.values()}, reverse=True):
-        keep_out.append(
-            {
-                "features": [ref for ref, w in widest.items() if w == clearance],
-                "clearance_mm": clearance,
-                "cites": cited.get(clearance, []),
-            }
-        )
-
     height: dict[str, Any] = {
         "top": str(chosen.get("top") or "slope"),
         "fraction": float(chosen.get("height_fraction") or 1.0),
@@ -853,6 +906,7 @@ def point(
     caps = [float(c.params["mm"]) for c in rules if c.kind == "height_at_most"]
     if caps:
         height["max_mm"] = min(caps)
+    ratios = [float(c.params["ratio"]) for c in rules if c.kind == "rib_to_wall"]
     return {
         "id": found.id,
         "host": list(found.where.support),
@@ -862,6 +916,80 @@ def point(
         "height": height,
         "section": _section(chosen),
         "connection": "supports" if any(c.kind == "ends_on" for c in rules) else "free",
+        "clear_of": list(clear_of),
+        "clear_of_mm": max(clear_of.values(), default=0.0),
+        "pads": str(chosen.get("pads") or "off") == "on",
+        # Held to the wall it meets only when a rule says how far; the engineer may take it out.
+        "rib_to_wall": min(ratios) if ratios else None,
+        "cites": list(found.cites),
+    }
+
+
+def _keeps(found: Block, rules: list[Constraint]) -> tuple[list[dict[str, Any]], dict[str, float]]:
+    """What a block keeps clear of: every feature at the largest clearance any rule asks for it -
+    and the ribs or holes of other blocks, which a design places first, at theirs."""
+    widest: dict[str, float] = {}
+    cited: dict[float, list[str]] = {}
+    clear_of: dict[str, float] = {}
+    for c in (c for c in rules if c.kind == "keep_clear_of"):
+        clearance = float(c.params["clearance_mm"])
+        for ref in c.refs:
+            other = made_by(ref)
+            if other is not None:
+                if other != found.id:
+                    clear_of[other] = max(clear_of.get(other, clearance), clearance)
+                continue
+            widest[ref] = max(widest.get(ref, clearance), clearance)
+        cited.setdefault(clearance, [])
+        cited[clearance] += [x for x in c.cites if x not in cited[clearance]]
+    keep_out = [
+        {
+            "features": [ref for ref, w in widest.items() if w == clearance],
+            "clearance_mm": clearance,
+            "cites": cited.get(clearance, []),
+        }
+        for clearance in sorted({*widest.values()}, reverse=True)
+    ]
+    return keep_out, clear_of
+
+
+def _thicken_point(found: Block, chosen: dict[str, Any]) -> dict[str, Any]:
+    """Faces to move, and how far: an offset along their own normal, blended into what is round
+    them, never thinning a wall below its least."""
+    if chosen.get("offset_mm") is None:
+        raise StudyError(f"{found.id} has no value for offset_mm")
+    return {
+        "id": found.id,
+        "kind": "thicken",
+        "faces": list(found.where.support),
+        "offset_mm": float(chosen["offset_mm"]),
+        "blend_mm": float(chosen.get("blend_mm") or 20.0),
+        "min_wall_mm": float(chosen.get("min_wall_mm") or 0.0),
+        "cites": list(found.cites),
+    }
+
+
+def _holes_point(
+    found: Block,
+    chosen: dict[str, Any],
+    keep_out: list[dict[str, Any]],
+    clear_of: dict[str, float],
+) -> dict[str, Any]:
+    """Holes to cut through a plate, on a lattice, clear of what the block keeps clear of."""
+    lacking = [n for n in ("diameter_mm", "pitch_mm") if chosen.get(n) is None]
+    if lacking:
+        raise StudyError(f"{found.id} has no value for {', '.join(lacking)}")
+    return {
+        "id": found.id,
+        "kind": "holes",
+        "host": list(found.where.support),
+        "pattern": str(chosen.get("pattern") or "grid"),
+        "diameter_mm": float(chosen["diameter_mm"]),
+        "pitch_mm": float(chosen["pitch_mm"]),
+        "angle_deg": float(chosen.get("angle_deg") or 0.0),
+        "edge_mm": float(chosen.get("edge_mm") or 0.0),
+        "ligament_mm": float(chosen.get("ligament_mm") or 0.0),
+        "keep_out": keep_out,
         "clear_of": list(clear_of),
         "clear_of_mm": max(clear_of.values(), default=0.0),
         "cites": list(found.cites),
@@ -923,6 +1051,48 @@ def sample(
     return points
 
 
+def spread(
+    version: StudyVersion, seed: int | None = None, blocks: list[str] | None = None
+) -> Iterator[dict[str, dict[str, Any]]]:
+    """Designs to make, one after another for as long as they are asked for: the suggested one
+    first - every block at its suggested point, as ``{}`` - then a scrambled Sobol spread over every
+    free setting of every block at once - or of ``blocks`` alone, the rest at their suggested
+    points - so no two blocks move in step, each value snapped to its step or drawn by its choices'
+    weights. Points alike are given once; it stops when the spread gives nothing new. The same
+    version and seed give the same points."""
+    from scipy.stats import qmc
+
+    first: dict[str, dict[str, Any]] = {b.id: {} for b in version.blocks}
+    yield first
+    varied = [
+        (b.id, name, d)
+        for b in version.blocks
+        if blocks is None or b.id in blocks
+        for name, d in sorted(b.free.items())
+        if not d.fixed
+    ]
+    if not varied:
+        return
+    engine = qmc.Sobol(
+        d=len(varied), scramble=True, seed=version.target.seed if seed is None else seed
+    )
+    seen = {json.dumps(first, sort_keys=True)}
+    stale = 0
+    while stale < 4:
+        fresh = 0
+        for row in engine.random(1024):
+            values: dict[str, dict[str, Any]] = {b.id: {} for b in version.blocks}
+            for (block, name, domain), u in zip(varied, row, strict=True):
+                values[block][name] = _at(domain, float(u))
+            key = json.dumps(values, sort_keys=True)
+            if key in seen:
+                continue
+            seen.add(key)
+            fresh += 1
+            yield values
+        stale = 0 if fresh else stale + 1
+
+
 def _at(domain: Domain, u: float) -> Any:
     """A setting's value a fraction ``u`` of the way through what it may take."""
     if domain.options is not None:
@@ -943,11 +1113,42 @@ def _at(domain: Domain, u: float) -> Any:
 
 def rules_of(version: StudyVersion) -> dict[str, Any]:
     """The check thresholds a design of this version is held to: the smallest radius allowed, when
-    the study names one."""
+    the study names one; and, for each rib block, the thickness and draft its design space allows -
+    what its ribs are held to when built, rather than any one block's value."""
+    out: dict[str, Any] = {}
     radii = [
         float(c.params["radius_mm"]) for c in version.constraints if c.kind == "smallest_radius"
     ]
-    return {"fillet_floor_mm": max(radii)} if radii else {}
+    if radii:
+        out["fillet_floor_mm"] = max(radii)
+    windows = {}
+    for block in version.blocks:
+        if block.add != "ribs":
+            continue
+        own = {}
+        for name in ("thickness_mm", "draft_deg"):
+            span = _span(block.free.get(name))
+            if span is not None:
+                own[name] = list(span)
+        if own:
+            windows[block.id] = own
+    if windows:
+        out["per_block"] = windows
+    return out
+
+
+def _span(domain: Domain | None) -> tuple[float, float] | None:
+    """The least and most a setting may take: its range, its choices, or the one value it is."""
+    if domain is None:
+        return None
+    if domain.options is not None:
+        numbers = [float(o) for o in domain.options if isinstance(o, (int, float))]
+        return (min(numbers), max(numbers)) if numbers else None
+    if domain.low is not None and domain.high is not None:
+        return float(domain.low), float(domain.high)
+    if isinstance(domain.suggested, (int, float)):
+        return float(domain.suggested), float(domain.suggested)
+    return None
 
 
 # --- finding entities again ----------------------------------------------------------------------
