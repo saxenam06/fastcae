@@ -1,9 +1,10 @@
 .shell {
   display: grid;
   grid-template-columns: var(--rail) 1fr var(--inspector);
-  grid-template-rows: 48px minmax(0, 1fr) 26px;
+  grid-template-rows: 48px auto minmax(0, 1fr) 26px;
   grid-template-areas:
     "topbar topbar topbar"
+    "agent  agent  agent"
     "index  stage  inspector"
     "title  title  title";
   height: 100%;
@@ -28,7 +29,8 @@
   overflow: auto;
 }
 
-/* The rib card's column, opened and closed from the bar above. */
+/* The right-hand column: the variant card on CAD, launching on Campaign, the design on Designs -
+   each folds away to a strip at the edge. */
 .card-pane {
   grid-area: inspector;
   position: relative;
@@ -1155,37 +1157,6 @@ button.quiet:hover {
 }
 
 /* Say what you want: the engineer's words to the agent, and what it asks them to look at. */
-.say-what header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-}
-
-.say-what header button {
-  padding: 0;
-  border: none;
-  background: none;
-  font-size: 11px;
-  color: var(--muted);
-  text-transform: none;
-  letter-spacing: 0;
-  cursor: pointer;
-}
-
-.say-what textarea {
-  box-sizing: border-box;
-  width: 100%;
-  min-height: 54px;
-  font: inherit;
-  font-size: 12px;
-  line-height: 1.4;
-  resize: vertical;
-}
-
-.say-what .actions .dim {
-  font-size: 11px;
-}
-
 .said-line {
   margin-top: 8px;
   font-size: 12px;
@@ -1713,24 +1684,6 @@ button.quiet:hover {
   color: var(--ink);
 }
 
-.go-designs .go-design {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px;
-  padding: 2px 0;
-  font-size: 11px;
-  border-bottom: 1px dotted var(--hairline);
-}
-
-.go-design[data-drawn="true"] {
-  background: var(--blue-wash);
-}
-
-.go-design .icon {
-  margin-left: auto;
-}
-
 .slot-parts {
   display: flex;
   flex-wrap: wrap;
@@ -1987,3 +1940,795 @@ button.quiet:hover {
   height: 3px;
   border-radius: 1px;
 }
+
+/* The study by hand: blocks added from the faces selected, settings changed where they show, what
+   a block keeps clear of - and how many designs. */
+.add-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px 7px;
+  font-size: 11px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.add-row button,
+.setting-editor button {
+  padding: 1px 6px;
+  font-size: 11px;
+}
+
+.study-block > header {
+  display: flex;
+  align-items: center;
+}
+
+.study-block > header .icon {
+  margin-left: auto;
+}
+
+.block-where dd .link,
+.study-setting .link,
+.study-rule .link,
+.keep-clear .link {
+  margin-left: 6px;
+  font-size: 10.5px;
+}
+
+.keep-clear-add,
+.setting-editor,
+.how-many {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+}
+
+.setting-editor {
+  display: flex;
+  margin: 2px 0 4px 12px;
+  padding: 3px 6px;
+  border-left: 2px solid var(--blue-wash);
+}
+
+.setting-editor label {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: 6px;
+}
+
+input.num {
+  width: 52px;
+  padding: 1px 4px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink);
+  background: var(--ground);
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+}
+
+input.num:focus {
+  outline: none;
+  border-color: var(--blue);
+  background: var(--sheet);
+}
+
+.keep-clear-add select {
+  font-size: 11px;
+}
+
+.go-progress,
+.go-alone {
+  margin: 2px 0 4px;
+  font-size: 11px;
+}
+
+.varied-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.varied-head .card-title {
+  margin-right: auto;
+}
+
+.varied-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 11px;
+}
+
+.varied-grid {
+  flex: 1;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.varied-defs {
+  position: absolute;
+}
+
+.varied-card {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--hairline);
+  background: var(--ground);
+}
+
+.varied-plan {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: var(--sheet);
+}
+
+.varied-outline {
+  fill: none;
+  stroke: #adb5bd;
+  stroke-width: 0.6px;
+  vector-effect: non-scaling-stroke;
+}
+
+.varied-rib {
+  stroke-width: 2px;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.varied-pad {
+  stroke-width: 3.5px;
+  vector-effect: non-scaling-stroke;
+}
+
+.varied-hole {
+  stroke-width: 1.2px;
+  vector-effect: non-scaling-stroke;
+}
+
+.varied-card figcaption {
+  padding: 4px 6px 6px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.varied-blocks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  font-size: 10.5px;
+}
+
+.varied-card .actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+/* --- the tabs, and the agent above them -------------------------------------------------------- */
+
+.main-tabs {
+  margin-left: 18px;
+  align-self: stretch;
+  align-items: stretch;
+}
+
+.main-tabs button {
+  padding: 0 14px;
+  font-size: 13px;
+}
+
+.main-tabs button[data-ready="false"]:not([data-active="true"]) {
+  color: var(--faint);
+}
+
+.agent-bar {
+  grid-area: agent;
+  background: var(--sheet);
+  border-bottom: 1px solid var(--hairline);
+  min-width: 0;
+}
+
+.agent-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+}
+
+.agent-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--blue);
+}
+
+.agent-line input {
+  flex: 1;
+  min-width: 120px;
+  font: inherit;
+  font-size: 12.5px;
+  padding: 5px 8px;
+  color: var(--ink);
+  background: var(--ground);
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+}
+
+.agent-line input:focus {
+  outline: none;
+  border-color: var(--blue);
+  background: var(--sheet);
+}
+
+/* The answer's fold and a new conversation: small words like the rest of the line, not the
+   large glyph a quiet button elsewhere is. */
+.agent-line button.quiet {
+  padding: 0 2px;
+  font-size: 11.5px;
+  line-height: inherit;
+  color: var(--blue);
+  white-space: nowrap;
+}
+
+.agent-line button.quiet:hover:not(:disabled) {
+  color: var(--blue);
+  text-decoration: underline;
+}
+
+.agent-line button.quiet:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+.agent-selected {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.agent-drawer {
+  max-height: 32vh;
+  overflow: auto;
+  padding: 2px 14px 8px 70px;
+  border-top: 1px dashed var(--hairline);
+}
+
+.agent-drawer .said-line {
+  margin-top: 4px;
+}
+
+.agent-drawer button.link,
+.campaign-doc button.link,
+.launch-card button.link {
+  border: none;
+  background: none;
+  padding: 0 2px;
+  font-size: inherit;
+  color: var(--blue);
+  cursor: pointer;
+}
+
+.agent-drawer button.link:hover,
+.campaign-doc button.link:hover {
+  text-decoration: underline;
+}
+
+/* A pane folded away: a strip at the edge with its name, a click from open again. */
+.pane-strip {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 12px 0;
+  border: none;
+  border-radius: 0;
+  background: var(--sheet);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.pane-strip span {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pane-strip:hover {
+  color: var(--blue);
+  background: var(--ground);
+}
+
+.rib-card-head .pane-fold {
+  margin-left: auto;
+  font-size: 16px;
+  line-height: 1;
+}
+
+/* A few choices side by side, one of them on. */
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.segmented button {
+  border: none;
+  border-right: 1px solid var(--hairline);
+  border-radius: 0;
+  background: var(--sheet);
+  padding: 4px 9px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.segmented button:last-child {
+  border-right: none;
+}
+
+.segmented button[data-active="true"] {
+  background: var(--blue-wash);
+  color: var(--blue);
+  font-weight: 500;
+}
+
+.generate-tabs {
+  display: flex;
+  margin: 10px 12px 4px;
+}
+
+.generate-tabs button {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 12.5px;
+}
+
+/* A page over the part: the part stays loaded underneath, so coming back to it costs nothing. */
+.stage-page {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  overflow: auto;
+  background: var(--ground);
+}
+
+.later {
+  max-width: 640px;
+  margin: 48px auto;
+  padding: 18px 22px;
+  background: var(--sheet);
+  border: 1px solid var(--hairline);
+}
+
+.later h2 {
+  font-size: 15px;
+  margin-bottom: 8px;
+}
+
+.later p {
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.inline-layers {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 0;
+  gap: 2px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid var(--hairline);
+}
+
+/* --- where a design is: a letter a stage, filled once done ------------------------------------ */
+
+.stage-badges {
+  display: inline-flex;
+  gap: 2px;
+  flex: none;
+}
+
+.stage-badge {
+  display: inline-grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--faint);
+  background: var(--sheet);
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+}
+
+.stage-badge[data-state="done"],
+.stage-badge[data-state="pass"] {
+  color: #fff;
+  background: var(--measured);
+  border-color: var(--measured);
+}
+
+.stage-badge[data-state="warn"] {
+  color: #fff;
+  background: var(--running);
+  border-color: var(--running);
+}
+
+.stage-badge[data-state="reject"] {
+  color: #fff;
+  background: var(--conflict);
+  border-color: var(--conflict);
+}
+
+/* --- Campaign ----------------------------------------------------------------------------------- */
+
+.campaign-doc {
+  max-width: 1000px;
+  padding: 16px 22px 40px;
+}
+
+.campaign-section {
+  margin-bottom: 12px;
+  padding: 10px 14px 12px;
+  background: var(--sheet);
+  border: 1px solid var(--hairline);
+}
+
+.campaign-section h2 {
+  margin-bottom: 8px;
+  font-size: 11.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.campaign-section h2 .dim {
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.campaign-section > .card-note {
+  margin-bottom: 6px;
+}
+
+.switch-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  padding: 3px 0;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.switch-row input {
+  margin: 0 3px 0 0;
+  transform: translateY(1px);
+}
+
+.switch-row[data-off="true"] > :not(input) {
+  color: var(--faint);
+  text-decoration: line-through;
+}
+
+.campaign-block {
+  padding: 6px 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.campaign-block:first-of-type {
+  border-top: none;
+}
+
+.campaign-block-body {
+  padding-left: 24px;
+}
+
+.campaign-setting {
+  padding: 1px 0;
+  font-size: 11.5px;
+}
+
+.campaign-setting .tag,
+.campaign-block .tag {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  padding: 0 4px;
+  margin-right: 4px;
+  border-radius: 2px;
+  color: var(--blue);
+  background: var(--blue-wash);
+}
+
+.campaign-setting .tag[data-fixed="true"] {
+  color: var(--muted);
+  background: var(--ground);
+}
+
+.rule-switch {
+  font-size: 11.5px;
+}
+
+.knowledge-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 0;
+  font-size: 12px;
+  border-bottom: 1px dotted var(--hairline);
+}
+
+.knowledge-row dt,
+.knowledge-row dd {
+  margin: 0;
+}
+
+.knowledge-row dd {
+  font-size: 11px;
+  text-align: right;
+}
+
+table.materials {
+  width: 100%;
+  margin-top: 6px;
+  border-collapse: collapse;
+  font-size: 11.5px;
+}
+
+table.materials th,
+table.materials td {
+  padding: 3px 6px;
+  text-align: left;
+  border-bottom: 1px solid var(--hairline);
+}
+
+table.materials th {
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.stage-list-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+
+.launch-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  font-size: 12px;
+}
+
+.launch-line input.num {
+  width: 72px;
+}
+
+.launch-off {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: 11.5px;
+}
+
+.off-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  padding: 1px 4px 1px 7px;
+  font-size: 11px;
+  background: var(--running-wash);
+  border: 1px solid var(--running);
+  border-radius: 9px;
+}
+
+.run-row {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
+
+.run-row .run-name {
+  font-size: 12px;
+}
+
+.run-row .run-detail {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* --- Designs ------------------------------------------------------------------------------------ */
+
+.run-select {
+  width: 100%;
+  padding: 3px;
+  font-size: 12px;
+}
+
+.stage-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.stage-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.design-filters {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.design-row {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+}
+
+.design-row[data-active="true"] {
+  background: var(--blue-wash);
+  border-left-color: var(--blue);
+}
+
+.design-name {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.rank {
+  padding: 0 4px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--muted);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+}
+
+.design-detail {
+  overflow: hidden;
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+}
+
+.design-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+}
+
+.stage-body .overlay.design-key {
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: min(460px, 70%);
+}
+
+.design-key .paths-key,
+.design-key > .card-note {
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--hairline);
+}
+
+.readout-stages {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.readout-stage {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+}
+
+.readout-made div {
+  padding: 1px 0;
+  font-size: 11.5px;
+}
+
+.plans {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  background: var(--sheet);
+}
+
+.plans > .card-note {
+  padding: 12px;
+}
+
+.plans .varied-grid {
+  flex: 1;
+  overflow: visible;
+}
+
+.varied-card {
+  cursor: pointer;
+}
+
+.varied-card[data-selected="true"] {
+  outline: 2px solid var(--blue);
+  outline-offset: -1px;
+}
+
+.varied-line .stage-badge {
+  margin-left: 4px;
+  vertical-align: 1px;
+}
+
+.add-hint {
+  flex-basis: 100%;
+  margin-top: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--ink);
+  background: var(--blue-wash);
+  border-left: 2px solid var(--blue);
+}
+
+.switch-row .chip {
+  margin-left: 0;
+}
+
+.knowledge-row > span:last-child:not(:first-child) {
+  flex: none;
+  max-width: 45%;
+  text-align: right;
+  font-size: 11px;
+}
+
+.paths-said summary {
+  cursor: pointer;
+}
+
+.paths-said .dim {
+  max-height: 22vh;
+  overflow: auto;
+  margin-top: 4px;
+}
+

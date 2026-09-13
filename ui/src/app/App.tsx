@@ -4,9 +4,11 @@
  * Starts empty. There is no model until something has been extracted, and nothing on screen is derived
  * from anything but the files in that project's folder.
  *
- * The chrome describes the **product** - six stages, always shown - and the project's name comes
- * from its folder, so a `DEEPJEB_Bracket/` folder renames the whole application without a code
- * change.
+ * Five tabs, in the order the work happens: the Drawing as read; the CAD, where single variants are
+ * designed by hand on Design a variant; Generate, where campaigns make thousands and every design
+ * is followed through its stages; Learn and Optimize. The agent sits above them all - one
+ * conversation, whichever tab is open. The project's name comes from its folder, so a
+ * `DEEPJEB_Bracket/` folder renames the whole application without a code change.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -17,28 +19,21 @@ import type {
   FaceDetail,
   Feature,
   Mesh,
-  FieldOption,
-  FieldSummary,
   ProjectRow,
   Seed,
   Selection,
   SessionState,
   Step,
   Summary,
-  SurfaceSummary,
-  VoxelCells,
-  StudyInfo,
-  Verdict,
 } from "../api/client";
+import { AgentBar } from "../panel/AgentBar";
 import { ModelIndex } from "../panel/ModelIndex";
 import { DrawingIndex } from "../panel/DrawingIndex";
-import type { Layers } from "../panel/FieldIndex";
-import { FieldIndex } from "../panel/FieldIndex";
-import type { GenerateLayers } from "../panel/GenerateIndex";
-import { GenerateIndex } from "../panel/GenerateIndex";
 import { Inspector } from "../panel/Inspector";
-import { StudyCard } from "../panel/StudyCard";
+import { VariantCard } from "../panel/VariantCard";
 import { Splitter } from "../panel/Splitter";
+import { CampaignLaunch, CampaignPipelineView, CampaignRuns, useCampaign } from "../generate/Campaign";
+import { DesignReadout, DesignStage, DesignTabs, DesignsRail, useDesigns } from "../generate/Designs";
 import { DrawingStage } from "../stage/DrawingStage";
 import { UploadStage } from "../stage/UploadStage";
 import { Stage as GeometryStage } from "../stage/Stage";
@@ -47,7 +42,7 @@ import { SelectionBar } from "../stage/SelectionBar";
 import { DESIGN_PICK } from "../render/renderer";
 import type { ColourMode, LineSet } from "../render/renderer";
 import type { View } from "./product";
-import { ART, PRODUCT, STAGES, VENDOR, VIEWS } from "./product";
+import { ART, PRODUCT, VENDOR, VIEWS } from "./product";
 
 interface Model {
   summary: Summary;
@@ -60,6 +55,12 @@ interface Model {
   controlled: Set<number>;
 }
 
+/** Generate's two halves: launching campaigns, and the designs they kept. */
+type GenerateTab = "campaign" | "designs";
+
+/** The right-hand panes that fold away to the edge, one a place. */
+type Pane = "cad" | "campaign" | "designs";
+
 export function App() {
   const [session, setSession] = useState<SessionState | null>(null);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
@@ -68,6 +69,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
 
   const [view, setView] = useState<View>("drawing");
+  const [generateTab, setGenerateTab] = useState<GenerateTab>("campaign");
   const [selection, setSelection] = useState<Selection | null>(null);
   const [face, setFace] = useState<FaceDetail | null>(null);
   const [hovered, setHovered] = useState<number | null>(null);
@@ -83,35 +85,26 @@ export function App() {
   const [activeSeed, setActiveSeed] = useState<number | null>(null);
   const [kindFilter, setKindFilter] = useState<string | null>(null);
   const [ofKind, setOfKind] = useState<Feature[] | null>(null);
-
-  // The field and the surface contoured out of it, kept apart from `model` because they belong to
-  // Generate rather than to what the artifacts said, and because building one costs minutes.
-  const [fieldInfo, setFieldInfo] = useState<FieldSummary | null>(null);
-  const [fieldSurface, setFieldSurface] = useState<SurfaceSummary | null>(null);
-  const [fieldMesh, setFieldMesh] = useState<Mesh | null>(null);
-  const [voxels, setVoxels] = useState<VoxelCells | null>(null);
-  const [fieldBusy, setFieldBusy] = useState<string | null>(null);
   const [calloutFilter, setCalloutFilter] = useState<string | null>(null);
-  const [spacings, setSpacings] = useState<FieldOption[]>([]);
 
-  // Generate: the study, and the ribs of the last design made from it.
-  const [studyInfo, setStudyInfo] = useState<StudyInfo | null>(null);
-  const [madeMesh, setMadeMesh] = useState<Mesh | null>(null);
-  const [designError, setDesignError] = useState<string | null>(null);
-  const [generateLayers, setGenerateLayers] = useState<GenerateLayers>({
-    geometry: true,
-    design: true,
-  });
+  // CAD: the variant last made on Design a variant, drawn over the part, and where the card would
+  // put ribs before anything is made.
+  const [variantMesh, setVariantMesh] = useState<Mesh | null>(null);
+  const [cardLines, setCardLines] = useState<LineSet | null>(null);
+  const [showPart, setShowPart] = useState(true);
+  const [showVariant, setShowVariant] = useState(true);
+  // Bumped when the agent changes the study, so the card reads itself again.
+  const [cardRefresh, setCardRefresh] = useState(0);
 
   // Pane widths, remembered between sessions. Losing them on every reload is a small annoyance
   // that never stops being annoying.
   const [railWidth, setRailWidth] = useState(() => remembered("fastcae.rail", 300));
-  const [cardWidth, setCardWidth] = useState(() => remembered("fastcae.card", 360));
-  const [cardOpen, setCardOpen] = useState(true);
-  // Bumped when the agent changes the study, so the study card reads itself again.
-  const [cardRefresh, setCardRefresh] = useState(0);
-  // Where the study would put ribs, drawn on the part before anything is made.
-  const [pathLines, setPathLines] = useState<LineSet | null>(null);
+  const [cardWidth, setCardWidth] = useState(() => remembered("fastcae.card", 380));
+  const [open, setOpen] = useState<Record<Pane, boolean>>({
+    cad: true,
+    campaign: true,
+    designs: true,
+  });
 
   useEffect(() => {
     try {
@@ -122,25 +115,9 @@ export function App() {
     }
   }, [railWidth, cardWidth]);
 
-  // The field's own cells are cheap and are the field itself, so they are on by default. The
-  // contour is a reconstruction and costs tens of megabytes, so it is off until asked for.
-  const [layers, setLayers] = useState<Layers>({
-    voxels: true,
-    contour: false,
-    geometry: true,
-  });
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const [state, found] = await Promise.all([api.state(), api.projects()]);
-        setSession(state);
-        setProjects(found);
-      } catch (caught) {
-        setError(String(caught));
-      }
-    })();
-  }, []);
+  const project = session?.project?.name ?? null;
+  const campaign = useCampaign(view === "generate" && generateTab === "campaign", project);
+  const designs = useDesigns(view === "generate" && generateTab === "designs", project);
 
   const loadModel = useCallback(async () => {
     const [summary, steps, mesh, features, kinds, axes, callouts, controlled] =
@@ -158,8 +135,21 @@ export function App() {
       summary, steps, mesh, features, kinds, axes, callouts,
       controlled: new Set(controlled.face_ids),
     });
-    setSpacings(await api.fieldOptions());
   }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [state, found] = await Promise.all([api.state(), api.projects()]);
+        setSession(state);
+        setProjects(found);
+        // A project already open - the page reloaded - is shown again, not asked for.
+        if (state.stage === "model") await loadModel();
+      } catch (caught) {
+        setError(String(caught));
+      }
+    })();
+  }, [loadModel]);
 
   const extract = useCallback(
     async (project: ProjectRow, paths: string[], reuse = true) => {
@@ -187,76 +177,36 @@ export function App() {
     await extract(session.project, paths, false);
   }, [session, extract]);
 
-  // Two steps on purpose. The numbers are the comparison and cost seconds; drawing it can be
-  // hundreds of megabytes, and a browser asked to hold that without warning simply stops.
-  const buildField = useCallback(async (spacingMm?: number) => {
-    setFieldBusy("Sampling the part into a distance field. Minutes the first time, seconds after.");
-    setError(null);
+  // A variant made on the card: the surfaces it changes, drawn over the part. Its verdict is on
+  // the card.
+  const variantMade = useCallback(async () => {
     try {
-      const built = await api.buildField(spacingMm);
-      api.fieldOptions().then(setSpacings);
-      setFieldInfo(built);
-      setFieldBusy(built.from_cache ? "Reading the contour." : "Contouring the field.");
-      const [surface, cells] = await Promise.all([api.fieldSurface(), api.fieldVoxels()]);
-      setFieldSurface(surface);
-      setVoxels(cells);
-    } catch (caught) {
-      setError(String(caught));
-    } finally {
-      setFieldBusy(null);
+      setVariantMesh(await api.designMesh());
+      setShowVariant(true);
+    } catch {
+      setVariantMesh(null);
     }
   }, []);
 
-  useEffect(() => {
-    if (view !== "generate" || model === null) return;
-    api.study().then(setStudyInfo).catch((caught) => setDesignError(String(caught)));
-  }, [view, model]);
-
-  // A design made from the card: its ribs, drawn over the part. Its verdict is on the card.
-  const showDesign = useCallback(async (made: Verdict) => {
-    setMadeMesh(made.ribs > 0 ? await api.designMesh() : null);
+  const openCard = useCallback(() => {
+    setView("cad");
+    setOpen((was) => ({ ...was, cad: true }));
   }, []);
 
-  // The study has a new version - the card was accepted: read it again for the rail.
-  const readStudy = useCallback(() => {
-    api
-      .study()
-      .then(setStudyInfo)
-      .catch((caught) => setDesignError(String(caught)));
-  }, []);
-
-  // The agent filled the card: the card reads itself again, and is shown.
-  const cardFilled = useCallback(() => {
+  // The agent changed the card: it reads itself again, and is opened where it lives.
+  const cardChanged = useCallback(() => {
     setCardRefresh((n) => n + 1);
-    setCardOpen(true);
+    setOpen((was) => ({ ...was, cad: true }));
   }, []);
 
-  // The study card made a design: show it where designs are looked at.
-  const cardDesigned = useCallback(
-    async (made: Verdict) => {
+  const openRun = useCallback(
+    (run: string) => {
       setView("generate");
-      await showDesign(made);
+      setGenerateTab("designs");
+      designs.openRun(run);
     },
-    [showDesign],
+    [designs],
   );
-
-  const forgetField = useCallback(() => {
-    setFieldInfo(null);
-    setFieldSurface(null);
-    setFieldMesh(null);
-    setVoxels(null);
-  }, []);
-
-  const loadFieldMesh = useCallback(async () => {
-    setFieldBusy("Sending the contour to the browser…");
-    try {
-      setFieldMesh(await api.fieldMesh());
-    } catch (caught) {
-      setError(String(caught));
-    } finally {
-      setFieldBusy(null);
-    }
-  }, []);
 
   const reset = useCallback(async () => {
     setSession(await api.reset());
@@ -264,12 +214,8 @@ export function App() {
     setSeeds([]);
     setActiveSeed(null);
     setFace(null);
-    setFieldInfo(null);
-    setFieldSurface(null);
-    setFieldMesh(null);
-    setVoxels(null);
-    setStudyInfo(null);
-    setMadeMesh(null);
+    setVariantMesh(null);
+    setCardLines(null);
     setView("drawing");
   }, []);
 
@@ -297,16 +243,6 @@ export function App() {
     const value = step?.produced?.pages;
     return typeof value === "number" ? value : null;
   }, [model]);
-
-  // What each layer costs to draw, every frame. The only honest answer to "why is this slow".
-  const layerCost = useMemo(
-    () => ({
-      voxels: (voxels?.faces.length ?? 0) * 6,
-      contour: (fieldSurface?.triangles ?? 0) * 3,
-      geometry: (model?.summary.triangles ?? 0) * 3,
-    }),
-    [voxels, fieldSurface, model],
-  );
 
   const selectedFaces = useMemo(() => new Set(selection?.face_ids ?? []), [selection]);
 
@@ -430,7 +366,7 @@ export function App() {
     async (feature: Feature) => {
       selectFaces([...feature.face_ids]);
       if (feature.face_ids.length) setFace(await api.face(feature.face_ids[0]));
-      setView("geometry");
+      setView("cad");
     },
     [selectFaces],
   );
@@ -438,18 +374,41 @@ export function App() {
   if (error && !session) return <div className="error">{error}</div>;
   if (!session) return <div className="loading">starting&hellip;</div>;
 
-  const open = session.stage === "model" && model !== null;
+  const opened = session.stage === "model" && model !== null;
   const title = session.project?.title ?? "no project";
+
+  // What each tab lays out: a rail on the left, a pane on the right - and which pane.
+  const pane: Pane | null =
+    view === "cad" ? "cad" : view === "generate" ? generateTab : null;
+  const hasRail = view === "drawing" || view === "cad" || view === "generate";
+  const paneWidth = pane === null ? 0 : open[pane] ? cardWidth : 30;
+
+  // The part in 3D is kept alive on every tab but the drawing, so going back and forth costs
+  // nothing; what is drawn over it depends on the tab.
+  const onDesigns = view === "generate" && generateTab === "designs";
+  const designField = onDesigns && designs.tab === "field";
+  const designPaths = onDesigns && designs.tab === "paths";
+  const overlay = view === "cad" ? variantMesh : designField ? designs.overlay : null;
+  const lines = view === "cad" ? cardLines : designPaths ? designs.lines : null;
+  const voxels = designField && designs.showCells ? designs.cells : null;
+  const partShown = view === "cad" || designField ? showPart : true;
+  const pageOver =
+    view === "learn" ||
+    view === "optimize" ||
+    (view === "generate" && generateTab === "campaign") ||
+    (onDesigns && !designField && !designPaths);
 
   return (
     <div
       className="shell"
-      data-open={open}
+      data-open={opened}
       // Only while a project is open: the upload screen is one column, and an inline three-column
       // template would override the rule that makes it so.
       style={
-        open
-          ? { gridTemplateColumns: `${railWidth}px 1fr ${cardOpen ? cardWidth : 0}px` }
+        opened
+          ? {
+              gridTemplateColumns: `${hasRail ? railWidth : 0}px minmax(0, 1fr) ${paneWidth}px`,
+            }
           : undefined
       }
     >
@@ -468,18 +427,24 @@ export function App() {
           <b>{title}</b>
           <em>{session.project ? `${session.project.artifacts.length} artifacts` : "not extracted"}</em>
         </span>
+        {opened ? (
+          <nav className="stages main-tabs">
+            {VIEWS.map((entry) => (
+              <button
+                key={entry.id}
+                data-active={view === entry.id}
+                data-ready={entry.ready}
+                onClick={() => setView(entry.id)}
+                title={entry.summary}
+              >
+                {entry.label}
+              </button>
+            ))}
+          </nav>
+        ) : null}
         <span className="spacer" />
-        {open ? (
+        {opened ? (
           <>
-            <button
-              className="pane-toggle"
-              data-open={cardOpen}
-              onClick={() => setCardOpen((was) => !was)}
-              title={cardOpen ? "Hide the study card" : "Show the study card"}
-            >
-              <RibMark />
-              Study
-            </button>
             <button
               onClick={reextract}
               disabled={busy !== null}
@@ -492,103 +457,92 @@ export function App() {
             </button>
           </>
         ) : null}
-        <nav className="stages">
-          {STAGES.map((entry) => (
-            <button
-              key={entry.id}
-              data-active={entry.id === (open ? "model" : "extract")}
-              data-reached={entry.id === "extract" || (open && entry.id === "model")}
-              disabled
-              title={entry.summary}
-            >
-              {entry.label}
-            </button>
-          ))}
-        </nav>
       </header>
 
-      {open ? (
+      {opened ? (
         <>
-          <div className="rail">
-            <div className="rail-scroll">
-            {view === "drawing" ? (
-              <DrawingIndex
-              steps={model.steps}
-              callouts={model.callouts}
-              pages={pages}
-              filter={calloutFilter}
-              onFilter={setCalloutFilter}
-            />
-          ) : view === "generate" ? (
-            <GenerateIndex
-              layers={generateLayers}
-              onLayers={setGenerateLayers}
-              study={studyInfo}
-              selection={selection?.face_ids ?? []}
-              onShow={selectRefs}
-              onCardChanged={cardFilled}
-              error={designError}
-            />
-          ) : view === "field" ? (
-            <FieldIndex
-              field={fieldInfo}
-              surface={fieldSurface}
-              layers={layers}
-              onLayers={setLayers}
-              contourLoaded={fieldMesh !== null}
-              voxelsLoaded={voxels !== null}
-              cost={layerCost}
-              onSpacing={forgetField}
-            />
-          ) : (
-            <ModelIndex
-              summary={model.summary}
-              steps={model.steps}
-              features={ofKind ?? model.features}
-              kinds={model.kinds}
-              axes={model.axes}
-              selectedFaces={selectedFaces}
-              kindFilter={kindFilter}
-              onKindFilter={setKindFilter}
-              onSelectFeature={selectFeature}
-              />
-            )}
+          <AgentBar
+            selection={selection?.face_ids ?? []}
+            onCardChanged={cardChanged}
+            onOpenCard={openCard}
+            cardInView={view === "cad" && open.cad}
+            onShow={selectRefs}
+          />
 
-            {/* The selection belongs beside the features it was made from, and it applies to two
-                tabs of the three - a pane that is empty on the third is a pane in the wrong place. */}
-            {view === "geometry" && (selection || face) ? (
-              <Inspector
-                face={face}
-                selection={selection}
-                onGrow={grow}
-                onSimilar={similar}
-                onSelectFeature={selectFeature}
-                onClear={clearSelection}
-                growAngle={activeAngle}
-                onGrowAngle={setActiveAngle}
-              />
-            ) : null}
+          {hasRail ? (
+            <div className="rail">
+              <div className="rail-scroll">
+                {view === "drawing" ? (
+                  <DrawingIndex
+                    steps={model.steps}
+                    callouts={model.callouts}
+                    pages={pages}
+                    filter={calloutFilter}
+                    onFilter={setCalloutFilter}
+                  />
+                ) : view === "generate" ? (
+                  <>
+                    <nav className="segmented generate-tabs">
+                      <button
+                        data-active={generateTab === "campaign"}
+                        onClick={() => setGenerateTab("campaign")}
+                        title="Launch campaigns, with the whole pipeline in the open"
+                      >
+                        Campaign
+                      </button>
+                      <button
+                        data-active={generateTab === "designs"}
+                        onClick={() => setGenerateTab("designs")}
+                        title="Every design a campaign kept, and how far each has got"
+                      >
+                        Designs
+                      </button>
+                    </nav>
+                    {generateTab === "campaign" ? (
+                      <CampaignRuns
+                        runs={campaign.pipeline?.runs ?? []}
+                        going={campaign.going}
+                        onOpenRun={openRun}
+                      />
+                    ) : (
+                      <DesignsRail designs={designs} />
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <ModelIndex
+                      summary={model.summary}
+                      steps={model.steps}
+                      features={ofKind ?? model.features}
+                      kinds={model.kinds}
+                      axes={model.axes}
+                      selectedFaces={selectedFaces}
+                      kindFilter={kindFilter}
+                      onKindFilter={setKindFilter}
+                      onSelectFeature={selectFeature}
+                    />
+                    {/* The selection belongs beside the features it was made from. */}
+                    {selection || face ? (
+                      <Inspector
+                        face={face}
+                        selection={selection}
+                        onGrow={grow}
+                        onSimilar={similar}
+                        onSelectFeature={selectFeature}
+                        onClear={clearSelection}
+                        growAngle={activeAngle}
+                        onGrowAngle={setActiveAngle}
+                      />
+                    ) : null}
+                  </>
+                )}
+              </div>
+              <Splitter side="right" onResize={(d) => setRailWidth((w) => clampPane(w + d))} />
             </div>
-
-            <Splitter side="right" onResize={(d) => setRailWidth((w) => clampPane(w + d))} />
-          </div>
+          ) : null}
 
           <div className="stage">
-            {/* What you are looking at. The rail follows from this rather than the other way
-                round, so a tab and its own detail never disagree about the subject. */}
-            <nav className="stage-tabs">
-              {VIEWS.map((entry) => (
-                <button
-                  key={entry.id}
-                  data-active={view === entry.id}
-                  onClick={() => setView(entry.id)}
-                  title={entry.summary}
-                >
-                  {entry.label}
-                </button>
-              ))}
-            </nav>
-
+            {onDesigns ? <DesignTabs designs={designs} /> : null}
             <div className="stage-body">
               {view === "drawing" ? (
                 <DrawingStage
@@ -602,63 +556,21 @@ export function App() {
                   filter={calloutFilter}
                   pages={pages}
                 />
-              ) : view === "field" && !fieldInfo ? (
-                <div className="empty-stage">
-                  {fieldBusy ? (
-                    <p className="card-note">{fieldBusy}</p>
-                  ) : (
-                    <>
-                      <p>
-                        The distance field is the representation a design is edited in. Building it
-                        samples the part onto a fixed grid. A finer voxel holds smaller features and
-                        costs more of everything.
-                      </p>
-                      <div className="actions">
-                        {spacings.map((option) => (
-                          <button
-                            key={option.spacing_mm}
-                            onClick={() => buildField(option.spacing_mm)}
-                            title={
-                              option.field_ready
-                                ? "Already built - opens straight away"
-                                : "Not built yet - this samples the whole part"
-                            }
-                          >
-                            {option.spacing_mm} mm
-                            <span className="detail">
-                              {option.field_ready ? "ready" : "minutes"}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
               ) : (
                 <>
                   <GeometryStage
                     mesh={model.mesh}
                     faceCount={model.summary.faces ?? 0}
                     bbox={model.summary.bbox_mm ?? [0, 0, 0, 1, 1, 1]}
-                    showSurface={
-                      view === "field"
-                        ? layers.geometry
-                        : view === "generate"
-                          ? generateLayers.geometry
-                          : true
-                    }
-                    showOverlay={
-                      view === "generate" ? generateLayers.design : view === "field" && layers.contour
-                    }
-                    showVoxels={view === "field" && layers.voxels}
-                    overlay={view === "generate" ? madeMesh : fieldMesh}
-                    overlayAlpha={view === "generate" ? 1.0 : layers.geometry ? 0.42 : 1.0}
-                    overlayTint={view === "generate" ? DESIGN_TINT : undefined}
-                    overlayPick={
-                      view === "generate" ? "design" : view === "field" ? "faces" : "none"
-                    }
-                    voxels={view === "generate" ? null : voxels}
-                    lines={pathLines}
+                    showSurface={partShown}
+                    showOverlay={view === "cad" ? showVariant : true}
+                    showVoxels={voxels !== null}
+                    overlay={overlay}
+                    overlayAlpha={1.0}
+                    overlayTint={DESIGN_TINT}
+                    overlayPick={overlay ? "design" : "none"}
+                    voxels={voxels}
+                    lines={lines}
                     selected={selectedFaces}
                     frozen={model.controlled}
                     exterior={EMPTY}
@@ -667,17 +579,9 @@ export function App() {
                     onHover={setHovered}
                     onPick={pick}
                   />
-                  <div className="overlay">
-                    {view === "field" ? (
-                      layers.contour && !fieldMesh ? (
-                        <button onClick={loadFieldMesh} disabled={fieldBusy !== null}>
-                          {fieldBusy
-                            ? fieldBusy
-                            : `Load the contour (${megabytes(fieldSurface?.vertices ?? 0, fieldSurface?.triangles ?? 0)} MB)`}
-                        </button>
-                      ) : null
-                    ) : view === "generate" ? null : (
-                      (["surface", "frozen"] as ColourMode[]).map((mode) => (
+                  {view === "cad" ? (
+                    <div className="overlay">
+                      {(["surface", "frozen"] as ColourMode[]).map((mode) => (
                         <button
                           key={mode}
                           data-active={colourMode === mode}
@@ -685,62 +589,109 @@ export function App() {
                         >
                           {mode === "frozen" ? "controlled" : mode}
                         </button>
-                      ))
-                    )}
-                  </div>
-                  <SelectionBar
-                    count={selection?.count ?? 0}
-                    seeds={seeds}
-                    active={activeSeed}
-                    onActive={setActiveSeed}
-                    onAngle={setActiveAngle}
-                    onRemove={(faceId) => {
-                      setSeeds((was) => was.filter((s) => s.face !== faceId));
-                      if (faceId === activeSeed) setActiveSeed(null);
-                    }}
-                    onClear={clearSelection}
-                  />
-                  <HoverCard
-                    target={
-                      cardTarget === DESIGN_PICK ? "design" : cardTarget
-                    }
-                    face={cardFace}
-                    pinned={pinned !== null}
-                    onRelease={() => setPinned(null)}
-                  />
-                  <div className="hint">
-                    {view === "field" && voxels ? (
-                      <>
-                        {voxels.faces.length.toLocaleString()} visible cell faces at {voxels.size}{" "}
-                        mm
-                        {fieldSurface
-                          ? ` · ${fieldSurface.shell_cells.toLocaleString()} cells on the surface` +
-                            ` · contour off by ${fieldSurface.volume_error_pct}%`
+                      ))}
+                      {variantMesh ? (
+                        <span className="layers inline-layers">
+                          <button data-on={showPart} onClick={() => setShowPart((was) => !was)}>
+                            <span className="swatch" style={{ background: "#a5a9a4" }} />
+                            part
+                          </button>
+                          <button
+                            data-on={showVariant}
+                            onClick={() => setShowVariant((was) => !was)}
+                          >
+                            <span className="swatch" style={{ background: "#0e6e74" }} />
+                            the variant
+                          </button>
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {onDesigns ? (
+                    <DesignStage designs={designs} showPart={showPart} onPart={setShowPart} />
+                  ) : null}
+                  {!pageOver ? (
+                    <>
+                      <SelectionBar
+                        count={selection?.count ?? 0}
+                        seeds={seeds}
+                        active={activeSeed}
+                        onActive={setActiveSeed}
+                        onAngle={setActiveAngle}
+                        onRemove={(faceId) => {
+                          setSeeds((was) => was.filter((s) => s.face !== faceId));
+                          if (faceId === activeSeed) setActiveSeed(null);
+                        }}
+                        onClear={clearSelection}
+                      />
+                      <HoverCard
+                        target={cardTarget === DESIGN_PICK ? "design" : cardTarget}
+                        face={cardFace}
+                        pinned={pinned !== null}
+                        onRelease={() => setPinned(null)}
+                      />
+                      <div className="hint">
+                        {voxels
+                          ? `${voxels.faces.length.toLocaleString()} visible cell faces of new metal at ${voxels.size} mm · `
                           : ""}
-                      </>
-                    ) : (
-                      <>
                         drag orbit &middot; shift-drag pan &middot; wheel zoom &middot; click pins a
                         face
-                      </>
-                    )}
-                  </div>
+                      </div>
+                    </>
+                  ) : null}
+                  {view === "generate" && generateTab === "campaign" ? (
+                    <div className="stage-page">
+                      <CampaignPipelineView campaign={campaign} onOpenCard={openCard} />
+                    </div>
+                  ) : null}
+                  {view === "learn" || view === "optimize" ? (
+                    <div className="stage-page">
+                      <Later view={view} />
+                    </div>
+                  ) : null}
                 </>
               )}
             </div>
           </div>
 
-          {cardOpen ? (
+          {pane !== null ? (
             <div className="card-pane">
-              <Splitter side="left" onResize={(d) => setCardWidth((w) => clampPane(w - d))} />
-              <StudyCard
-                project={session.project?.name ?? null}
-                refresh={cardRefresh}
-                onShow={selectRefs}
-                onDesign={cardDesigned}
-                onStudyChanged={readStudy}
-                onPaths={setPathLines}
-              />
+              {open[pane] ? (
+                <>
+                  <Splitter side="left" onResize={(d) => setCardWidth((w) => clampPane(w - d))} />
+                  {pane === "cad" ? (
+                    <VariantCard
+                      project={project}
+                      selection={selection?.face_ids ?? []}
+                      refresh={cardRefresh}
+                      onShow={selectRefs}
+                      onDesign={variantMade}
+                      onStudyChanged={() => undefined}
+                      onPaths={setCardLines}
+                      onCollapse={() => setOpen((was) => ({ ...was, cad: false }))}
+                    />
+                  ) : pane === "campaign" ? (
+                    <CampaignLaunch
+                      campaign={campaign}
+                      onOpenRun={openRun}
+                      onCollapse={() => setOpen((was) => ({ ...was, campaign: false }))}
+                    />
+                  ) : (
+                    <DesignReadout
+                      designs={designs}
+                      onCollapse={() => setOpen((was) => ({ ...was, designs: false }))}
+                    />
+                  )}
+                </>
+              ) : (
+                <button
+                  className="pane-strip"
+                  onClick={() => setOpen((was) => ({ ...was, [pane]: true }))}
+                  title="Open it again"
+                >
+                  <span>{PANE_NAMES[pane]}</span>
+                </button>
+              )}
             </div>
           ) : null}
 
@@ -771,18 +722,41 @@ export function App() {
 
 const EMPTY = new Set<number>();
 
+/** What a folded pane says on its strip. */
+const PANE_NAMES: Record<Pane, string> = {
+  cad: "Design a variant",
+  campaign: "Launch a campaign",
+  designs: "The design",
+};
+
 /** The design's new surfaces: teal, a colour nothing else uses - selection is blue. */
 const DESIGN_TINT: [number, number, number] = [0.055, 0.431, 0.455];
 
-/** Ribs standing on a plate, seen end on: the card's mark in the bar. */
-function RibMark() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
-      <path
-        d="M1 14 H15 V12 H1 Z M3 12 V5 H5 V12 Z M7 12 V3 H9 V12 Z M11 12 V5 H13 V12 Z"
-        fill="currentColor"
-      />
-    </svg>
+/** A tab not built yet: what it will do, and what it waits for. */
+function Later({ view }: { view: "learn" | "optimize" }) {
+  return view === "learn" ? (
+    <div className="later">
+      <h2>Learn - not built yet</h2>
+      <p>
+        Learn trains surrogates on a campaign's results - what each design's solve gave back - and
+        says how far they can be believed on designs they were not trained on.
+      </p>
+      <p className="dim">
+        It waits for designs with results: on Generate → Designs, a design goes from its paths (P)
+        to its field (F), mesh (M), solver setup (S) and results (R). Fields are built today;
+        meshing, setup and results come next.
+      </p>
+    </div>
+  ) : (
+    <div className="later">
+      <h2>Optimize - not built yet</h2>
+      <p>
+        Optimize searches the surrogate for designs that do better on the study's objectives,
+        proposes candidates, and verifies the ones worth solving - each a design of the same design
+        space, held to the same rules.
+      </p>
+      <p className="dim">It waits for a surrogate from Learn.</p>
+    </div>
   );
 }
 
@@ -800,13 +774,4 @@ function remembered(key: string, fallback: number): number {
   } catch {
     return fallback;
   }
-}
-
-/**
- * What a surface costs to send, indexed: a position, a packed normal and a face id per vertex,
- * plus three indices per triangle. Vertices are shared wherever they agree about which way the
- * surface faces, so this is a close lower bound rather than an exact figure.
- */
-function megabytes(vertices: number, triangles: number): number {
-  return Math.round((vertices * 20 + triangles * 12) / 1e6);
 }

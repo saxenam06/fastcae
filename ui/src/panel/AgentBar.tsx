@@ -1,10 +1,12 @@
 /**
- * Say what you want: the engineer's words, with the faces selected, go to the agent, which reads the
- * part and writes the study. The study card shows what changed, and waits for Accept or Undo.
+ * The agent, above every tab: the engineer's words - with the faces selected on the part - go to it,
+ * it reads the drawing and the part, and it writes the design space on the variant card, which waits
+ * there for Accept or Undo. One conversation, whichever tab is open.
  *
- * Nothing is decided here, and nothing the card shows is said again. This shows what was said,
- * what the agent is doing while it reads, and its answer: when it filled the card, only the few
- * lines it asked the engineer to look at - with faces as chips that show them on the part.
+ * One line to say something; under it a drawer with what was said, what the agent is doing while it
+ * reads, and its answer - opened when something is sent, closed at a click. When it filled the card,
+ * only the few lines it asked the engineer to look at are said here, with faces as chips that show
+ * them on the part.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -14,8 +16,8 @@ import { Said, Written } from "./shared";
 
 // What each of the agent's tools is doing, as the engineer would say it.
 const DOING: Record<string, string> = {
-  read_study: "reading the study",
-  edit_study: "writing the study",
+  read_study: "reading the design space",
+  edit_study: "writing the design space",
   find: "looking for entities",
   describe: "reading entities",
   relate: "relating them to the part",
@@ -24,11 +26,15 @@ const DOING: Record<string, string> = {
   skill: "reading a skill",
 };
 
-interface SayWhatProps {
+interface AgentBarProps {
   /** The faces selected on the part: they go with what is said. */
   selection: number[];
-  /** The agent filled the card: read it again, and show it. */
+  /** The agent changed the variant card: read it again. */
   onCardChanged: () => void;
+  /** Open the variant card, where what the agent wrote waits. */
+  onOpenCard: () => void;
+  /** Whether the variant card is in view: if not, the answer says where to find it. */
+  cardInView: boolean;
   /** Show these faces and features on the part. */
   onShow: (refs: string[]) => void;
 }
@@ -44,15 +50,17 @@ interface Answer {
 
 const NOTHING: Answer = { filled: false, attention: [], needed: [], text: "" };
 
-export function SayWhat({ selection, onCardChanged, onShow }: SayWhatProps) {
+export function AgentBar(props: AgentBarProps) {
+  const { selection, onCardChanged, onShow } = props;
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState<string | null>(null);
   const [answer, setAnswer] = useState<Answer>(NOTHING);
   const [doing, setDoing] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
 
-  // The last exchange, as the conversation kept it: the pane comes and goes with the tab.
+  // The last exchange, as the conversation kept it.
   useEffect(() => {
     api
       .agentHistory()
@@ -68,6 +76,7 @@ export function SayWhat({ selection, onCardChanged, onShow }: SayWhatProps) {
     const message = text.trim();
     if (!message || busy) return;
     setBusy(true);
+    setOpen(true);
     setSaid(message);
     setText("");
     setAnswer(NOTHING);
@@ -106,46 +115,67 @@ export function SayWhat({ selection, onCardChanged, onShow }: SayWhatProps) {
     setError(null);
   }, []);
 
+  const something = Boolean(said || answer.text || answer.filled || error);
+
   return (
-    <section className="section say-what">
-      <header>
-        Say what you want
-        <button className="link" onClick={() => void fresh()} disabled={busy}>
-          new conversation
-        </button>
-      </header>
-      <div className="body">
-        <textarea
+    <section className="agent-bar" data-open={open && something}>
+      <div className="agent-line">
+        <span className="agent-label" title="Reads the drawing and the part, and writes the design space">
+          Agent
+        </span>
+        <input
           value={text}
-          rows={3}
           disabled={busy}
-          placeholder="What to add, where, and what must hold - the faces selected go with it"
+          placeholder="Say what you want - what to add, where, what must hold. The faces selected go with it."
           onChange={(event) => setText(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) void send();
+            if (event.key === "Enter") void send();
           }}
         />
-        <div className="actions">
-          <button onClick={() => void send()} disabled={busy || !text.trim()}>
-            {busy ? "Reading…" : "Send"}
+        <button onClick={() => void send()} disabled={busy || !text.trim()}>
+          {busy ? "Reading…" : "Send"}
+        </button>
+        <span className="dim agent-selected">
+          {selection.length ? `${selection.length} faces selected` : "no faces selected"}
+        </span>
+        {something ? (
+          <button
+            className="quiet"
+            onClick={() => setOpen((was) => !was)}
+            title={open ? "Fold the answer away" : "Show the last answer"}
+          >
+            {open ? "▴ hide" : busy ? "▾ reading…" : "▾ answer"}
           </button>
-          <span className="dim">
-            {selection.length ? `${selection.length} faces selected` : "no faces selected"} ·
-            Ctrl+Enter sends
-          </span>
-        </div>
-        {said ? <div className="said-line">&ldquo;{said}&rdquo;</div> : null}
-        {doing.length ? <div className="card-note">{doing.join(" · ")}</div> : null}
-        <AnswerView answer={answer} busy={busy} onShow={onShow} />
-        {error ? <div className="warn">{error}</div> : null}
+        ) : null}
+        <button className="quiet" onClick={() => void fresh()} disabled={busy}>
+          new conversation
+        </button>
       </div>
+      {open && something ? (
+        <div className="agent-drawer">
+          {said ? <div className="said-line">&ldquo;{said}&rdquo;</div> : null}
+          {doing.length ? <div className="card-note">{doing.join(" · ")}</div> : null}
+          <AnswerView
+            answer={answer}
+            onShow={onShow}
+            cardInView={props.cardInView}
+            onOpenCard={props.onOpenCard}
+          />
+          {error ? <div className="warn">{error}</div> : null}
+        </div>
+      ) : null}
     </section>
   );
 }
 
 /** The agent's answer. When it filled the card, the card says what changed: only what it asked
- * the engineer to look at is said here. */
-function AnswerView(props: { answer: Answer; busy: boolean; onShow: (refs: string[]) => void }) {
+ * the engineer to look at is said here - and where the card is, when it is not in view. */
+function AnswerView(props: {
+  answer: Answer;
+  onShow: (refs: string[]) => void;
+  cardInView: boolean;
+  onOpenCard: () => void;
+}) {
   const { answer, onShow } = props;
   if (answer.filled) {
     return (
@@ -159,10 +189,15 @@ function AnswerView(props: { answer: Answer; busy: boolean; onShow: (refs: strin
             ))}
           </ul>
         ) : (
-          <div className="dim">Wrote the study: what changed is marked on the study card.</div>
+          <div className="dim">Wrote the design space: what changed is marked on the variant card.</div>
         )}
         {answer.needed.length ? (
           <div className="dim">Still needed: {answer.needed.join(", ")}.</div>
+        ) : null}
+        {!props.cardInView ? (
+          <button className="link" onClick={props.onOpenCard}>
+            open the variant card, on CAD
+          </button>
         ) : null}
       </div>
     );

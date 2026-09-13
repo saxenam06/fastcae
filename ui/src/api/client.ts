@@ -491,7 +491,11 @@ export interface Verdict {
   fidelity: "preview" | "full";
   outcome: Outcome;
   ribs: number;
+  pads?: number;
+  holes?: number;
   added_cm3: number;
+  mass_kg?: number | null;
+  material?: string | null;
   seconds: number;
   constraints: VerdictRow[];
   checks: VerdictRow[];
@@ -511,10 +515,21 @@ export interface StudySetting {
   source: string;
   fixed: boolean;
   basis: string;
+  /** What it may take: a range with a step, or choices - to change by hand on the card. */
+  domain: {
+    low: number | null;
+    high: number | null;
+    step: number | null;
+    options: (number | string)[] | null;
+    suggested: number | string | null;
+    unit: string;
+    /** For what the part is cast in: every material there is, to choose the one it is. */
+    catalogue?: string[];
+  };
   changed?: boolean;
 }
 
-/** A rule as the study card shows it: in words, how firmly, from where and by whom, and whether
+/** A rule as Design a variant shows it: in words, how firmly, from where and by whom, and whether
  * anything enforces it yet - and if not, until when. */
 export interface StudyRule {
   id: string;
@@ -555,7 +570,7 @@ export interface StudyBlockView {
   changed: boolean;
 }
 
-/** The study card: the draft of the study's next version, against the version last accepted. */
+/** Design a variant: the draft of the study's next version, against the version last accepted. */
 export interface StudyDraft {
   accepted: number | null;
   /** Null when the draft cannot be a version: a check refused it. */
@@ -579,24 +594,191 @@ export interface StudyDraft {
   attention: string[];
   /** A few words for every face and feature the draft names. */
   names: Record<string, string>;
+  /** Every run of Go kept for the project, newest first. */
+  runs: KeptRun[];
 }
 
-/** One design Go made: its values, block by block, and what became of each block's paths. */
+/** A campaign's run, kept in `_archived_designs`: its study and version, what it switched off, how
+ * many designs it kept of how many tried, and how many of them are built. */
+export interface KeptRun {
+  run: string;
+  study: string;
+  version: number;
+  made: number;
+  tried: number;
+  seconds: number;
+  seed: number | null;
+  off: Partial<CampaignOff>;
+  built: number;
+  where: string;
+  when: number;
+}
+
+/** What one campaign switches off for itself alone: blocks and rules by id, checks by name. */
+export interface CampaignOff {
+  blocks: string[];
+  rules: string[];
+  checks: string[];
+}
+
+/** The stages a design goes through: paths placed and screened, field built, mesh, solver setup,
+ * results. */
+export type StageKey = "P" | "F" | "M" | "S" | "R";
+/** How a stage came out - as screened, as checked - or ``done`` for one with no verdict, ``none``
+ * for one not reached. */
+export type StageState = "pass" | "warn" | "reject" | "done" | "none";
+
+/** What a campaign runs, in the open. */
+export interface CampaignPipeline {
+  checks: { name: string; rule: string; source: string }[];
+  /** The rules ribs, pads and holes are placed to, and what a block is read off the part as. */
+  placement: { name: string; value: number | null; says: string }[];
+  /** Every check a design goes through when its field is built. */
+  full_checks: { name: string; rule: string }[];
+  interfaces_clear_mm: number;
+  knowledge: { name: string; value: number; source: string }[];
+  materials: {
+    id: string;
+    name: string;
+    density_kg_m3: number;
+    min_wall_mm: number;
+    source: string;
+  }[];
+  sampler: {
+    says: string;
+    pool: { least: number; most: number; tries: number };
+    tries_per_design: number;
+  };
+  stages: { key: StageKey; label: string; built: boolean; says: string }[];
+  runs: KeptRun[];
+}
+
+/** One design of a run, as the list of designs shows it. */
+export interface RunRow {
+  index: number;
+  ribs: number;
+  holes: number;
+  pads: number;
+  mass_kg: number;
+  material: string | null;
+  /** Where it comes among the designs that differ most - 1 the most - or null past them. */
+  rank: number | null;
+  stages: Record<StageKey, StageState>;
+  short: [string, string][];
+}
+
+/** A run's designs as the list shows them, and how many are at each stage. */
+export interface RunDesigns {
+  run: string;
+  version: number;
+  of: number;
+  show: "varied" | "built" | "all";
+  rows: RunRow[];
+  counts: Record<StageKey, number>;
+  /** The designs built, each with how its field was checked. */
+  built: [number, StageState][];
+  blocks: Record<string, string>;
+}
+
+/** One design of a run in full, with its verdict at each fidelity it was built at. */
+export interface RunDesign extends GoDesign {
+  run: string;
+  rank: number | null;
+  short: [string, string][];
+  stages: Record<StageKey, StageState>;
+  built: Partial<Record<"preview" | "full", Verdict>>;
+}
+
+/** A design seen along the pull: ribs and pads as lines - x1, y1, x2, y2, block - and holes as
+ * circles - x, y, radius, block - in mm on the plan. */
+export interface DesignPlan {
+  ribs: [number, number, number, number, string][];
+  pads: [number, number, number, number, string][];
+  holes: [number, number, number, string][];
+}
+
+/** The designs Go kept that differ most, each as a plan with a few words a block, over the
+ * outlines of what the study names and the part's bores. */
+export interface VariedDesigns {
+  of: number;
+  run: string | null;
+  designs: (GoDesign & { plan: DesignPlan; short: [string, string][] })[];
+  outlines: [number, number, number, number][];
+  /** xmin, ymin, xmax, ymax on the plan, in mm. */
+  bounds: [number, number, number, number];
+  blocks: Record<string, string>;
+}
+
+/** One design Go kept: its values, block by block, what every block made, how it screened and what
+ * it weighs. */
 export interface GoDesign {
   index: number;
   values: Record<string, Record<string, unknown>>;
+  outcome: Outcome;
   ribs: number;
-  blocks: Record<string, { ribs: number; says: string }>;
+  pads: number;
+  holes: number;
+  mass_kg: number;
+  added_kg: number;
+  material: string | null;
+  blocks: Record<string, { ribs?: number; holes?: number; pads?: number; says: string }>;
   about: Record<string, string>;
+  findings: { check: string; outcome: Outcome; reason: string; rule: string }[];
+}
+
+/** How far Go has got: points tried, designs kept, and what screened the rest out. */
+export interface GoProgress {
+  tried: number;
+  made: number;
+  rejected: Record<string, number>;
+  seconds: number;
+}
+
+/** A block of the study tried alone: how many of its points made something, of how many. */
+export interface GoAlone {
+  block: string;
+  kept: number;
+  tried: number;
+  rejected: Record<string, number>;
 }
 
 /** What happens while Go makes designs, as it happens. */
 export type GoEvent =
   | { type: "accepted"; version: number }
-  | { type: "started"; version: number; n: number; waiting: string[] }
+  | {
+      type: "started";
+      version: number;
+      n: number;
+      budget: number;
+      waiting: string[];
+      archive: string;
+      run: string;
+      off: CampaignOff;
+    }
+  | ({ type: "block" } & GoAlone)
+  | ({ type: "progress" } & GoProgress)
   | ({ type: "design" } & GoDesign)
-  | { type: "done"; made: number }
+  | ({ type: "done"; asked: number; archive: string } & GoProgress)
   | { type: "error"; message: string };
+
+/** Something done by hand on Design a variant. */
+export interface HandAction {
+  action: "add" | "stand_on" | "end_on" | "setting" | "keep_clear" | "remove" | "confirm" | "designs";
+  block?: string;
+  add?: "ribs" | "webs" | "thicken" | "holes" | "material";
+  refs?: string[];
+  name?: string;
+  value?: number | string;
+  low?: number;
+  high?: number;
+  step?: number;
+  options?: (number | string)[];
+  clearance_mm?: number;
+  rule?: string;
+  n?: number;
+  seed?: number;
+  selected?: number[];
+}
 
 /** One stretch of path the card's layout tried, just off the part, and what became of it. */
 export interface PathLine {
@@ -610,6 +792,8 @@ export interface PathLine {
 export interface CardPaths {
   lines: PathLine[];
   ribs: number;
+  pads?: number;
+  holes?: number;
   paths: number;
   summary: string;
 }
@@ -639,12 +823,17 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-/** Go: many designs from the study, each handed on as it is placed. */
-async function go(n: number, onEvent: (event: GoEvent) => void): Promise<void> {
+/** A campaign: many designs from the study - as many as its target asks for, unless ``n`` says -
+ * spread from ``seed``, with what ``off`` names switched off for this campaign alone; each design
+ * handed on as it is kept. */
+async function go(
+  campaign: { n: number | null; seed?: number | null; off?: Partial<CampaignOff> },
+  onEvent: (event: GoEvent) => void,
+): Promise<void> {
   const response = await fetch("/api/study/go", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ n }),
+    body: JSON.stringify(campaign),
   });
   if (!response.ok || !response.body) {
     const text = await response.text();
@@ -669,15 +858,43 @@ async function go(n: number, onEvent: (event: GoEvent) => void): Promise<void> {
   }
 }
 
+/** A run's name in a path: it is one folder's name, and may hold spaces. */
+const runPath = (run: string) => `/api/runs/${encodeURIComponent(run)}`;
+
 export const api = {
+  campaign: () => getJson<CampaignPipeline>("/api/campaign"),
+  runs: () => getJson<KeptRun[]>("/api/runs"),
+  runDesigns: (
+    run: string,
+    show: "varied" | "built" | "all",
+    k = 30,
+    offset = 0,
+    limit = 200,
+  ) =>
+    getJson<RunDesigns>(
+      `${runPath(run)}/designs?show=${show}&k=${k}&offset=${offset}&limit=${limit}`,
+    ),
+  runDesign: (run: string, index: number) =>
+    getJson<RunDesign>(`${runPath(run)}/designs/${index}`),
+  buildRunDesign: (run: string, index: number, fidelity: "preview" | "full") =>
+    postJson<RunDesign>(`${runPath(run)}/designs/${index}/build`, { fidelity }),
+  runDesignMesh: (run: string, index: number, fidelity: "preview" | "full") =>
+    fetchMesh(`${runPath(run)}/designs/${index}/mesh?fidelity=${fidelity}`),
+  runDesignCells: (run: string, index: number, fidelity: "preview" | "full") =>
+    fetchVoxels(`${runPath(run)}/designs/${index}/cells?fidelity=${fidelity}`),
   studyDraft: () => getJson<{ draft: StudyDraft }>("/api/study/draft"),
   acceptStudy: () => postJson<{ version: number; draft: StudyDraft }>("/api/study/accept", {}),
   undoStudy: () => postJson<{ draft: StudyDraft }>("/api/study/undo", {}),
   dropRule: (id: string) => postJson<{ draft: StudyDraft }>("/api/study/rules/drop", { id }),
-  studyPaths: (which: { draft?: boolean; design?: number } = {}) =>
+  handStudy: (action: HandAction) => postJson<{ draft: StudyDraft }>("/api/study/hand", action),
+  variedDesigns: (k: number, run?: string | null) =>
+    getJson<VariedDesigns>(
+      `/api/study/varied?k=${k}` + (run ? `&run=${encodeURIComponent(run)}` : ""),
+    ),
+  studyPaths: (which: { draft?: boolean; design?: number; run?: string | null } = {}) =>
     postJson<CardPaths>("/api/study/paths", which),
-  studyDesign: (fidelity: "preview" | "full", design?: number) =>
-    postJson<Verdict>("/api/study/design", { fidelity, design: design ?? null }),
+  studyDesign: (fidelity: "preview" | "full", design?: number, run?: string | null) =>
+    postJson<Verdict>("/api/study/design", { fidelity, design: design ?? null, run: run ?? null }),
   go,
   spec: () => getJson<SpecInfo>("/api/spec"),
   specDesign: (fidelity: "preview" | "full", levers: Record<string, number> = {}) =>

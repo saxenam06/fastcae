@@ -82,14 +82,16 @@ export function Stage(props: StageProps) {
     };
     frame = requestAnimationFrame(loop);
 
-    const onResize = () => {
+    // The canvas changes size with the window, and with every pane that opens, folds or is dragged
+    // beside it: redrawn whenever it does, or the picture stretches until something else moves.
+    const sized = new ResizeObserver(() => {
       dirtyRef.current = true;
-    };
-    window.addEventListener("resize", onResize);
+    });
+    sized.observe(canvas);
 
     return () => {
       cancelAnimationFrame(frame);
-      window.removeEventListener("resize", onResize);
+      sized.disconnect();
       renderer.dispose();
       rendererRef.current = null;
     };

@@ -26,87 +26,50 @@ export const PRODUCT = {
 } as const;
 
 /**
- * The three ways to look at what is open.
+ * The tabs, in the order the work happens: what the drawing states, the part as its CAD describes
+ * it - where single variants are designed by hand - campaigns of thousands and the designs they
+ * keep, surrogates trained on them, and the search.
  *
- * `field` is the distance field a design is edited in, drawn against the surface it was built
- * from - the only way to see what the representation kept and what it cost.
+ * Every tab is shown whether or not it is built yet. A shell that hides its unbuilt stages
+ * describes a tool; one that shows them describes a product, and tells anyone looking where what
+ * they are doing now leads.
  */
-export type View = "drawing" | "geometry" | "field" | "generate";
+export type View = "drawing" | "cad" | "generate" | "learn" | "optimize";
 
-/** The tabs on the stage, in the order the work happens. */
-export const VIEWS: { id: View; label: string; summary: string }[] = [
+export const VIEWS: { id: View; label: string; summary: string; ready: boolean }[] = [
   {
     id: "drawing",
     label: "Drawing",
     summary: "What the drawing states, callout by callout, beside the text it was read from.",
+    ready: true,
   },
   {
-    id: "geometry",
-    label: "Geometry",
-    summary: "The CAD as read: faces, axes and the features detected on them.",
-  },
-  {
-    id: "field",
-    label: "Field",
-    summary: "The distance field a design is edited in, and what it reproduces.",
-  },
-  {
-    id: "generate",
-    label: "Generate",
-    summary: "Levers on the geometry, and the variants they produce.",
-  },
-];
-
-/**
- * The stages of the product, shown in full whether or not each one is built yet.
- *
- * Deliberately visible before they work. A shell that hides its unbuilt stages describes a tool;
- * one that shows them describes a product, and it tells anyone looking where the thing they are
- * doing now leads. `available` is what gates interaction, not what gates display.
- */
-export interface Stage {
-  id: string;
-  label: string;
-  summary: string;
-  available: boolean;
-}
-
-export const STAGES: Stage[] = [
-  {
-    id: "extract",
-    label: "Extract",
-    summary: "Artifacts in. What each one yielded, and what could not be read.",
-    available: true,
-  },
-  {
-    id: "model",
-    label: "Model",
-    summary: "What the part geometrically is, and which of it a drawing controls.",
-    available: true,
+    id: "cad",
+    label: "CAD",
+    summary:
+      "The part as its CAD describes it - faces, axes and the features on them - and single " +
+      "variants designed on it by hand.",
+    ready: true,
   },
   {
     id: "generate",
     label: "Generate",
-    summary: "Author design parameters on the geometry and produce variants.",
-    available: false,
-  },
-  {
-    id: "simulate",
-    label: "Simulate",
-    summary: "Run campaigns across the design space and collect responses.",
-    available: false,
+    summary:
+      "Campaigns: thousands of variants spread over the design space, each screened - and every " +
+      "design followed through its stages to the data it yields.",
+    ready: true,
   },
   {
     id: "learn",
     label: "Learn",
-    summary: "Train surrogates on the campaign, and measure whether they can be believed.",
-    available: false,
+    summary: "Surrogates trained on a campaign's results, and how far they can be believed.",
+    ready: false,
   },
   {
     id: "optimize",
     label: "Optimize",
-    summary: "Search the surrogate, propose candidates, verify the ones worth solving.",
-    available: false,
+    summary: "The surrogate searched, candidates proposed, the ones worth solving verified.",
+    ready: false,
   },
 ];
 
