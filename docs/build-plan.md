@@ -388,8 +388,10 @@ product.
 - **What a record keeps** - a design's Zarr store is about 28 MB with the volume (TET10 connectivity,
   displacement and von Mises at every node) beside agenticCAE's surface arrays; about 110 GB at
   4,000 designs. The surface alone and the field would be about a third of that.
-- **The Code_Aster fallback** ran past its 15 minutes on one design of the same size the baseline
-  deck solves in 2 min 35 s; why is not yet known. It is called only when cuDSS fails twice.
+- **The Code_Aster fallback** needs 6-7 GB of its own in WSL; starved of memory by the runner it
+  took seven times as long and ran out its 15 minutes. It now runs one at a time with no design
+  starting meanwhile, and is called only when cuDSS fails twice. On a machine with more memory the
+  runner could leave it room instead of pausing.
 
 ## Later
 

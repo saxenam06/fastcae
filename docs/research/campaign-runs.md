@@ -22,9 +22,14 @@ Twenty designs of a campaign, three at a time. None came out solved, for four re
 - **Windows' 260 characters.** Zarr writes each array through a temporary name 45 characters long;
   in a deep folder a solved design's store failed to write. Stores are written in a short temporary
   folder and moved into place whole.
-- **The Code_Aster fallback ran past 15 minutes** on one design (1.19 M equations, the same size as
-  the baseline deck that took 2 min 35 s) and was stopped by its limit. Not yet understood; cuDSS is
-  the route, and with the card handed back it has not needed the fallback since.
+- **The Code_Aster fallback ran past 15 minutes** on one design and was stopped by its limit. Its
+  own log says why: the solve took 779 s, of which 301 s was the system's - memory, not arithmetic -
+  where the baseline deck's, the same size at the same 6.4 GB peak, took 111 s with 21 s of the
+  system's. The machine had 0.1 GB free: Code_Aster in WSL was starved by the runner's cascade. It
+  now runs one at a time, and no design starts while it runs. On a machine with room it re-solved a
+  design cuDSS had solved - 1.30 M unknowns, the same mesh and setup rebuilt from its record - in
+  192 s, every seat's tilt the same to 10⁻⁷ and the displacement to 1.6·10⁻⁷, the precision a record
+  keeps it in.
 
 ## The unattended run
 

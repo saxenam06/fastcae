@@ -83,6 +83,8 @@ class Shared:
     )
     base: dict[tuple, tetmesh.SizeGrid] = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
+    # Held while Code_Aster runs as a fallback: one at a time, and no design starts meanwhile.
+    fallback: threading.Lock = field(default_factory=threading.Lock)
 
     @staticmethod
     def open(project: Project, run: str) -> Shared:
@@ -179,21 +181,26 @@ class Tracker:
         )
 
 
-def _room(tracker: Tracker, index: int) -> float:
+def _room(shared: Shared, tracker: Tracker, index: int) -> float:
     """Wait, before a design takes its first stage, while the runner holds more of the machine's
-    memory than :data:`MEMORY_SHARE` - the others in flight finish and hand theirs back. Returns
-    the seconds waited."""
+    memory than :data:`MEMORY_SHARE` - the others in flight finish and hand theirs back - or while
+    Code_Aster runs as a fallback, which needs 6-7 GB of its own in WSL: starved, it took seven
+    times as long. Returns the seconds waited."""
     limit = MEMORY_SHARE * machine.physical_gb()
     t0 = time.time()
     said = False
-    while machine.committed_gb() > limit and not tracker.job.cancelled():
+    while not tracker.job.cancelled():
+        held = machine.committed_gb()
+        if held <= limit and not shared.fallback.locked():
+            break
         if not said:
             tracker.set(index, stage="waiting")
-            tracker.job.event(
-                f"design #{index + 1}: waiting - the runner holds {machine.committed_gb():.1f} GB "
-                f"of the {limit:.1f} GB it may use",
-                design=index,
+            why = (
+                "Code_Aster is running as a fallback"
+                if shared.fallback.locked()
+                else f"the runner holds {held:.1f} GB of the {limit:.1f} GB it may use"
             )
+            tracker.job.event(f"design #{index + 1}: waiting - {why}", design=index)
             said = True
         time.sleep(5.0)
     return time.time() - t0
@@ -245,7 +252,12 @@ def _setup(shared: Shared, mesh) -> carry.Carried:  # type: ignore[no-untyped-de
 
 def _solve_aster(shared: Shared, carried: carry.Carried, index: int) -> signals.Answer:
     """The fallback: the carried mesh and setup written as a Code_Aster deck and run - one thread,
-    stopped on Linux's side after a quarter of an hour."""
+    stopped on Linux's side after a quarter of an hour; one at a time, nothing new starting."""
+    with shared.fallback:
+        return _run_aster(shared, carried, index)
+
+
+def _run_aster(shared: Shared, carried: carry.Carried, index: int) -> signals.Answer:
     work = shared.work / f"{index}-aster"
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
@@ -308,7 +320,7 @@ def solve_one(shared: Shared, tracker: Tracker, index: int) -> dict:
     record: dict = {"run": shared.folder.name, "index": index, "started": started, "stages": {}}
     route: list[str] = []
     try:
-        waited = _room(tracker, index)
+        waited = _room(shared, tracker, index)
         if waited:
             record["waited_s"] = waited
             started = time.time()  # the time limit counts from when it could start
