@@ -857,6 +857,18 @@ export interface RunDesign extends GoDesign {
   left_out_said: string;
   recipe: string | null;
   seed: number | null;
+  /** How the runner meshed and solved it, when it has. */
+  solved: {
+    outcome: "solved" | "set aside";
+    reason: string;
+    route: string;
+    seconds: number | null;
+    stages: Record<string, number>;
+    mesh: { tets: number | null; unknowns: number | null; quality_min: number | null };
+    mass_kg: number | null;
+    signals: { name: string; component: string; value: number; unit: string; kind: string }[];
+    solver: { name: string | null; residual: number | null };
+  } | null;
 }
 
 /** A design seen along the pull: ribs and pads as lines - x1, y1, x2, y2, block - and holes as

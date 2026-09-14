@@ -6,21 +6,42 @@
 
 ## Where it stands
 
-**Extract** and **Model** run end to end on any part. **Generate** runs end to end as the product
-flow in [build-plan.md](build-plan.md): the engineer authors **variants** by hand on the CAD tab -
-each one change in one place, with what it may vary and every rule it holds - composes a
-**campaign** of the variants they choose on Generate, counts it, screens a hundred designs, and
-launches it; every design is followed through its stages on Designs, and any one's field is built
-at a click. Meshing, simulation, Learn and Optimize are visible in the interface and not built.
+**Extract** and **Model** run end to end on any part. **Simulate** takes the engineer's solver deck
+and answer for the baseline, reproduces the answer, and walks the route every design will take on
+the baseline itself ([simulate.md](simulate.md)). **Generate** runs end to end as the product flow in
+[build-plan.md](build-plan.md): the engineer authors **variants** by hand on Variant Setup - each
+one change in one place, with what it may vary and every rule it holds - composes a **campaign** of
+the variants they choose, counts it, screens a hundred designs, and launches it; the runner then
+builds, meshes, sets up, solves and records the campaign's designs two or three at a time, and every
+design is followed through its stages on Explore. Models (Learn and Optimize) is visible and not
+built.
 
 Every step of the build plan runs, the clean start included: the housing starts empty. The agent
 is paused: its bar is hidden while variants and campaigns are built by hand.
 
 What runs:
 
-- **Five tabs** - Drawing, CAD, Generate, Learn, Optimize. Each tab lays out a rail of its subject's
-  detail, the subject in the middle, and a pane on the right that folds to a strip at the edge.
-- **Design a variant**, on the CAD tab's right. A tab for each variant kept - its code and name -
+- **Six tabs** - Input (Drawing, CAD, Mesh & setup, Solve), Reproduce, Variant Setup (Variants,
+  Route), Campaign, Explore, Models. Each tab lays out a rail of its subject's detail, the subject in
+  the middle, and a pane on the right that folds to a strip at the edge.
+- **The solver deck, read.** A Code_Aster deck in the project folder - `.export`, `.comm`, MED mesh,
+  and the run's results, tables and log - is read on Extract: the mesh with its groups, the setup,
+  the answer; its groups tied to the CAD faces they lie on. Mesh & setup draws the mesh with the
+  supports, couplings and loads as agenticCAE drew them, named on hover; Solve shows the answer as
+  contours. Everything says whether it was imported, derived or generated.
+- **Reproduce.** The deck's mesh and setup solved again by cuDSS on the runner - on the housing's
+  baseline deck, to about 10⁻¹¹ of Code_Aster in 23 s against its 2 min 35 s - shown one at a time,
+  side by side with one camera, or as the difference; a certificate holds each quantity to its own
+  tolerance.
+- **The route on the baseline** (Variant Setup → Route): the baseline's field, meshed by CGAL held to
+  the deck mesh's sizes, the deck's setup carried by CAD face, solved - about 100 s, and within the
+  gate's marks of the engineer's answer on its own mesh.
+- **A campaign's designs solved** (Campaign, a launched campaign chosen): the runner takes the designs
+  that differ most through build, mesh, setup, solve and record; the page shows how many are solved
+  and set aside, how many an hour, each design's stages and times, and what happened. A design
+  solved leaves a Zarr store, a JSON record and a row of the run's Parquet table; Explore's M, S and
+  R fill from them.
+- **Design a variant**, on Variant Setup's right. A tab for each variant kept - its code and name -
   and one for a new one. A new variant starts from the faces selected on the part and what to add
   there: **ribs on** them, **webs between** them, the faces **thickened** or thinned, **holes in** a
   plate; the card names the faces it will use. Ribs stand on flat faces in one plane: a selection
@@ -75,7 +96,7 @@ What runs:
   keeps it in `<project>/variants/<id>.json` under its name once a point passes, and refuses one
   none of whose points does, saying why. A variant kept is changed and saved, discarded back,
   duplicated or deleted - moved aside, never lost.
-- **Campaign**, on Generate, a card in three steps:
+- **Campaign**, a card in three steps:
   - **Compose**: its name, and the variants it takes, each with how many designs it allows.
   - **Check**, at a glance - a few words an item, its rule on hover: what each variant varies and
     the rules it holds, as pills; what holds always - holes keep their ligament from every
@@ -88,7 +109,7 @@ What runs:
     the most different of two to five times as many; how many designs the variants allow; **Screen
     100** - a hundred drawn, placed, repaired and screened, nothing kept, how many pass and how long
     the launch will take; **Launch**. Its progress - each variant pooled alone, designs kept, tried,
-    repaired and why the rest were not kept - and the campaign opened on Designs when done.
+    repaired and why the rest were not kept - and the campaign opened on Explore when done.
 - **How a campaign draws designs**: each variant alone first - points of what it allows placed,
   repaired and screened, those that pass its pool; then each design a set of the variants, as many
   designs with one as with two or all, and a pool point of each by the method; placed together,
@@ -114,7 +135,7 @@ What runs:
   hash, its own seed, what repair left out, how it screened and its paths; a summary of what was
   tried, kept and dropped and why, how each lever spread, how many distinct rib layouts, how far
   designs sit from their nearest neighbour; and each design built so far.
-- **Designs**, on Generate: a campaign's designs, each with its stages as letters - P its paths
+- **Explore**: a campaign's designs, each with its stages as letters - P its paths
   placed and screened, F its field built and checked, M meshed, S the solver set up, R results -
   coloured by how each came out, and dots for the variants it holds; the 20, 30 or 50 that differ
   most, those built, or all of them 200 at a time; only those holding one variant, when asked. A
@@ -200,7 +221,7 @@ about 60 ms once each block was known; 20 designs of three variants took 2 s abo
   pass nothing, and the engineer narrows them.
 - **A campaign runs on one core.** Placing and screening a design is milliseconds - tens of
   milliseconds with repair on many pieces - and building a design's field minutes, so campaigns are
-  placed and screened, and designs built one at a time on Designs.
+  placed and screened, and designs built one at a time on Explore.
 - **Mass is an estimate** for screening - ribs as plates, fillets and draft aside - beside the base
   part's exact volume; a built design is weighed exactly.
 - **The agent is paused.** Its tools write the study draft; it comes back writing variants and
@@ -378,7 +399,7 @@ Alongside, on Extract:
 | Reproducing | a campaign keeps its card, the part's digest, the code's commit, a copy of its variants, its seed and method; each design its recipe, the recipe's hash and its own seed |
 | What is unstated | explored within ranges read from the part and the drawing, and listed as assumed |
 | A rib | a web between two or more anchors, a floor optional; section, plane and pull direction from the variant |
-| The interface | five tabs - Drawing, CAD, Generate, Learn, Optimize - every one shown built or not; Design a variant on CAD; Generate is Campaign and Designs; the agent's bar hidden while it is paused |
+| The interface | six tabs in the order the work happens - Input, Reproduce, Variant Setup, Campaign, Explore, Models - every one shown built or not; Design a variant on Variant Setup; everything marked imported, derived or generated; the agent's bar hidden while it is paused |
 | Kinds of change | ribs and webs; faces moved along their normal - walls, plates, bosses; holes through a plate on a lattice. The part is cast in one material, which no variant changes. Built in one order - faces moved, then ribs and pads, then holes |
 | Design knowledge | data with its sources, in `knowledge/materials.json`: rib to wall 0.8, root gap 2 thicknesses, a hole's ligament one plate thickness, a least wall 8 mm, six casting materials with density, stiffness, strength and least wall from their standards; where a new variant of ribs starts - 20 mm thick, 100 mm apart, 2 to 5 thicknesses tall, two to ten, three choices of each radius and draft |
 | Pads | on unless the engineer says otherwise: a wall too thin for a rib is padded round its end, never past twice itself; off, the rib is left out |

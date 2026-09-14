@@ -15,9 +15,9 @@ follow their rules, with solver decks. A surrogate trained on them finds groups 
 well on several objectives at once - each a real, castable design - and shows which choices matter
 for the next design.
 
-The engineer brings a plain STEP file and its drawing. On the CAD tab they author **variants**: each
+The engineer brings a plain STEP file and its drawing. On Variant Setup they author **variants**: each
 one change in one place - ribs on a floor, webs between two faces, a wall thickened, holes through a
-plate - with what it may vary and every rule it must hold. On the Generate tab they compose a
+plate - with what it may vary and every rule it must hold. On the Campaign tab they compose a
 **campaign** from the variants they choose, see how many combinations it could make, screen a
 hundred in half a minute, and launch it - twenty designs to try the flow, four thousand for a
 training set. The designs appear in Designs with their stages - paths, field, mesh, setup, results -
@@ -77,7 +77,7 @@ and the ones that differ most side by side.
 STEP + drawing
       │  read once: faces, features, interfaces, the part's field
       ▼
-variants (CAD tab) ─── each: where + levers + rules; samples shown only when they pass
+variants (Variant Setup) ─── each: where + levers + rules; samples shown only when they pass
       │
       ▼
 campaign card ─── variants chosen · checks held · method, n, seed · count · screen 100
@@ -361,25 +361,16 @@ product.
 1. The compiled mesher, with the size rules, the edge lines and the mesh report - built, in the
    bench.
 2. The gate against real CAD - run; the field matches the CAD within the noise of meshing.
-3. The route in the product: each design built, meshed, solved and recorded by the runner, its
-   conveyor, and the run's design list.
-4. Designs made for runs: the fixes below, faces moved on the GPU, the surface drawn when opened,
-   labels from CAD faces, mass from the mesh, every check timed and the slow ones made fast.
-5. Runs one, two and three at a time, as a timeline.
-6. The 40-design check.
-7. Round 1.
+3. The baseline's own solver deck as an input - read, reproduced by cuDSS to 10⁻¹¹, and the route
+   walked on the baseline within the gate's marks ([research/baseline-deck.md](research/baseline-deck.md)).
+4. Designs made for runs - built from a campaign's folder by any process, on the GPU, every check
+   timed; rib heights from what an end meets, floors never thickened, holes that go through.
+5. The route in the product: each design built, meshed, set up, solved and recorded by the runner,
+   two or three at a time, and the run's design list - built; next, 20 designs run unattended.
+6. Runs one, two and three at a time, as a timeline.
+7. The 40-design check.
+8. Round 1.
 
-### Fixes to the designs, before the 40-design check
-
-1. **Rib height.** An end is as tall as what it actually meets, never the metal found behind it (a
-   web reached 422 mm through a 494 mm column behind a 45 mm boss). Webs are no taller than where both
-   sides overlap, their top level by default. Spokes turn only about round things with an axis - a
-   ring's faces map to the ring's axis. Height becomes a setting in thicknesses, 2-5× by default,
-   never taller than what the end meets.
-2. **No floor thickening.** Floors are never thickened for ribs; a rib too thick for its floor is left
-   out, saying why.
-3. **Holes see-through.** The Field view hides the CAD faces a design cuts and draws the design's own
-   surface there; the verdict adds a check that holes go through.
 ### Open
 
 - **Counting the gate passed** - the field is within the noise of meshing the CAD, but three of the

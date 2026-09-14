@@ -299,10 +299,12 @@ def solve_one(shared: Shared, tracker: Tracker, index: int) -> dict:
         record["stages"]["build"] = time.time() - t
         record["build"] = built.verdict
         if built.verdict.get("outcome") == "reject":
+            # The engineer's rules first, then the checks: whichever said no, and why.
+            said = built.verdict.get("constraints", []) + built.verdict.get("checks", [])
             failed = [
-                c["check"] for c in built.verdict.get("checks", []) if c["outcome"] == "reject"
+                f"{c['check']}: {c.get('reason', '')}" for c in said if c["outcome"] == "reject"
             ]
-            raise SetAside("its checks reject it: " + ", ".join(failed[:3]))
+            raise SetAside("its own rules reject it - " + "; ".join(failed)[:400])
         job.event(f"design {index}: built in {record['stages']['build']:.0f} s", design=index)
 
         t = _timed(tracker, index, "mesh", started)

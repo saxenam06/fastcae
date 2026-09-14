@@ -26,13 +26,13 @@ engineer's part.
 
 1. **Extract** names what the part holds - faces, planar groups, holes, bosses, bores, walls,
    fillets - and what the drawing controls.
-2. **Author variants.** On the CAD tab the engineer selects faces and says what to add there - ribs
+2. **Author variants.** On Variant Setup the engineer selects faces and says what to add there - ribs
    on them, webs between them, the faces thickened, holes through a plate. Each **variant** is one
    change in one place, with what it may vary and every rule it must hold, in the part's named
    entities. By hand today; from words too when the model returns - *"ribs between the bearing boss
    and the outer wall, clear of the holes, no taller than the boss"* - written into a variant for
    the engineer to keep.
-3. **Compose a campaign** on Generate: the variants it takes, how its designs are drawn and how
+3. **Compose a campaign** on the Campaign tab: the variants it takes, how its designs are drawn and how
    many; a hundred of them screened in seconds before it is launched.
 4. **Place, repair and screen.** Each design is a set of the variants at a point of each, placed on
    the part, mended by a solver where its pieces break a rule between them, and checked - a
@@ -364,7 +364,7 @@ rule, not a hope.
 
 ## Design a variant
 
-Design a variant - a pane on the CAD tab's right, beside the faces it names - authors one variant at
+Design a variant - a pane on Variant Setup's right, beside the faces it names - authors one variant at
 a time, by hand. A tab for each variant kept, with its code and name, and one for a new variant.
 
 **A new variant starts from faces.** Faces selected on the part, and what to add there: **ribs on**
@@ -441,7 +441,7 @@ the copy it was launched with, and marked where the variant has changed since.
 
 ## A campaign
 
-A **campaign**, on Generate, is a card in three steps, each greyed until the one before holds
+A **campaign**, on the Campaign tab, is a card in three steps, each greyed until the one before holds
 something:
 
 - **Compose** - its name, and the variants it takes, each with what it adds, where, and how many

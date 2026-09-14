@@ -685,10 +685,53 @@ export function DesignReadout(props: { designs: Designs; onCollapse: () => void 
               </section>
             ) : null,
           )}
+          {detail.solved ? <SolvedView solved={detail.solved} /> : null}
           {designs.problem ? <div className="card-note warn">{designs.problem}</div> : null}
         </div>
       )}
     </div>
+  );
+}
+
+/** How the runner meshed and solved the design - or why it set it aside - and the signals derived
+ * from its answer, under the deck's names. */
+function SolvedView({ solved }: { solved: NonNullable<RunDesign["solved"]> }) {
+  const stages = Object.entries(solved.stages)
+    .map(([name, seconds]) => `${name} ${Math.round(seconds)} s`)
+    .join(" · ");
+  return (
+    <section className="rib-slot">
+      <header>
+        <span className="slot-label">solved</span>
+        <span className="chip" data-outcome={solved.outcome === "solved" ? "pass" : "reject"}>
+          {solved.outcome}
+        </span>
+      </header>
+      {solved.outcome === "set aside" ? <div className="card-note warn">{solved.reason}</div> : null}
+      <div className="dim">
+        {solved.route}
+        {solved.seconds ? ` · ${Math.round(solved.seconds)} s` : ""}
+      </div>
+      {stages ? <div className="dim">{stages}</div> : null}
+      {solved.mesh?.unknowns ? (
+        <div className="dim">
+          {solved.mesh.tets?.toLocaleString()} TET10 · {(solved.mesh.unknowns / 1e6).toFixed(2)} M unknowns
+          {solved.mass_kg ? ` · ${solved.mass_kg.toFixed(1)} kg from its mesh` : ""}
+        </div>
+      ) : null}
+      {solved.signals.length ? (
+        <div className="solved-signals">
+          {solved.signals
+            .filter((s) => s.component !== "spin" && s.component !== "reaction")
+            .map((s) => (
+              <div key={`${s.name}.${s.component}`} className="made-row">
+                <span className="mono">{s.name}</span> <span className="dim">{s.component}</span>{" "}
+                <b>{s.value.toPrecision(3)}</b> <span className="dim">{s.unit}</span>
+              </div>
+            ))}
+        </div>
+      ) : null}
+    </section>
   );
 }
 

@@ -2440,9 +2440,9 @@ def kept(session: Session) -> list[dict]:
 STAGES = (
     ("P", "Paths", True, "placed and screened: where its ribs, pads and holes go"),
     ("F", "Field", True, "its field built and checked: the geometry, as voxels and a surface"),
-    ("M", "Mesh", False, "meshed for the solver"),
-    ("S", "Setup", False, "loads, supports and the solver deck"),
-    ("R", "Results", False, "solved: stresses, displacements, frequencies"),
+    ("M", "Mesh", True, "meshed for the solver, by CGAL from its field"),
+    ("S", "Setup", True, "the solver deck's supports, couplings and loads, carried by CAD face"),
+    ("R", "Results", True, "solved: displacement and stress everywhere, the deck's signals"),
 )
 
 # What each stage takes, and what it gives - the pipeline in the open.
@@ -2458,9 +2458,19 @@ STAGE_FLOW = {
         "the design's field - ribs joined with their fillets, faces moved, holes cut - its "
         "surfaces, its new metal as cells, and every field check - minutes a design",
     ),
-    "M": ("a design's field", "a volume mesh for the solver"),
-    "S": ("the mesh; loads and supports", "the solver deck"),
-    "R": ("the solver deck", "stresses, displacements, frequencies"),
+    "M": (
+        "a design's field; the solver deck mesh's element sizes",
+        "quadratic tetrahedra, two through every rib the design adds - seconds a design",
+    ),
+    "S": (
+        "the mesh; the deck's supports, couplings and loads, tied to the CAD's faces",
+        "the deck's setup on the design's mesh, every group where the deck put it",
+    ),
+    "R": (
+        "the mesh and its setup",
+        "displacement and stress at every node, the deck's signals, and the design's record - "
+        "seconds a design on the GPU",
+    ),
 }
 
 # How designs may be drawn, as the campaign card offers them.
@@ -2568,19 +2578,79 @@ def _built(session: Session, run: str) -> dict[int, dict[str, str]]:
     return session.memo[key]
 
 
-def _stages(design: dict, built: dict[str, str] | None) -> dict[str, str]:
+SOLVED_RECORD = re.compile(r"(\d+)\.json")
+
+
+def _solved(session: Session, run: str) -> dict[int, dict[str, str]]:
+    """The designs of a run the runner took on: how far each got - built, meshed, set up, solved -
+    and how each stage came out, from the records it left. Read once for as long as the folder is
+    unchanged."""
+    folder = archive_root(session.project) / run / "solved"
+    if not folder.is_dir():
+        return {}
+    paths = [p for p in folder.iterdir() if SOLVED_RECORD.fullmatch(p.name)]
+    key = ("solved", run, tuple(sorted((p.name, p.stat().st_mtime_ns) for p in paths)))
+    if key not in session.memo:
+        out: dict[int, dict[str, str]] = {}
+        for path in paths:
+            try:
+                record = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            done = record.get("stages") or {}
+            state: dict[str, str] = {}
+            for letter, stage in (("F", "build"), ("M", "mesh"), ("S", "setup"), ("R", "solve")):
+                if stage in done:
+                    verdict = (record.get("build") or {}).get("outcome") if letter == "F" else None
+                    state[letter] = str(verdict or "pass")
+                elif record.get("outcome") != "solved":
+                    state[letter] = "reject"  # where it was set aside
+                    break
+            out[int(path.stem)] = state
+        session.memo[key] = out
+    return session.memo[key]
+
+
+def _solved_brief(session: Session, run: str, index: int) -> dict | None:
+    """How the runner made and solved one design, briefly - or None when it has not taken it on:
+    solved or set aside and why, the route and its times, the mesh, and the deck's signals."""
+    if not _safe(run):
+        return None
+    path = archive_root(session.project) / run / "solved" / f"{int(index)}.json"
+    if not path.is_file():
+        return None
+    record = json.loads(path.read_text(encoding="utf-8"))
+    mesh = record.get("mesh") or {}
+    return {
+        "outcome": record.get("outcome"),
+        "reason": record.get("reason", ""),
+        "route": record.get("route", ""),
+        "seconds": record.get("seconds"),
+        "stages": record.get("stages") or {},
+        "mesh": {k: mesh.get(k) for k in ("tets", "unknowns", "quality_min")},
+        "mass_kg": record.get("mass_kg"),
+        "signals": [s for s in record.get("signals") or [] if s.get("kind") == "derived"],
+        "solver": {k: (record.get("solver") or {}).get(k) for k in ("name", "residual")},
+    }
+
+
+def _stages(
+    design: dict, built: dict[str, str] | None, solved: dict[str, str] | None = None
+) -> dict[str, str]:
     """Where one design is in its stages, and how each came out: its paths as screened - pass or
-    warn, since a run keeps nothing screened out - and its field as checked, in full if it was
-    built in full; ``none`` for a stage not reached."""
+    warn, since a run keeps nothing screened out - its field as checked, in full if it was built
+    in full, and its mesh, setup and results as the runner left them; ``none`` for a stage not
+    reached."""
     field = "none"
     if built:
         field = built.get("full") or built.get("preview") or "none"
+    solved = solved or {}
     return {
         "P": str(design.get("outcome", "pass")),
-        "F": field,
-        "M": "none",
-        "S": "none",
-        "R": "none",
+        "F": field if field != "none" else solved.get("F", "none"),
+        "M": solved.get("M", "none"),
+        "S": solved.get("S", "none"),
+        "R": solved.get("R", "none"),
     }
 
 
@@ -2613,6 +2683,7 @@ def run_designs(
         return {"cannot": found}
     version, designs = found
     built = _built(session, run)
+    solved = _solved(session, run)
     varied_order = _order(session, run, version, designs)
     rank = {index: position + 1 for position, index in enumerate(varied_order)}
     everyone = [b.id for b in version.blocks]
@@ -2623,7 +2694,7 @@ def run_designs(
     if show == "varied":
         order = [i for i in varied_order if holds(i)][: max(1, min(int(k), MOST_VARIED))]
     elif show == "built":
-        order = sorted(i for i in built if i < len(designs) and holds(i))
+        order = sorted(i for i in set(built) | set(solved) if i < len(designs) and holds(i))
     else:
         matching = [i for i in range(len(designs)) if holds(i)]
         order = matching[max(0, offset) : max(0, offset) + limit]
@@ -2632,14 +2703,19 @@ def run_designs(
             **{key: designs[i][key] for key in ("index", "ribs", "holes", "pads", "mass_kg")},
             "material": designs[i].get("material"),
             "rank": rank.get(i),
-            "stages": _stages(designs[i], built.get(i)),
+            "stages": _stages(designs[i], built.get(i), solved.get(i)),
             "short": _short(version, designs[i]),
             "variants": designs[i].get("variants") or everyone,
             "left_out": len(designs[i].get("left_out") or []),
         }
         for i in order
     ]
-    counts = {"P": len(designs), "F": len(built), "M": 0, "S": 0, "R": 0}
+    reached = {
+        letter: sum(s.get(letter) in ("pass", "warn") for s in solved.values())
+        for letter in ("F", "M", "S", "R")
+    }
+    fields = set(built) | {i for i, s in solved.items() if s.get("F") in ("pass", "warn")}
+    counts = {"P": len(designs), "F": len(fields), **{k: reached[k] for k in ("M", "S", "R")}}
     return {
         "run": run,
         "version": version.version,
@@ -2650,7 +2726,9 @@ def run_designs(
         "rows": rows,
         "counts": counts,
         "built": [
-            [i, _stages(designs[i], built[i])["F"]] for i in sorted(built) if i < len(designs)
+            [i, _stages(designs[i], built.get(i), solved.get(i))["F"]]
+            for i in sorted(fields)
+            if i < len(designs)
         ],
         "blocks": {b.id: b.add for b in version.blocks},
         "labels": _labels(session, run),
@@ -2689,8 +2767,9 @@ def run_design(session: Session, run: str, index: int) -> dict:
         "run": run,
         "rank": rank.get(index),
         "short": _short(version, design),
-        "stages": _stages(design, built.get(index)),
+        "stages": _stages(design, built.get(index), _solved(session, run).get(index)),
         "built": verdicts,
+        "solved": _solved_brief(session, run, index),
         "variants": held,
         "absent": [b for b in everyone if b not in held],
         "labels": _labels(session, run),
