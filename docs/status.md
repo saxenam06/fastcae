@@ -199,11 +199,13 @@ about 60 ms once each block was known; 20 designs of three variants took 2 s abo
 - **Bosses and bores are not yet required to go round.** Holes are; convex cylinders are still all
   bosses, and 216 on the housing are mostly rounded wall corners and edge rounds.
 - **The mesh, solver setup and results stages are not built** in the product; a design's M, S and R
-  stay empty, and nothing ranks designs but their geometry and mass. The solving route is measured on
-  design #7 and agenticCAE's design ([../bench/solvers/RESULTS.md](../bench/solvers/RESULTS.md)):
-  TET10 solved by cuDSS on the GPU gives Code_Aster's answer in 13 s.
-- **Meshing a design takes 31-103 minutes.** fTetWild on the design's surface, decimated from 2.5 M
-  triangles, with a 1.9 or 0.95 mm envelope; the solve after it takes 13 s.
+  stay empty, and nothing ranks designs but their geometry and mass. The route is measured on
+  design #7 in the bench ([research/design-to-solution.md](research/design-to-solution.md)): built with
+  the grid's distance on the GPU, meshed straight from the field by CGAL, solved by cuDSS - about 2.5
+  minutes a design, within 2.3 % of Code_Aster on the slow route; none of it is in the product yet.
+- **The design's surface crosses itself** where two sheets pass closer than the grid: dual contouring
+  left 2,333 crossing faces on design #7, nearly all on one 556 mm column. A mesher from the surface
+  cannot fill it without a repair; meshing from the field never makes the surface.
 - **Ribs grow as tall as the metal behind their ends.** An end's height is the tallest column of
   metal found up to 60 mm into what it meets, and the housing's walls are 560-640 mm tall, so ribs
   reach 105-241 mm and a web 422 mm - through a 494 mm column behind a 45 mm boss. No variant holds a
@@ -311,20 +313,20 @@ tight integration on the housing.
 | a campaign of 4,000 designs of ten blocks, together | about 60 ms a design once each block is known |
 | a design built at preview - its field, surfaces and cells, checked, kept | 1.5 to 16 minutes the first time; 80 s once its windows are kept; 45-60 minutes with 262 faces thickened |
 | the preview grid | 425 × 463 × 258 = 50.8 M cells at 3 mm, 5.5 M near the surface; the full grid at 1.5 mm about 403 M |
-| design #7 of `w4zf5` (15 ribs, 11 pads) built at preview, outside the interface | 1,962 s; 2.54 M surface triangles |
-| that design meshed as TET10 by fTetWild, 20 mm | 31 min for 648 k unknowns (1.9 mm envelope); 103 min for 1.06 M (0.95 mm) |
+| design #7 of `w4zf5` (15 ribs, 11 pads) built at preview, outside the interface | 1,962 s; 79 s with the grid's distance on the GPU (bench); 2.54 M surface triangles |
+| that design meshed as TET10 | 46 s straight from the field by CGAL, 905 k unknowns; 73 s from its cleaned surface by gmsh; fTetWild 26-103 min |
 | its TET10 solve, 1.06 M unknowns | 13 s by cuDSS on the GPU (5.2 GB); 35 s PETSc multigrid on the GPU; 57 s Code_Aster, one core |
 | the workstation | i7-13700HX (16 cores, 24 threads), 15.7 GB RAM, RTX 5060 Laptop 8 GB; WSL Ubuntu 24.04 with 12 GB |
 
 ## Next
 
 **Now** - the next phase in [build-plan.md](build-plan.md): first the fixes the engineer asked for
-(rib height, no floor thickening, holes seen through, builds that finish); the solving route, the
-supports and the mesher decided from the measurement on design #7
-([../bench/solvers/RESULTS.md](../bench/solvers/RESULTS.md)) - TET10 and cuDSS recommended, meshing
-now the slow step; then the pipeline that meshes, solves and records each design, the data in rounds,
-the field model, and the agents that supervise it. Mould release with the pull and cores, and the
-engineer's review loop, after.
+(rib height, no floor thickening, holes seen through, builds that finish - on the GPU); the route
+and the supports decided from the measurement on design #7
+([research/design-to-solution.md](research/design-to-solution.md)) - GPU build, CGAL from the field,
+cuDSS recommended - and brought into the product; then the pipeline that meshes, solves and records
+each design, the data in rounds, the field model, and the agents that supervise it. Mould release
+with the pull and cores, and the engineer's review loop, after.
 
 Alongside, on Extract:
 

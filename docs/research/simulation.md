@@ -15,12 +15,12 @@ at full) and a contoured triangle surface. From there:
 |---|---|---|
 | What happens | grid → surface → solid elements (quadratic tets, TET10/C3D10) → solver | each cell of the design's grid becomes an element; no mesh |
 | Can it fail? | meshing sometimes (fTetWild succeeds on about 98.7% of a hard test set) | no |
-| Time per design | mesh about 1 min, solve 2-10 min on CPU *(est.)* | about 10-60 s on a laptop GPU *(est.)* |
-| Bearing tilt, misalignment, deflection | accurate | close; these converge well on grids |
+| Time per design, measured here | mesh 46 s straight from the field (CGAL), solve 13 s (cuDSS on the GPU); fTetWild took 26-103 min, Code_Aster 57 s | 9-109 s on the laptop GPU (voxels, cut cells) |
+| Bearing tilt, misalignment, deflection | accurate - every TET10 solver agrees to 10⁻⁸ | measured 6-17 % off on the worst tilt, up to 36 % on the gear-mesh lead |
 | Natural frequencies | accurate | close |
-| Stress at fillets and rib roots | accurate with a fine TET10 mesh | unreliable: the grid's stair-step boundary distorts surface stress. A 99.9th-percentile stress fares better than the peak but is still biased |
-| Memory | 8-25 GB RAM | fits an 8 GB GPU at 3-5 mm cells *(est.)* |
-| Libraries | meshing: gmsh, fTetWild (pytetwild), MMG; solvers: CalculiX, Code_Aster, FEniCSx | NVIDIA Warp fem (Windows), JAX-FEM (Linux/WSL), torch-fem; commercial: Ansys Discovery, Intact in nTop |
+| Stress at fillets and rib roots | accurate with a fine TET10 mesh | unreliable: the grid's stair-step boundary distorts surface stress. A 99.9th-percentile stress fares better than the peak - cut cells measured within 0.4 % - but is still biased |
+| Memory, measured here | cuDSS 5.2 GB of the 8 GB card at 1.06 M unknowns | 7 M voxel unknowns (4 mm) and quadratic cut cells ran out of the card |
+| Libraries | meshing: CGAL (from the field), gmsh, fTetWild (pytetwild), MMG, TetGen; solvers: cuDSS, PETSc, Code_Aster, FEniCSx, CalculiX | NVIDIA Warp fem (Windows), JAX-FEM (Linux/WSL), torch-fem; commercial: Ansys Discovery, Intact in nTop |
 
 A middle route keeps the grid but computes the cells the surface cuts properly - **cut-cell
 (immersed) methods**, below. It restores most of the stress accuracy at surfaces without meshing,
@@ -84,8 +84,11 @@ this workstation. Full tables: [../../bench/solvers/RESULTS.md](../../bench/solv
   about its bolt, give 2.07' on the worst bore where clamping the holes gives 1.25'. With its
   couplings, on its own mesh, this setup reproduces agenticCAE's recorded tilts within 10% and its
   gear-mesh lead within 2.4%; the GPU solves the couplings to Code_Aster's answer at 2·10⁻¹⁰.
-- The design took 33 minutes to build and 31-103 minutes to mesh with fTetWild: meshing and building,
-  not solving, now set the pace.
+- The design took 33 minutes to build and 31-103 minutes to mesh with fTetWild - and both can be fast.
+  Built with the grid's distance on the GPU it takes 79 s and is the same design; meshed straight
+  from its field by CGAL, 46 s, 905,154 unknowns, no slivers; solved by cuDSS, within 2.3 % of the slow
+  route everywhere. About 2.5 minutes a design, end to end. Every approach tried, and why each won or
+  failed: [design-to-solution.md](design-to-solution.md).
 
 ## What a "GPU solver" means
 
@@ -184,26 +187,37 @@ unless a measured comparison on this part says otherwise.
 
 ## Tet meshing
 
+Each tried on design #7 ([design-to-solution.md](design-to-solution.md) has the numbers):
+
 - **fTetWild / pytetwild** ([TOG 2020](https://ar5iv.labs.arxiv.org/html/1908.03581),
   [pytetwild](https://github.com/pyvista/pytetwild): MPL-2.0, Windows wheels). Meshes 98.7% of the
-  Thingi10k test set in under 2 min (18.5 s on average). *Fit: high* as the fallback that almost never
-  fails; its output approximates the input surface within a tolerance envelope.
+  Thingi10k test set in under 2 min (18.5 s on average), its output within a tolerance envelope of the
+  input surface. *Measured here*: 26-103 minutes on the design's surface, whatever it is given - its
+  optimisation passes dominate - and decimating its input far enough to matter spoils the part. Robust,
+  too slow for 4,000 designs.
 - **TetGen** (AGPLv3 [or commercial licence](https://www.wias-berlin.de/software/tetgen/FAQ-license.jsp)).
   Fails to produce a constrained Delaunay mesh on about 8.5% of valid Thingi10k models
-  ([Diazzi et al. 2023](https://cims.nyu.edu/gcl/papers/2023-CDT.pdf)). *Fit: medium*: fast on clean
-  surfaces, but AGPL is a problem for a hosted product.
+  ([Diazzi et al. 2023](https://cims.nyu.edu/gcl/papers/2023-CDT.pdf)). *Measured here*: 4-8 s on a
+  cleaned surface, but it refuses one that crosses itself and leaves slivers; AGPL is a problem for a
+  hosted product.
 - **gmsh**. Its parallel Delaunay kernel (HXT) makes 3 billion tets in 53 s
-  ([IJNME 2019](https://arxiv.org/abs/1805.08831)); size fields and second-order elements. *Fit: high*
-  as the primary mesher for watertight contoured surfaces. (gmsh 4.15.2 is installed in fastcae's
-  environment, unused.)
+  ([IJNME 2019](https://arxiv.org/abs/1805.08831)); size fields and second-order elements. *Measured
+  here*: re-parametrising a 200,000-triangle surface stalled past 30 minutes; handed the cleaned,
+  repaired surface as it is, HXT fills it in 9 s - the fallback route, 73 s for the whole mesh step.
 - **MMG `mmg3d -ls`** ([man page](https://www.mankier.com/1/mmg3d), LGPL). Takes level-set values on a
   background tet mesh and produces a conforming, quality-optimised mesh of the zero set, preserving
-  ridges. *Fit: high*: distance field to body-fitted mesh with no surface step.
+  ridges. *Measured here* (mmgpy 0.17, MMG 5.8): on the field's own grid cut into tets it refined
+  instead of coarsening and ran single-threaded past 15 minutes. Not usable as tried.
 - **CGAL Mesh_3** ([manual](https://doc.cgal.org/latest/Mesh_3/index.html)). Meshes implicit
   functions and labelled images; sharp-feature protection improved in
   [6.0.1, December 2024](https://www.cgal.org/2024/12/01/mesh3-improvements/); Python via
-  [pygalmesh](https://github.com/meshpro/pygalmesh). *Fit: medium*: excellent quality, GPL/commercial
-  licence and Windows build friction.
+  [pygalmesh](https://github.com/meshpro/pygalmesh) (conda-forge, Linux - in WSL). *Measured here*:
+  straight from the field, 46 s, 905,154 unknowns, no slivers, no repair, within 2.3 % of the slow
+  route - the recommended mesher. GPL or commercial licence.
+- **MeshLab and MeshFix**, for the surface route: MeshLab's isotropic remeshing makes the field's
+  2.54 M-triangle surface 100,000 even triangles in about 60 s; the surface, it turned out, crosses
+  itself where two sheets pass closer than the grid (2,333 faces on design #7), and MeshFix patches
+  those in seconds. Both GPL.
 - **quartet** ([GitHub](https://github.com/crawforddoran/quartet)), isosurface stuffing
   ([Labelle & Shewchuk 2007](https://people.eecs.berkeley.edu/~jrs/papers/stuffing.pdf); dihedral angles
   guaranteed between 10.7° and 164.8°). Never fails on a distance field, but element size is uniform:
@@ -268,8 +282,10 @@ place for well over 10,000 designs or for live previews in the interface.
 
 ## Where fastcae stands
 
-Measured, on the same load case, supports and metrics as agenticCAE: TET10 solved by cuDSS on the GPU
-gives Code_Aster's answer four times faster, and is the recommended route; PETSc's multigrid on the
-GPU is its fallback, Code_Aster its audit. The grid routes stay for previews and a low-fidelity level
-until a cut-cell solve with quadratic cells and a grid multigrid earns its place. What is slow now is
-the mesher. See [../build-plan.md](../build-plan.md).
+Measured, on the same load case, supports and metrics as agenticCAE: the design built with its
+grid's distance on the GPU, meshed straight from its field by CGAL, solved as TET10 by cuDSS - about
+2.5 minutes a design, within 2.3 % of the slow route's Code_Aster answer - is the recommended route;
+the cleaned surface filled by gmsh is the meshing fallback, PETSc's multigrid on the GPU the solving
+fallback for a design too big for the card, Code_Aster the audit. The grid routes stay for previews
+and a low-fidelity level until a cut-cell solve with quadratic cells and a grid multigrid earns its
+place. See [design-to-solution.md](design-to-solution.md) and [../build-plan.md](../build-plan.md).

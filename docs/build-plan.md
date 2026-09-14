@@ -309,7 +309,9 @@ product.
    surface there; the verdict adds a check that holes go through.
 4. **Builds that finish.** The face-moving step fixed (262 faces thickened spent 30-40 minutes in one
    step); builds as background jobs with progress, outside the development server, each design saved
-   as it finishes.
+   as it finishes. The build's slowest step - each grid cell's exact distance to the part - measured on
+   the GPU: design #7 in 79 s instead of 33 minutes, the same design to 0.005 mm, once the part's long
+   sliver triangles are split (see [research/design-to-solution.md](research/design-to-solution.md)).
 
 ### Open
 
@@ -329,10 +331,13 @@ product.
 - **The supports** - agenticCAE's couplings (each bolt position a rigid body about a held point, each
   seat's force through an RBE3), which the GPU route reproduces to 2·10⁻¹⁰, so results stand beside
   agenticCAE's 490 designs; or the bolt holes clamped. The choice moves the worst tilt by 40%.
-- **The mesher** - the build and the mesh now take the time, not the solve: design #7 took 33 minutes
-  to build and 31-103 minutes to mesh with fTetWild, and a coarser input neither speeds fTetWild up
-  nor keeps the part intact. Candidates: MMG meshing the distance field directly; TetGen or gmsh's
-  parallel mesher on a cleanly remeshed surface.
+- **The mesher** - recommended by the measurement: **straight from the field with CGAL** - 46 s on
+  design #7, 905,154 unknowns, no slivers, nothing to repair, its answer within 2.3 % of the slow
+  route; the field's surface remeshed evenly, repaired where it crosses itself and filled by gmsh as
+  the fallback - 73 s, within 1.6 %. Ruled out by it: fTetWild (26-103 minutes, whatever its input),
+  gmsh re-parametrising the surface (stalled), TetGen (slivers; refuses a surface that crosses
+  itself), MMG on the field's grid (refines instead of coarsening). With the GPU build and cuDSS, a
+  design takes about 2.5 minutes end to end ([research/design-to-solution.md](research/design-to-solution.md)).
 
 ## Later
 
