@@ -75,7 +75,7 @@ class Setting(BaseModel):
 SETTINGS = (
     "generator (parallel, grid, triangle, radial), centre (what spokes turn about), spread "
     "(across, round), angle_deg, count, spacing_mm, thickness_mm, root_fillet_mm, edge_round_mm, "
-    "draft_deg, top (slope, level), height_fraction, section (flat, T), flange_width_mm, "
+    "draft_deg, top (slope, level), height_thicknesses, section (flat, T), flange_width_mm, "
     "flange_thickness_mm"
 )
 

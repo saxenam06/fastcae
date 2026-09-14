@@ -36,6 +36,9 @@ dev = [
     "ruff>=0.7",
     "mypy>=1.13",
 ]
+gpu = [
+    "warp-lang>=1.17",
+]
 
 [project.scripts]
 fastcae = "fastcae.cli:main"

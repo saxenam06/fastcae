@@ -312,6 +312,14 @@ export class Renderer {
   private overlayIndexCount = 0;
   private faceCount: number;
 
+  /** The part's triangles as they arrived, and which of them are drawn: all of them, or all but
+   * those of the faces hidden. */
+  private indices: Uint32Array;
+  private faceIds: Uint32Array;
+  private indexBuffer: WebGLBuffer;
+  private shownBuffer: WebGLBuffer | null = null;
+  private shownCount = 0;
+
   /** A second surface drawn over the first, for comparing one against the other. */
   private overlayVao: WebGLVertexArrayObject | null = null;
   private overlayBuffers: WebGLBuffer[] = [];
@@ -393,6 +401,10 @@ export class Renderer {
     const indexBuffer = createIndexBuffer(gl, mesh.indices);
     this.buffers.push(positionBuffer, normalBuffer, faceIdBuffer, indexBuffer);
     this.indexCount = mesh.indexCount;
+    this.shownCount = mesh.indexCount;
+    this.indices = mesh.indices;
+    this.faceIds = mesh.faceIds;
+    this.indexBuffer = indexBuffer;
 
     this.vao = gl.createVertexArray()!;
     gl.bindVertexArray(this.vao);
@@ -499,7 +511,7 @@ export class Renderer {
     gl.uniform1i(tinted, 0);
     if (this.showSurface) {
       gl.bindVertexArray(this.vao);
-      gl.drawElements(gl.TRIANGLES, this.indexCount, gl.UNSIGNED_INT, 0);
+      gl.drawElements(gl.TRIANGLES, this.shownCount, gl.UNSIGNED_INT, 0);
     }
 
     if (this.showVoxels && this.voxelProgram && this.voxelVao && this.voxelCount > 0) {
@@ -643,6 +655,46 @@ export class Renderer {
   }
 
   /**
+   * Leave these faces of the part out of the picture - and out of picking - or, empty, draw them
+   * all again.
+   *
+   * What a design cuts - a hole through a plate, a face thinned - would still be drawn by the part's
+   * own faces over the design's surface, and a hole would look blind; hidden, the design's own
+   * surface drawn there shows it. The part's triangles stay on the GPU: only which of them are
+   * drawn changes, a list of indices rebuilt once per design.
+   */
+  setHidden(faces: Set<number>): void {
+    const gl = this.gl;
+    if (this.shownBuffer) {
+      gl.deleteBuffer(this.shownBuffer);
+      this.shownBuffer = null;
+    }
+    let buffer = this.indexBuffer;
+    this.shownCount = this.indexCount;
+    if (faces.size) {
+      const kept = new Uint32Array(this.indexCount);
+      let count = 0;
+      for (let t = 0; t + 2 < this.indexCount; t += 3) {
+        // A triangle is the face its last corner carries - the one a flat attribute is read
+        // from, so what is hidden is what the picture calls that face.
+        if (faces.has(this.faceIds[this.indices[t + 2]])) continue;
+        kept[count++] = this.indices[t];
+        kept[count++] = this.indices[t + 1];
+        kept[count++] = this.indices[t + 2];
+      }
+      this.shownBuffer = createIndexBuffer(gl, kept.subarray(0, count));
+      buffer = this.shownBuffer;
+      this.shownCount = count;
+    }
+    // Which elements a vertex array draws is part of the array's state: both are told.
+    for (const vao of [this.vao, this.pickVao]) {
+      gl.bindVertexArray(vao);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffer);
+    }
+    gl.bindVertexArray(null);
+  }
+
+  /**
    * Put a second surface over the first, or take it away.
    *
    * Whether it can be picked, and as what, is {@link overlayPick}.
@@ -697,6 +749,8 @@ export class Renderer {
     this.setOverlay(null);
     this.setVoxels(null);
     this.setLines(null);
+    if (this.shownBuffer) gl.deleteBuffer(this.shownBuffer);
+    this.shownBuffer = null;
     if (this.voxelProgram) gl.deleteProgram(this.voxelProgram);
     if (this.lineProgram) gl.deleteProgram(this.lineProgram);
     for (const buffer of this.buffers) gl.deleteBuffer(buffer);
@@ -738,7 +792,7 @@ export class Renderer {
     if (this.showSurface) {
       gl.uniform1i(useConstant, 0);
       gl.bindVertexArray(this.pickVao);
-      gl.drawElements(gl.TRIANGLES, this.indexCount, gl.UNSIGNED_INT, 0);
+      gl.drawElements(gl.TRIANGLES, this.shownCount, gl.UNSIGNED_INT, 0);
     }
     if (this.overlayPick !== "none" && this.showOverlay && this.overlayVao) {
       gl.uniform1i(useConstant, this.overlayPick === "design" ? 1 : 0);

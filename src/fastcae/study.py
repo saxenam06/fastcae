@@ -74,6 +74,7 @@ USED = (
     "spacing_mm",
     "layout",
     "thickness_mm",
+    "height_thicknesses",
     "height_fraction",
     "top",
     "root_fillet_mm",
@@ -963,6 +964,9 @@ def point(
         "fraction": float(chosen.get("height_fraction") or 1.0),
         "cites": [],
     }
+    # So many thicknesses of the rib tall, and never taller than what each end meets.
+    if chosen.get("height_thicknesses") is not None:
+        height["thicknesses"] = float(chosen["height_thicknesses"])
     not_above = list(dict.fromkeys(r for c in rules if c.kind == "not_above" for r in c.refs))
     if not_above:
         height["not_above"] = not_above

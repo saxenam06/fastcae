@@ -7,8 +7,9 @@ kept. What screening holds a design to, each a rule with where it comes from:
 - **every block made something** - ribs where the study asks for ribs, holes where it asks for
   holes. A design without them is not a design of the study.
 - **a rib is no thicker than the floor it stands on allows** - the wall it ends on is held to that
-  as it is placed, padded or not; the floor under it is held to it here, as the design leaves it
-  after moving its faces. Thicken the floor, or thin the ribs.
+  as it is placed, padded or not, and a rib too thick for the floor under it is left out as it is
+  placed; the ribs left are held to it here again, as the design leaves the floor after moving its
+  faces. A floor is never thickened for its ribs.
 - **ribs leave room for the mould between them** - the clear gap between two ribs standing in the
   open, at least twice the thinner, as the built design is checked.
 - **no wall thinned below the least it may be** - the study's, or the material's when that is more.
@@ -23,6 +24,7 @@ times that - the design's own, or the default the catalogue names.
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -33,7 +35,7 @@ from ..features import FeatureSet
 from ..spec import HoleSet, MaterialChoice, Offset, Placement
 from .checks import Rules, _gaps
 from .field import Field
-from .placement import Drilled, Placed, root_gap_of
+from .placement import FLOOR_SLACK, Drilled, Placed, root_gap_of
 from .ribs import Rib
 
 # Every check screening makes, what it holds a design to, and where the rule comes from - for the
@@ -72,6 +74,8 @@ class Screened:
     outcome: str
     findings: list[dict[str, Any]] = field(default_factory=list)
     stats: dict[str, Any] = field(default_factory=dict)
+    seconds: dict[str, float] = field(default_factory=dict)
+    """How long each check took, by name."""
 
     def rejected(self) -> list[dict[str, Any]]:
         return [f for f in self.findings if f["outcome"] == "reject"]
@@ -89,21 +93,6 @@ def measure_walls(
         walls = [w for w in (_through(extraction, exit_along, ref) for ref in offset.faces) if w]
         out[offset.id] = min(walls) if walls else None
     return out
-
-
-def raised_floors(features: FeatureSet, placed: dict) -> list[Offset]:
-    """The floors a design thickens for ribs too thick for them, as faces moved: each block's
-    floor by what it asked, on top of what blocks placed before it asked of the same floor."""
-    return [
-        Offset(
-            id=f"{block}-floor",
-            faces=[f"face:{face}" for face in result.raised_faces],
-            offset_mm=result.raised_mm,
-            blend_mm=20.0,
-        )
-        for block, result in placed.items()
-        if isinstance(result, Placed) and result.raised_mm
-    ]
 
 
 def face_offsets(features: FeatureSet, offsets: list[Offset]) -> dict[int, float]:
@@ -139,10 +128,20 @@ def screen(
     chosen = knowledge.material(material.material) if material is not None else None
     least_of_material = float(chosen["min_wall_mm"]) if chosen else 0.0
 
+    seconds: dict[str, float] = {}
+    clock = [time.perf_counter()]
+
     def say(check: str, outcome: str, reason: str, rule: str, block: str | None = None) -> None:
         findings.append(
             {"check": check, "outcome": outcome, "reason": reason, "rule": rule, "block": block}
         )
+
+    def took(*checks: str) -> None:
+        """What the checks since the last took, said for each of them."""
+        now = time.perf_counter()
+        for check in checks:
+            seconds[check] = round(now - clock[0], 4)
+        clock[0] = now
 
     # Every block made something.
     for placement in placements:
@@ -158,6 +157,7 @@ def screen(
         if not result.holes:
             say("holes placed", "reject", f"{hole_set.id} cut no hole: {result.tally()}",
                 "holes where the study asks for holes", hole_set.id)  # fmt: skip
+    took("ribs placed", "holes placed")
 
     # A rib no thicker than the floor under it allows, as the design leaves the floor.
     for placement in placements:
@@ -171,23 +171,18 @@ def screen(
         floors = [s["floor_mm"] for s in result.spans if s.get("floor_mm")]
         if not floors:
             continue
-        # Thickened for these ribs, and for ribs of other blocks on the same floor.
-        raised = sum(
-            r.raised_mm
-            for r in placed.values()
-            if isinstance(r, Placed) and set(r.raised_faces) & faces
-        )
-        floor = min(floors) + lift + raised
+        floor = min(floors) + lift
         most = placement.rib_to_wall * floor
         thickness = placement.section.thickness_mm
         rule = f"a rib no thicker than {placement.rib_to_wall:g} of the floor it stands on"
-        if thickness > most + 0.5:
+        if thickness > most + FLOOR_SLACK:
             say("rib on floor", "reject", f"{placement.id}: {thickness:g} mm ribs on a "
-                f"{floor:.0f} mm floor - at most {most:.1f} mm there; thicken the floor or thin "
-                "the ribs", rule, placement.id)  # fmt: skip
+                f"{floor:.0f} mm floor - at most {most:.1f} mm there; thin the ribs",
+                rule, placement.id)  # fmt: skip
         else:
             say("rib on floor", "pass", f"{placement.id}: {thickness:g} mm ribs on a "
                 f"{floor:.0f} mm floor", rule, placement.id)  # fmt: skip
+    took("rib on floor")
 
     # Holes a ligament of metal from the ribs they keep clear of - measured on what was placed -
     # and through no rib of any block.
@@ -221,6 +216,7 @@ def screen(
         if through is not None and through < 0.0:
             say("holes clear of ribs", "warn", f"{hole_set.id}: a hole cuts into a rib no rule "
                 "keeps it clear of", rule, hole_set.id)  # fmt: skip
+    took("holes clear of ribs")
 
     # Room for the mould between ribs: within each block - its own spacing against its own
     # thickness, which the block alone decides - then between blocks, which only together do.
@@ -244,6 +240,7 @@ def screen(
     if not failed and len({p.id for p in placements if placed[p.id].ribs}) > 1:
         gap = _gaps(base, every, Rules(), radii, ratios)
         say("root gap", gap.outcome, f"between blocks: {gap.reason}", gap.rule)
+    took("root gap")
 
     # No wall thinned below the least it may be.
     for offset in offsets:
@@ -258,12 +255,13 @@ def screen(
                 "wall", rule, offset.id)  # fmt: skip
         else:
             say("wall kept", "pass", f"{offset.id} leaves {left:.1f} mm", rule, offset.id)
+    took("wall kept")
 
     findings = [f for f in findings if f["check"] not in off]
     stats = _weighed(features, placed, offsets, chosen, base_volume_mm3)
     order = {"reject": 0, "warn": 1, "pass": 2}
     worst = min((f["outcome"] for f in findings), key=order.get, default="pass")
-    return Screened(outcome=worst, findings=findings, stats=stats)
+    return Screened(outcome=worst, findings=findings, stats=stats, seconds=seconds)
 
 
 def _weighed(
@@ -286,7 +284,7 @@ def _weighed(
         for hole in result.holes
     )
     moved_mm3 = 0.0
-    for offset in [*offsets, *raised_floors(features, placed)]:
+    for offset in offsets:
         area = sum(
             features.get(ref).area_mm2 for ref in offset.faces if features.get(ref) is not None
         )

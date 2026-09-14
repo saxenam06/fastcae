@@ -73,6 +73,9 @@ export interface Designs {
   pathsNote: string | null;
   lines: LineSet | null;
   overlay: Mesh | null;
+  /** The part's faces the design cuts - holes through them, faces thinned: hidden while its field
+   * is shown, its own surface drawn there instead. */
+  cutFaces: Set<number>;
   cells: VoxelCells | null;
   showCells: boolean;
   setShowCells: (on: boolean) => void;
@@ -254,6 +257,10 @@ export function useDesigns(active: boolean, project: string | null): Designs {
   );
 
   const lines = useMemo(() => (paths ? toLines(paths) : null), [paths]);
+  const cutFaces = useMemo(
+    () => new Set<number>(detail?.built[fidelity]?.cut_faces ?? []),
+    [detail, fidelity],
+  );
 
   return {
     runs,
@@ -273,6 +280,7 @@ export function useDesigns(active: boolean, project: string | null): Designs {
     pathsNote,
     lines,
     overlay,
+    cutFaces,
     cells,
     showCells,
     setShowCells,
@@ -539,11 +547,19 @@ export function DesignStage(props: { designs: Designs; showPart: boolean; onPart
         </div>
       ) : (
         <div className="layers inline-layers">
-          <button data-on={props.showPart} onClick={() => props.onPart(!props.showPart)}>
+          <button
+            data-on={props.showPart}
+            onClick={() => props.onPart(!props.showPart)}
+            title={
+              designs.cutFaces.size
+                ? `The part as its CAD describes it - the ${designs.cutFaces.size} faces the design cuts shown as its own surface`
+                : "The part as its CAD describes it"
+            }
+          >
             <span className="swatch" style={{ background: "#a5a9a4" }} />
             part
           </button>
-          <button data-on={true} disabled>
+          <button data-on={true} disabled title="What the design adds and takes away">
             <span className="swatch" style={{ background: "#0e6e74" }} />
             surfaces it changes
           </button>

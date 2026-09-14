@@ -9,9 +9,13 @@ blend and the band reach - and the move is one subtraction there::
     phi = part - offset * weight
 
 ``weight`` is one on the faces moved and nothing on the rest of the part, ramped between over the
-block's blend (:func:`.offset.weight`): nearer the faces moved than any other face, never through a
-wall to its far side. Blocks that move faces near each other move them together - the window of
-each sees every block's weight - so where a thickened floor meets a thickened wall both move.
+block's blend (:func:`.offset.ramped`): a cell belongs to the faces moved by how much nearer it is
+to them than to any other face, never through a wall to its far side. Both distances are exact -
+to the triangles of the faces moved, and to those of every other face - and come from
+:mod:`.distance`, on the GPU when there is one: the nearest-face question is asked of every cell in
+the window, and the CPU and the GPU give it the same answer. Blocks that move faces near each other
+move them together - the window of each sees every block's weight - so where a thickened floor
+meets a thickened wall both move.
 
 **The part's interfaces stay as they are.** Every cell within the clearance of a face the study
 keeps closed - a bore, a hole - and nearer it than any face moved is given its base value back, so
@@ -21,6 +25,7 @@ cells, and a boss thickened round a bore meets the bore, which runs on through w
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -28,9 +33,30 @@ import numpy as np
 from ..features import FeatureSet
 from ..geometry.brep import Tessellation
 from ..spec import Offset
-from .compose import Composition, _part_distance, _splice
+from .compose import Composition, _splice
+from .distance import part_distance
 from .field import Field, Grid
-from .offset import Patch, patch_from, weight
+from .offset import ramped
+
+# How many blocks of faces moved are kept, read off the part, for the designs that move them alike.
+KEPT = 2
+
+
+@dataclass
+class Reach:
+    """What one block of faces moved reads off the part, round its faces: the cells it moves -
+    within the offset and the band of the surface - with their signed distance to the part; and the
+    cells that belong to its faces at all, with how much, and how far each is from them. Cells as
+    base-grid samples, ascending."""
+
+    window: Grid
+    moves: np.ndarray
+    moves_local: np.ndarray
+    """The same cells as ``moves``, as cells of ``window``."""
+    part: np.ndarray
+    owned: np.ndarray
+    weight: np.ndarray
+    near: np.ndarray
 
 
 @dataclass
@@ -40,17 +66,23 @@ class Moved:
 
     field: Field
     changed: np.ndarray
-    patches: list[tuple[Patch, float, float]] = field(default_factory=list)
+    blocks: list[tuple[Reach, float]] = field(default_factory=list)
 
     def shift(self, points: np.ndarray) -> np.ndarray:
         """How far the moved faces push the surface out at each point: every block's offset times
-        how much the point belongs to its faces."""
-        total = np.zeros(len(points))
-        for patch, offset, blend in self.patches:
-            lo, hi = patch.bounds(abs(offset) + blend + 1.0)
-            near = np.all((points >= lo) & (points <= hi), axis=1)
-            if near.any():
-                total[near] += offset * weight(patch, points[near], blend)
+        how much the grid cell nearest the point belongs to its faces."""
+        grid = self.field.grid
+        index = np.rint(
+            (np.asarray(points, dtype=float) - np.asarray(grid.origin)) / grid.spacing_mm
+        )
+        index = np.clip(index.astype(np.int64), 0, np.asarray(grid.shape) - 1)
+        return self.shift_at(np.ravel_multi_index(tuple(index.T), grid.shape))
+
+    def shift_at(self, samples: np.ndarray) -> np.ndarray:
+        """The same, at samples of the grid."""
+        total = np.zeros(len(samples))
+        for reach, offset in self.blocks:
+            total += offset * _looked_up(reach.owned, reach.weight, samples, 0.0)
         return total
 
 
@@ -64,52 +96,52 @@ def move_faces(
     patches: dict | None = None,
 ) -> Moved:
     """``base`` with every block of ``offsets`` moving its faces, exactly, and the cells within
-    ``clearance_mm`` of ``protected_faces`` left as they were. ``patches`` keeps each block's
-    sampled faces for the next design that moves the same ones."""
+    ``clearance_mm`` of ``protected_faces`` left as they were. ``patches`` keeps what each block
+    reads off the part for the next design that moves the same faces as far."""
     spacing, reach = base.grid.spacing_mm, base.reach_mm
-    kept = patches if patches is not None else {}
-    chosen: list[tuple[Patch, float, float]] = []
+    kept: dict = patches if patches is not None else OrderedDict()
+    every = {int(f) for f in np.unique(tess.face_id)}
+    chosen: list[tuple[Reach, float]] = []
     for offset in offsets:
         if offset.offset_mm == 0.0:
             continue
         faces = tuple(sorted(moved_faces(features, [offset])))
-        key = (faces, spacing)
+        # Out from the surface, the distance is needed as far as a cell can move into the band -
+        # the offset and the band's reach; across, as far again as the blend ramps.
+        deep = abs(offset.offset_mm) + reach + spacing
+        key = ("moved", base.key or id(base), faces, round(deep, 6), float(offset.blend_mm))
         if key not in kept:
-            kept[key] = patch_from(tess, set(faces), spacing / 2.0)
-        chosen.append((kept[key], offset.offset_mm, offset.blend_mm))
-    moved = Moved(field=base, changed=np.empty(0, dtype=np.int64), patches=chosen)
+            kept[key] = _reach_of(base, tess, set(faces), every, deep, offset.blend_mm)
+            _trim(kept)
+        chosen.append((kept[key], offset.offset_mm))
+    moved = Moved(field=base, changed=np.empty(0, dtype=np.int64), blocks=chosen)
     if not chosen:
         return moved
 
     samples_all: list[np.ndarray] = []
     values_all: list[np.ndarray] = []
-    for patch, offset, blend in chosen:
-        # Across, the window reaches past the faces as far as their blend; out from the surface,
-        # the distance is needed only as far as a cell can move into the band - the offset and the
-        # band's reach - which is what the exact scan costs by.
-        deep = abs(offset) + reach + spacing
-        lo, hi = patch.bounds(blend + deep + spacing)
-        window, first = _window(base.grid, lo, hi)
-        unsigned = _part_distance(tess, window, deep)
-        samples = _samples(window, first, base.grid)
-        solid = base.inside.ravel()[samples]
-        part = np.where(solid, -unsigned, unsigned)
-        # Only cells the move can reach: within the offset and the band of the surface.
-        near = np.flatnonzero(np.abs(part) < deep)
-        if not near.size:
+    for block, _ in chosen:
+        samples = block.moves
+        if not samples.size:
             continue
-        points = window.centres(near)
-        value = part[near] - moved.shift(points)
+        shift = moved.shift_at(samples)
+        value = block.part.astype(np.float64) - shift
+        # Where nothing moves, the part is as the field holds it, bit for bit - not a cell changed.
+        still = shift == 0.0
+        value[still] = base.at(samples[still])
         if protected_faces:
             # Held as it was where a face kept closed is nearer than any face moved: the closed
             # face stays exactly where it is, and what is added beside it meets it, no groove.
-            guard = _part_distance(tess, window, clearance_mm, faces=protected_faces)[near]
-            to_moved = np.min(
-                [p.inside.query(points, k=1, workers=-1)[0] for p, _, _ in chosen], axis=0
-            )
+            guard = part_distance(tess, block.window, clearance_mm, faces=protected_faces)
+            guard = guard[block.moves_local]
+            to_moved = np.full(len(samples), np.inf)
+            for other, _ in chosen:
+                to_moved = np.minimum(
+                    to_moved, _looked_up(other.owned, other.near, samples, np.inf)
+                )
             held = (guard < clearance_mm) & (guard < to_moved)
-            value[held] = base.at(samples[near][held])
-        samples_all.append(samples[near])
+            value[held] = base.at(samples[held])
+        samples_all.append(samples)
         values_all.append(value)
     if not samples_all:
         return moved
@@ -134,6 +166,62 @@ def moved_faces(features: FeatureSet, offsets: list[Offset]) -> set[int]:
     return out
 
 
+def _reach_of(
+    base: Field, tess: Tessellation, faces: set[int], every: set[int], deep: float, blend: float
+) -> Reach:
+    """What a block of faces moved reads off the part: see :class:`Reach`. Both distances - to the
+    faces moved and to the rest - are exact as far as a cell ``deep`` into the band can have its
+    weight ramped: past that, both clamped, the cell belongs to nothing."""
+    spacing = base.grid.spacing_mm
+    reach = deep + max(blend, 0.0)
+    mine = np.isin(tess.face_id, np.fromiter(faces, dtype=np.int64, count=len(faces)))
+    corners = tess.vertices[np.unique(tess.triangles[mine])]
+    grow = max(blend, 0.0) + deep + spacing
+    window, first = _window(base.grid, corners.min(axis=0) - grow, corners.max(axis=0) + grow)
+    near = part_distance(tess, window, reach, faces=faces)
+    others = every - faces
+    far = (
+        part_distance(tess, window, reach, faces=others)
+        if others
+        else np.full(window.n_cells, reach, dtype=np.float32)
+    )
+    unsigned = np.minimum(near, far)
+    within = np.flatnonzero(unsigned < reach)
+    samples = _samples(window, first, base.grid, within)
+    solid = base.inside.ravel()[samples]
+    part = np.where(solid, -unsigned[within], unsigned[within]).astype(np.float32)
+    moves = np.abs(part) < deep
+    weight = ramped(near[within], far[within], blend).astype(np.float32)
+    owned = weight > 0.0
+    return Reach(
+        window=window,
+        moves=samples[moves],
+        moves_local=within[moves],
+        part=part[moves],
+        owned=samples[owned],
+        weight=weight[owned],
+        near=near[within][owned].astype(np.float32),
+    )
+
+
+def _trim(kept: dict) -> None:
+    """At most :data:`KEPT` blocks of faces moved kept: the oldest go first."""
+    moved = [key for key in kept if isinstance(key, tuple) and key[:1] == ("moved",)]
+    for key in moved[: max(0, len(moved) - KEPT)]:
+        del kept[key]
+
+
+def _looked_up(keys: np.ndarray, values: np.ndarray, wanted: np.ndarray, missing: float):
+    """``values`` at ``wanted`` among the ascending ``keys``, ``missing`` where one is not there."""
+    out = np.full(len(wanted), missing, dtype=np.float64)
+    if not keys.size or not len(wanted):
+        return out
+    position = np.clip(np.searchsorted(keys, wanted), 0, keys.size - 1)
+    found = keys[position] == wanted
+    out[found] = values[position[found]]
+    return out
+
+
 def _window(grid: Grid, lo: np.ndarray, hi: np.ndarray) -> tuple[Grid, np.ndarray]:
     """The stretch of ``grid`` over the box ``lo`` to ``hi``, snapped to its lattice, and where
     it starts in it."""
@@ -149,9 +237,9 @@ def _window(grid: Grid, lo: np.ndarray, hi: np.ndarray) -> tuple[Grid, np.ndarra
     return window, first
 
 
-def _samples(window: Grid, first: np.ndarray, grid: Grid) -> np.ndarray:
-    """The flat index in ``grid`` of every cell of ``window``, in the window's order."""
-    i, j, k = np.unravel_index(np.arange(window.n_cells, dtype=np.int64), window.shape)
+def _samples(window: Grid, first: np.ndarray, grid: Grid, cells: np.ndarray) -> np.ndarray:
+    """The flat index in ``grid`` of the given cells of ``window`` - ascending, as they are."""
+    i, j, k = np.unravel_index(np.asarray(cells, dtype=np.int64), window.shape)
     return np.ravel_multi_index((i + first[0], j + first[1], k + first[2]), grid.shape).astype(
         np.int64
     )

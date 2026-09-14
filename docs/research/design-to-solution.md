@@ -149,8 +149,10 @@ only 1.7× today's code. The GPU with split triangles is the way.
 field's 50.8 M cells changes side, its distances agree within 0.005 mm, the surface has the same
 2.54 M triangles, and 8 of its 1.27 M vertices lie more than 0.01 mm from before (dual contouring's
 vertex placement is sensitive in a few nearly degenerate cells). What is left of the 79 s: the
-checks 25 s, contouring the surface 23 s, moving faces 17 s, the distances 8 s. Still a trial -
-`bench/solvers/build_gpu.py` swaps the function in at run time; the product code is unchanged.
+checks 25 s, contouring the surface 23 s, moving faces 17 s, the distances 8 s. Measured by
+`bench/solvers/build_gpu.py`, which swapped the function in at run time; the product now builds this
+way itself (`fastcae.generate.distance`), and its checks, surface and faces moved as the list above
+says.
 
 ## 2. Meshing
 

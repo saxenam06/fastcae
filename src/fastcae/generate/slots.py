@@ -154,6 +154,7 @@ SETTING_LABELS = {
     "edge_round_mm": "edge round",
     "draft_deg": "draft",
     "top": "top",
+    "height_thicknesses": "height",
     "height_fraction": "height",
     "section": "section",
     "flange_width_mm": "flange width",
@@ -171,6 +172,26 @@ SETTING_LABELS = {
 }
 # The part's interfaces, which the platform closes on every study.
 CLOSED = ("interface", "datum")
+
+# What a rib's height is said in: its own thickness, so many times over.
+HEIGHT_UNIT = "× thickness"
+
+
+def height_setting() -> dict[str, Any]:
+    """How tall ribs may be, when nothing says: so many times their own thickness - the range the
+    knowledge gives - and each end never taller than what it meets."""
+    tall = knowledge.rib_height()
+    low, high = float(tall["low"]), float(tall["high"])
+    return {
+        "low": low,
+        "high": high,
+        "step": float(tall["step"]),
+        "suggested": float(tall["suggested"]),
+        "unit": HEIGHT_UNIT,
+        "source": "default",
+        "basis": f"{low:g} to {high:g} times the rib's thickness, never taller than what each "
+        "end meets",
+    }
 
 
 # --- the slots, filled ---------------------------------------------------------------------------
@@ -448,13 +469,7 @@ class Slots:
             if height.basis.get("top_set")
             else {"options": ["slope", "level"], "suggested": top_kind}
         )
-        free["height_fraction"] = {
-            "low": 0.5,
-            "high": 1.0,
-            "step": 0.1,
-            "suggested": 1.0,
-            "basis": "from half to all of what each end meets",
-        }
+        free["height_thicknesses"] = height_setting()
 
         constraints: list[dict[str, Any]] = []
         keep = self.get("keep_out")
@@ -962,7 +977,10 @@ def infer(
     )
 
     top_kind = given.height_top or "slope"
-    height: dict[str, Any] = {"top": top_kind, "cites": []}
+    # So many times the rib's thickness - the knowledge's suggestion - and never taller than what
+    # each end meets.
+    tall = float(knowledge.rib_height()["suggested"])
+    height: dict[str, Any] = {"top": top_kind, "thicknesses": tall, "cites": []}
     if given.height_mm is not None:
         height["max_mm"] = given.height_mm
     if given.not_above:
@@ -995,12 +1013,13 @@ def infer(
             "height",
             SLOTS["height"][0],
             height,
-            " and ".join(bits) or "each end up to what it meets, the top sloping between",
+            " and ".join(bits)
+            or f"{tall:g} times its thickness, each end no taller than what it meets",
             "you" if bits or given.height_top else "default",
             list(given.not_above),
             ""
             if bits or given.height_top
-            else "each end of a rib as tall as the support it meets there",
+            else "each end of a rib no taller than the support it meets there",
             [
                 _number("height_mm", "at most", given.height_mm, "mm", 1.0, 1.0),
                 _faces_part("not_above", "no taller than", list(given.not_above)),
@@ -1354,9 +1373,10 @@ def _angle_from(extraction: Extraction, host: Feature, ref: str, centre: str | N
     frame = _frame(host)
     if centre is not None:
         about = features.get(centre)
-        if about is None:
+        point = None if about is None else _axis_point(features, about)
+        if point is None:
             return None
-        origin = frame.to_plane(np.asarray(_axis_point(features, about)).reshape(1, 3))[0]
+        origin = frame.to_plane(np.asarray(point).reshape(1, 3))[0]
         target = frame.to_plane(np.asarray(feature.centroid).reshape(1, 3))[0]
         towards = target - origin
         return float(math.degrees(math.atan2(towards[1], towards[0]))) % 360.0

@@ -392,7 +392,7 @@ def screen_sample(session: sessions.Session, card: Card, size: int = SCREENED) -
             why.update(f["check"] for f in screened.rejected())
             continue
         passed += 1
-        repaired += bool(mended.left_out)
+        repaired += bool(mended.repaired)
     each = (time.perf_counter() - started) / max(tried, 1)
     per_alone = pooled / max(sum(a["tried"] for a in alone.values()), 1)
     most = min(max(POOL[0], card.n // 4), POOL[1])
@@ -551,7 +551,7 @@ def go(session: sessions.Session, card: Card) -> Iterator[dict[str, Any]]:
             )
             design["variants"] = [b.id for b in version.blocks if b.id in values]
             design["left_out"] = mended.left_out
-            repaired += bool(mended.left_out)
+            repaired += bool(mended.repaired)
             _stamp(design, cid, extraction.cad_digest, kept_as)
             designs.append(design)
             if archive is not None and paths is not None:

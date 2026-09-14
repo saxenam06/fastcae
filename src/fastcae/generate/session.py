@@ -32,7 +32,7 @@ import shutil
 import threading
 import time
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -57,7 +57,7 @@ from ..spec import (
 )
 from .blocks import WEBS_JOIN, fill, start
 from .intent import IntentError, Made, Opened, make
-from .placement import Drilled, Placed, _Faces, host_of, place_all
+from .placement import Drilled, Placed, _Faces, axis_of, host_of, place_all
 from .repair import repair
 from .screen import Screened, face_offsets, measure_walls, screen
 from .slots import CLOSED, SETTING_LABELS, names
@@ -412,6 +412,21 @@ def hand(session: Session, action: dict[str, Any], selected: list[int] | None = 
             return {"refused": "which setting?"}
         told = {k: action[k] for k in ("value", "low", "high", "step", "options") if k in action}
         told = {k: v for k, v in told.items() if v is not None}
+        if name == "centre":
+            # Spokes turn about an axis: a thing with none has no middle for them to fan from.
+            features = session.extraction.features
+            assert features is not None
+            asked = [str(o) for o in told.get("options") or [told.get("value")] if o is not None]
+            flat = [
+                ref
+                for ref in asked
+                if (feature := features.get(ref)) is None or axis_of(features, feature) is None
+            ]
+            if flat:
+                return {
+                    "refused": f"{_and(flat)} {'has' if len(flat) == 1 else 'have'} no axis: "
+                    "spokes turn only about round things - a boss, a bore, a ring's round faces"
+                }
         label = SETTING_LABELS.get(name, name.replace("_", " "))
         said = f"{block} {label} {_told(told)}"
         change["blocks"] = [{"id": block, "settings": {name: told or None}}]
@@ -1630,14 +1645,15 @@ def random_point(block: studies.Block, draw: random.Random) -> dict[str, Any]:
 
 
 def left_out_said(left_out: list[dict[str, Any]]) -> str:
-    """What repair left out of a design, in a few words: how many ribs and holes, and why."""
+    """What was left out of a design, in a few words: how many ribs and holes, and the rule each
+    broke."""
     if not left_out:
         return ""
     counted = Counter((x["what"], x["why"]) for x in left_out)
     parts = [
         f"{n} {what}{'s' if n != 1 else ''} ({why})" for (what, why), n in sorted(counted.items())
     ]
-    return "left out so the rest hold: " + ", ".join(parts)
+    return "left out: " + ", ".join(parts)
 
 
 def _tried(
@@ -1697,24 +1713,19 @@ def design_from_study(
         if study is None:
             return {"cannot": "there is no study yet"}
         version, name = study.current, study.name
-    assert session.extraction.features is not None
-    _, lost = studies.resolve(version, session.extraction.features)
-    if lost:
-        return {"cannot": "the part is not the one the study names: " + "; ".join(lost[:3])}
-    pieces = _pieces(version, values, present)
-    if not pieces.any():
-        return {"cannot": "; ".join(pieces.cannot) or "nothing the study asks for can be made yet"}
-    point = _spec_of(version, pieces)
-    radius = pieces.radius()
-    if fidelity == "preview":
-        # Every preview of a study on one grid - no finer than the one its designs were placed
-        # on - built once: a design with a smaller fillet waits for full to be held to it.
-        radius = max(radius, _pieces(version).radius())
-    try:
-        opened = _opened(session, point, fidelity, radius)
-        made = make(opened, point, {}, finder=_measure(session), memo=session.memo)
-    except IntentError as error:
-        return {"cannot": str(error)}
+    built = built_of(
+        session.extraction,
+        version,
+        values,
+        present,
+        fidelity,
+        opener=lambda point, level, radius: _opened(session, point, level, radius),
+        finder=_measure(session),
+        memo=session.memo,
+    )
+    if isinstance(built, str):
+        return {"cannot": built}
+    made, pieces = built
     session.made = made
     session.changed.add("design")
     return {
@@ -1725,6 +1736,43 @@ def design_from_study(
         "assumed": studies.assumed(version),
         "waiting": pieces.cannot,
     }
+
+
+def built_of(
+    extraction: Extraction,
+    version: studies.StudyVersion,
+    values: dict[str, dict[str, Any]] | None,
+    present: set[str] | None,
+    fidelity: str,
+    *,
+    opener: Callable[[Version, str, float], Opened],
+    finder: _Faces,
+    memo: dict,
+    surface: bool = True,
+) -> tuple[Made, Pieces] | str:
+    """One design of a study version built - every block at the values given, or its suggested
+    point, only the variants ``present`` - on the part ``opener`` opens at a fidelity and a root
+    fillet's grid; and what it was made from. Or why it cannot be. Whoever builds a design of a
+    campaign builds it here, so the design built anywhere is the same design."""
+    assert extraction.features is not None
+    _, lost = studies.resolve(version, extraction.features)
+    if lost:
+        return "the part is not the one the study names: " + "; ".join(lost[:3])
+    pieces = _pieces(version, values, present)
+    if not pieces.any():
+        return "; ".join(pieces.cannot) or "nothing the study asks for can be made yet"
+    point = _spec_of(version, pieces)
+    radius = pieces.radius()
+    if fidelity == "preview":
+        # Every preview of a study on one grid - no finer than the one its designs were placed
+        # on - built once: a design with a smaller fillet waits for full to be held to it.
+        radius = max(radius, _pieces(version).radius())
+    try:
+        opened = opener(point, fidelity, radius)
+        made = make(opened, point, {}, finder=finder, memo=memo, surface=surface)
+    except IntentError as error:
+        return str(error)
+    return made, pieces
 
 
 def go(
@@ -2021,7 +2069,6 @@ def _key(pieces: Pieces, placed: dict) -> str:
     for placement in pieces.placements:
         result = placed[placement.id]
         parts.append(("fillet", placement.id, placement.section.root_fillet_mm))
-        parts.append(("raised", placement.id, result.raised_mm))
         for rib in result.made():
             parts.append(
                 (
@@ -2100,8 +2147,6 @@ def _made_of(pieces: Pieces, placed: dict) -> dict[str, Any]:
             "root_fillet_mm": placement.section.root_fillet_mm,
             "ribs": [rib_of(r) for r in result.ribs],
             "pads": [rib_of(r) for r in result.pads],
-            "floor_raised_mm": result.raised_mm,
-            "floor_faces": list(result.raised_faces),
         }
     for hole_set in pieces.holes:
         out[hole_set.id] = {
@@ -2775,8 +2820,6 @@ def _short(version: studies.StudyVersion, design: dict) -> list[list[str]]:
             words = f"{chosen.get('generator', 'ribs')} ×{len(ribs)}{thick}"
             if made.get("pads"):
                 words += f", {len(made['pads'])} pads"
-            if made.get("floor_raised_mm"):
-                words += f", floor +{_value(made['floor_raised_mm'])}"
         elif kind == "holes":
             holes = made.get("holes", [])
             size = f" Ø{_value(holes[0]['diameter_mm'])}" if holes else ""
@@ -2812,7 +2855,9 @@ def design_from_spec(session: Session, fidelity: str, levers: dict[str, float]) 
 
 
 def verdict(made: Made) -> dict:
-    """A design's verdict, as the engineer reads it: their constraints first, then the checks."""
+    """A design's verdict, as the engineer reads it: their constraints first, then the checks -
+    each check with how long it took - how long each step of the build took, and the part's faces
+    the design cuts, which the viewer shows as the design's own surface."""
     design = made.design
     order = {"reject": 0, "warn": 1, "pass": 2}
 
@@ -2827,6 +2872,7 @@ def verdict(made: Made) -> dict:
                 "rule": f.rule,
                 **({"assumed": True} if f.assumed and section == "check" else {}),
                 **({"cites": list(f.cites)} if f.cites else {}),
+                **({"seconds": f.seconds} if f.seconds is not None else {}),
             }
             for f in chosen
         ]
@@ -2842,7 +2888,12 @@ def verdict(made: Made) -> dict:
         "added_cm3": round(stats["added_cm3"], 1),
         "mass_kg": stats.get("mass_kg"),
         "material": stats.get("material"),
+        "weighed_from": stats.get("weighed_from", "surface"),
         "seconds": stats["seconds"],
+        "steps": dict(stats.get("steps") or {}),
+        "distance": stats.get("distance"),
+        "surface": design.surface is not None,
+        "cut_faces": list(stats.get("cut_faces") or []),
         "constraints": rows("constraint"),
         "checks": rows("check"),
     }

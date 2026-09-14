@@ -1,21 +1,24 @@
 """Checks: every design comes out pass, warn or reject, with a reason and a place.
 
 A blended shape always builds; it can still be quietly wrong. These are the ways it can be, each
-measured on the design as composed and contoured, never on what was asked for. Every finding names
-the rule it used and whether that rule is assumed, so a threshold nobody has confirmed is never
-presented as one somebody has.
+measured on the design as built - its field, and its surface where one is drawn - never on what was
+asked for. Every finding names the rule it used and whether that rule is assumed, so a threshold
+nobody has confirmed is never presented as one somebody has, and says how long it took.
 
 **The fillet that was actually made.** On a fillet surface the distances to the part and to the rib,
-``a`` and ``b``, satisfy ``(k - a)^2 + (k - b)^2 = k^2`` - so every contoured vertex on a fillet
-says what ``k``, and so what radius, it was built to: ``k = a + b + sqrt(2ab)``, and
-``R = k / (1 - n_a . n_b)``. Read off the surface, that is the radius a person would measure, grid
-error and all.
+``a`` and ``b``, satisfy ``(k - a)^2 + (k - b)^2 = k^2`` - so every point of the design's surface on
+a fillet says what ``k``, and so what radius, it was built to: ``k = a + b + sqrt(2ab)``, and
+``R = k / (1 - n_a . n_b)``. The points are read off the field - where its sign changes between two
+neighbouring cells - so the radius is the one the field holds, grid error and all, whether or not
+a surface is ever drawn.
 """
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import numpy as np
@@ -93,6 +96,16 @@ class Finding:
     """``check``: what the platform holds every rib to. ``constraint``: what the engineer asked."""
     cites: tuple[str, ...] = ()
     """For a constraint, the engineer's words it answers to."""
+    seconds: float | None = None
+    """How long the check took, when it was timed - two findings of one check share its time."""
+
+
+def timed(run: Callable[..., Finding | list[Finding]], *args: Any) -> list[Finding]:
+    """A check run, its findings each saying how long it took."""
+    started = time.perf_counter()
+    found = run(*args)
+    seconds = round(time.perf_counter() - started, 3)
+    return [replace(f, seconds=seconds) for f in (found if isinstance(found, list) else [found])]
 
 
 def check(
@@ -100,32 +113,34 @@ def check(
     window: Window,
     design: Composition,
     ribs: list,
-    surface: Surface,
+    surface: Surface | None,
     rules: Rules,
     owners: dict | None = None,
-    shift=None,
 ) -> list[Finding]:
-    """Every check, on one design. ``owners`` says which block each rib is of, for the rules each
-    block has of its own; ``shift``, how far the design moved the part's surface at any points - the
-    faces a rib is filleted to where they now are."""
+    """Every check of ribs, on one design, each timed. ``owners`` says which block each rib is of,
+    for the rules each block has of its own. ``surface`` is the design's surface where one was
+    drawn - checked for closure - or None: every other check reads the field, and the composition
+    carries how far the design moved the part's faces, so a fillet is read where they now are."""
     owners = owners or {}
     radii = {r: float(rules.of("root_fillet_mm", owners.get(r))) for r in ribs}
     ratios = {r: float(rules.of("root_gap", owners.get(r))) for r in ribs}
     # Mould release waits for the pull: with no direction the part leaves its mould along, and no
     # cores forming the pockets inside, it has nothing true to say.
-    return [
-        _protected(base, window, design),
-        _grid_edge(window, design),
-        _floating(base, design),
-        _thickness(ribs, base.grid.spacing_mm, rules, owners),
-        _gaps(base, ribs, rules, radii, ratios),
-        _fillet(window, design, ribs, surface, rules, radii, shift),
-        _bridging(window, design, rules),
-        _clipped(window, design),
-        _ends(base, design, ribs, rules),
-        *_sections(base, window, design, ribs, rules),
-        _surface(surface),
+    out = [
+        *timed(_protected, base, window, design),
+        *timed(_grid_edge, window, design),
+        *timed(_floating, base, design),
+        *timed(_thickness, ribs, base.grid.spacing_mm, rules, owners),
+        *timed(_gaps, base, ribs, rules, radii, ratios),
+        *timed(_fillet, window, design, ribs, rules, radii),
+        *timed(_bridging, window, design, rules),
+        *timed(_clipped, window, design),
+        *timed(_ends, base, design, ribs, rules),
+        *timed(_sections, base, window, design, ribs, rules),
     ]
+    if surface is not None:
+        out += timed(_surface, surface)
+    return out
 
 
 def described(rules: Rules | None = None) -> list[dict[str, str]]:
@@ -148,7 +163,7 @@ def described(rules: Rules | None = None) -> list[dict[str, str]]:
         {
             "name": "root fillet",
             "rule": "no smaller than the smallest radius the study allows, and within "
-            f"{r.fillet_tolerance:.0%} of the radius its block asks for",
+            f"{r.fillet_tolerance:.0%} of the radius its block asks for - read off the field",
         },
         {
             "name": "rib ends",
@@ -165,7 +180,14 @@ def described(rules: Rules | None = None) -> list[dict[str, str]]:
             "name": "rib against wall",
             "rule": f"a rib at most {r.rib_to_wall:g} x the wall it joins",
         },
-        {"name": "surface", "rule": "the design's surface closed, with no stray edges"},
+        {
+            "name": "holes through",
+            "rule": "every hole open from one side of its plate to the other",
+        },
+        {
+            "name": "surface",
+            "rule": "the design's surface closed, with no stray edges - where a surface is drawn",
+        },
     ]
 
 
@@ -228,9 +250,12 @@ def _floating(base: Field, design: Composition) -> Finding:
     new = design.field.inside[box] & ~base.inside[box]
     labels, count = ndimage.label(new, structure=np.ones((3, 3, 3), dtype=bool))
     touching = ndimage.binary_dilation(base.inside[box], structure=np.ones((3, 3, 3), dtype=bool))
-    loose = [n for n in range(1, count + 1) if not np.any(touching[labels == n])]
+    # Every piece at once: which touch the part, and how big each is.
+    attached = set(np.unique(labels[touching & (labels > 0)]).tolist())
+    loose = [n for n in range(1, count + 1) if n not in attached]
     if loose:
-        sizes = [int((labels == n).sum()) for n in loose]
+        counted = np.bincount(labels.ravel(), minlength=count + 1)
+        sizes = [int(counted[n]) for n in loose]
         biggest = loose[int(np.argmax(sizes))]
         where = _centre(base, np.argwhere(labels == biggest) + lo)
         volume = sum(sizes) * base.grid.spacing_mm**3 / 1e3
@@ -523,40 +548,27 @@ def _fillet(
     window: Window,
     design: Composition,
     ribs: list,
-    surface: Surface,
     rules: Rules,
     radii: dict | None = None,
-    shift=None,
 ) -> Finding:
-    """``radii``, when given, is the root fillet each rib was made with; else the rules'. ``shift``,
-    how far the design moved the part's surface: a fillet is read against the face where it is."""
+    """``radii``, when given, is the root fillet each rib was made with; else the rules'. The part's
+    distance is the composition's own - with whatever the design moved its faces by taken off, so a
+    fillet is read against the face where it now is."""
     targets = np.array([(radii or {}).get(r, rules.root_fillet_mm) for r in ribs], dtype=float)
     floor = rules.fillet_floor_mm
     text, assumed = rules.source("fillet_floor_mm")
     aim = f"R{targets[0]:g}" if np.allclose(targets, targets[0]) else "each rib's own radius"
     rule = f"achieved radius >= R{floor:g} ({text}); within {rules.fillet_tolerance:.0%} of {aim}"
 
-    grid = window.grid
-    lo = np.asarray(grid.origin)
-    hi = lo + (np.asarray(grid.shape) - 1) * grid.spacing_mm
-    v = surface.vertices
-    inside = np.all((v >= lo) & (v <= hi), axis=1)
-    v = v[inside]
-    a = _trilinear(window, window.part, v)
-    if shift is not None and v.size:
-        a = a - shift(v)
-    near = a < 2.0 * targets.max()
-    v, a = v[near], a[near]
+    v, a, n_a, owner = _on_fillets(window, design, 2.0 * float(targets.max()))
     if not v.size:
         return Finding("root fillet", "warn", "no fillet found to measure", rule, assumed)
-    n_a = window.normal_at(_nearest_cell(window, v))
-
-    distances = np.stack([r.distance(v) for r in ribs], axis=1)
-    owner = np.argmin(distances, axis=1)
-    b = distances[np.arange(v.shape[0]), owner]
+    b = np.empty(len(v))
     n_b = np.zeros_like(v)
     for index in np.unique(owner):
-        n_b[owner == index] = ribs[index].normal(v[owner == index])
+        rows = owner == index
+        b[rows] = ribs[index].distance(v[rows])
+        n_b[rows] = ribs[index].normal(v[rows])
     cosine = np.einsum("ij,ij->i", n_a, n_b)
     k = targets[owner] * (1.0 - cosine)
     on = (a > 0.05 * k) & (b > 0.05 * k) & (a < 0.95 * k) & (b < 0.95 * k) & (cosine < 0.9)
@@ -606,6 +618,111 @@ def _fillet(
     )
 
 
+def _on_fillets(
+    window: Window, design: Composition, reach: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Points of the design's surface where a fillet may be - within ``reach`` of both the part and
+    a rib - read off its field: where its sign changes between two neighbouring cells of the
+    window, the change found between their values. With each, its distance to the part as the
+    design leaves it, the part's normal there, and which rib is nearest."""
+    empty = (np.zeros((0, 3)), np.zeros(0), np.zeros((0, 3)), np.zeros(0, dtype=np.int64))
+    touched, a_all, b_all = design.touched, design.part, design.ribs
+    if touched is None or a_all is None or b_all is None or design.nearest is None:
+        return empty
+    grid = window.grid
+    spacing = grid.spacing_mm
+    close = (a_all < reach + spacing) & (b_all < reach + spacing)
+    cells = touched[close]
+    if not cells.size:
+        return empty
+    a_of, owner_of = a_all[close], design.nearest[close]
+    samples = window.samples_of(cells)
+    solid = design.field.inside.ravel()[samples]
+    value = design.field.at(samples).astype(np.float64)
+    shape = np.asarray(grid.shape)
+    index = np.stack(np.unravel_index(cells, grid.shape), axis=1)
+    strides = (int(shape[1] * shape[2]), int(shape[2]), 1)
+    points, a, n_a, owner = [], [], [], []
+    for axis in range(3):
+        ahead = np.flatnonzero(index[:, axis] < shape[axis] - 1)
+        after = cells[ahead] + strides[axis]
+        position = np.clip(np.searchsorted(cells, after), 0, cells.size - 1)
+        found = cells[position] == after
+        i, j = ahead[found], position[found]
+        crossing = solid[i] != solid[j]
+        i, j = i[crossing], j[crossing]
+        if not i.size:
+            continue
+        gap = value[i] - value[j]
+        t = np.clip(np.divide(value[i], gap, out=np.full(i.size, 0.5), where=gap != 0.0), 0, 1)
+        step = np.zeros(3)
+        step[axis] = spacing
+        points.append(grid.centres(cells[i]) + t[:, None] * step)
+        a.append(a_of[i] + t * (a_of[j] - a_of[i]))
+        n_a.append(window.normal_at(cells[i]))
+        owner.append(owner_of[i])
+    if not points:
+        return empty
+    return (
+        np.concatenate(points),
+        np.concatenate(a),
+        np.concatenate(n_a),
+        np.concatenate(owner).astype(np.int64),
+    )
+
+
+def holes_through(base: Field, field: Field, holes: list) -> Finding:
+    """Every hole open all the way through its plate: along its axis, from over the plate's face
+    to past its far side - where the part's metal under the hole ends - the design is air; and
+    the part had metal there to cut."""
+    rule = "every hole open from one side of its plate to the other"
+    if not holes:
+        return Finding("holes through", "pass", "no holes", rule, False)
+    spacing = field.grid.spacing_mm
+    blind, nothing = [], []
+    for hole in holes:
+        centre = np.asarray(hole.centre, dtype=float)
+        axis = np.asarray(hole.axis, dtype=float)
+        axis = axis / np.linalg.norm(axis)
+        # From over the plate's face down its axis, as far again as the hole was cut: where the
+        # part's metal under it starts, and where it ends - the plate's far side.
+        along = np.arange(hole.above_mm, -2.0 * hole.depth_mm - spacing, -spacing / 2.0)
+        points = centre + along[:, None] * axis
+        metal = base.sample(points) < 0.0
+        if not metal.any():
+            nothing.append(centre)
+            continue
+        start = int(np.argmax(metal))
+        after = np.flatnonzero(~metal[start:])
+        if not after.size:
+            blind.append(centre)
+            continue
+        stop = start + int(after[0])
+        # Air all the way: the plate's face to its far side, a sample past each.
+        through = slice(max(start - 1, 0), stop + 1)
+        if (field.sample(points[through]) < 0.0).any():
+            blind.append(centre)
+    if blind:
+        return Finding(
+            "holes through",
+            "reject",
+            f"{len(blind)} of {len(holes)} holes closed somewhere along their axis",
+            rule,
+            False,
+            tuple(float(v) for v in blind[0]),
+        )
+    if nothing:
+        return Finding(
+            "holes through",
+            "reject",
+            f"{len(nothing)} of {len(holes)} holes cut through no metal",
+            rule,
+            False,
+            tuple(float(v) for v in nothing[0]),
+        )
+    return Finding("holes through", "pass", f"all {len(holes)} holes through", rule, False)
+
+
 def _bridging(window: Window, design: Composition, rules: Rules) -> Finding:
     rule = "fillet material only where a rib meets the part"
     touched, a, b = design.touched, design.part, design.ribs
@@ -617,12 +734,20 @@ def _bridging(window: Window, design: Composition, rules: Rules) -> Finding:
     if not fillet.any():
         return Finding("blend bridging", "pass", "no fillet material", rule, False)
 
-    box, lo = _box_around(window.grid.shape, touched, 2)
-    marks = np.zeros(window.grid.shape, dtype=bool)
-    marks.ravel()[touched[overlap]] = True
-    away = ndimage.distance_transform_edt(~marks[box]) * window.grid.spacing_mm
-    cells = np.stack(np.unravel_index(touched[fillet], window.grid.shape), axis=1) - lo
-    far = away[tuple(cells.T)] > 2.0 * rules.root_fillet_mm + window.grid.spacing_mm
+    # How far each cell of fillet is from where a rib runs into the part, cell to cell: the
+    # nearest such cell, by a tree over them - what a distance transform of the box round them
+    # all would say, for the cells asked about only.
+    spacing = window.grid.spacing_mm
+    limit = 2.0 * rules.root_fillet_mm + spacing
+    cells = np.stack(np.unravel_index(touched[fillet], window.grid.shape), axis=1)
+    if overlap.any():
+        from scipy.spatial import cKDTree
+
+        roots = np.stack(np.unravel_index(touched[overlap], window.grid.shape), axis=1)
+        away, _ = cKDTree(roots).query(cells, k=1, distance_upper_bound=limit / spacing + 1.0)
+        far = away * spacing > limit
+    else:
+        far = np.ones(len(cells), dtype=bool)
     if far.any():
         where = _centre_of(window, touched[fillet][far])
         volume = far.sum() * window.grid.spacing_mm**3 / 1e3
@@ -777,59 +902,24 @@ def _sections(
             Finding("rib against wall", "pass", "no rib meets the part", wall_rule, wall_assumed),
         ]
     grown = int(math.ceil(3 * max(r.thickness_mm for r in ribs) / spacing))
-    box, lo = _box_around(window.grid.shape, touched[root], grown)
-    box_cells = np.ravel_multi_index(
-        tuple(
-            g.ravel()
-            for g in np.meshgrid(*[np.arange(s.start, s.stop) for s in box], indexing="ij")
-        ),
-        window.grid.shape,
-    )
-    sub = np.stack(np.unravel_index(window.samples_of(box_cells), base.grid.shape), axis=1)
     shape = window.grid.shape
-    shape_box = tuple(s.stop - s.start for s in box)
-    design_solid = design.field.inside[tuple(sub.T)].reshape(shape_box)
-    base_solid = base.inside[tuple(sub.T)].reshape(shape_box)
-    # A pad is the wall made thicker where a rib meets it: measured as the wall.
-    for pad in (r for r in ribs if getattr(r, "pad", False)):
-        _mark(window, box, base_solid, pad)
-    design_depth = ndimage.distance_transform_edt(design_solid) * spacing
-    base_depth = ndimage.distance_transform_edt(base_solid) * spacing
-    cells = np.stack(np.unravel_index(touched[root], shape), axis=1) - lo
+    cells = np.stack(np.unravel_index(touched[root], shape), axis=1)
     owner = design.nearest[root]
-
-    # The wall a rib stands on is measured through the part beneath its root - every part cell
-    # within one and a half rib thicknesses of the root, each credited to the nearest root cell's
-    # rib. A rib only reaches a voxel into the metal, so its own cells cannot see the wall's depth.
-    roots = np.zeros(shape_box, dtype=bool)
-    roots[tuple(cells.T)] = True
-    labels = np.full(shape_box, -1, dtype=np.int64)
-    labels[tuple(cells.T)] = owner
-    away, nearest_root = ndimage.distance_transform_edt(~roots, return_indices=True)
-    reach = 1.5 * max(r.thickness_mm for r in ribs) / spacing
-    beneath_mask = base_solid & (away <= reach)
-    beneath_owner = labels[tuple(nearest_root[:, beneath_mask])]
-    beneath_depth = base_depth[beneath_mask]
-
-    worst_spot, worst_wall = (0.0, None), (math.inf, None, None)
-    for index in np.unique(owner):
-        if getattr(ribs[index], "pad", False):
-            continue
-        mine = cells[owner == index]
-        depth = beneath_depth[beneath_owner == index]
-        # The wall: the deepest the part goes under where this rib joins it.
-        wall = 2.0 * float(depth.max()) if depth.size else 0.0
-        section = 2.0 * float(design_depth[tuple(mine.T)].max()) if mine.size else 0.0
-        if wall > 0.0:
-            ratio = section / wall
-            if ratio > worst_spot[0]:
-                worst_spot = (
-                    ratio,
-                    _centre_of(window, np.ravel_multi_index((mine + lo).T, shape)[:1]),
-                )
-            margin = rules.rib_to_wall * wall - ribs[index].thickness_mm
-            if margin < worst_wall[0]:
-                worst_wall = (margin, wall, ribs[index].thickness_mm)
+    worst_spot: tuple[float, Any] = (0.0, None)
+    worst_wall: tuple[float, Any, Any] = (math.inf, None, None)
+    # Each rib's junctions in a box of their own, grown as far as a section or the wall beneath
+    # can matter; boxes that overlap are one - ribs that meet or cross are measured together, and
+    # ribs far apart pay for the part round them, not for the box round them all.
+    for box, lo in _boxes(cells, owner, grown, shape):
+        mine = np.all((cells >= lo) & (cells < [s.stop for s in box]), axis=1)
+        for index, ratio, where, margin, wall in _box_sections(
+            base, window, design, ribs, rules, box, cells[mine] - lo, owner[mine]
+        ):
+            if wall > 0.0:
+                if ratio > worst_spot[0]:
+                    worst_spot = (ratio, where)
+                if margin < worst_wall[0]:
+                    worst_wall = (margin, wall, ribs[index].thickness_mm)
 
     ratio, where = worst_spot
     spot = (
@@ -872,6 +962,112 @@ def _sections(
         )
     )
     return [spot, against]
+
+
+def _boxes(
+    cells: np.ndarray, owner: np.ndarray, grown: int, shape: tuple[int, ...]
+) -> list[tuple[tuple[slice, ...], np.ndarray]]:
+    """A box round each rib's junction cells, grown by ``grown`` cells and held to the window;
+    boxes that overlap merged into one, until none do."""
+    top = np.asarray(shape)
+    boxes = []
+    for index in np.unique(owner):
+        mine = cells[owner == index]
+        boxes.append(
+            [np.maximum(mine.min(axis=0) - grown, 0), np.minimum(mine.max(axis=0) + grown + 1, top)]
+        )
+    merged = True
+    while merged:
+        merged = False
+        for i in range(len(boxes)):
+            for j in range(i + 1, len(boxes)):
+                (a_lo, a_hi), (b_lo, b_hi) = boxes[i], boxes[j]
+                if np.all(a_lo < b_hi) and np.all(b_lo < a_hi):
+                    boxes[i] = [np.minimum(a_lo, b_lo), np.maximum(a_hi, b_hi)]
+                    del boxes[j]
+                    merged = True
+                    break
+            if merged:
+                break
+    return [
+        (tuple(slice(int(a), int(b)) for a, b in zip(lo, hi, strict=True)), lo) for lo, hi in boxes
+    ]
+
+
+def _box_sections(
+    base: Field,
+    window: Window,
+    design: Composition,
+    ribs: list,
+    rules: Rules,
+    box: tuple[slice, ...],
+    cells: np.ndarray,
+    owner: np.ndarray,
+):
+    """In one box of the window, each rib's thickest junction against the wall it joins: the rib,
+    the ratio of the two and where, how far the rib is inside what the wall allows, and the wall.
+    By distance transform, so to the nearest voxel."""
+    spacing = window.grid.spacing_mm
+    lo = np.array([s.start for s in box])
+    shape_box = tuple(s.stop - s.start for s in box)
+    # The window is a block of the base grid: the box, where it lies in that.
+    at = tuple(
+        slice(s.start + first, s.stop + first) for s, first in zip(box, window.first, strict=True)
+    )
+    design_solid = design.field.inside[at]
+    base_solid = base.inside[at].copy()
+    # A pad is the wall made thicker where a rib meets it: measured as the wall.
+    for pad in (r for r in ribs if getattr(r, "pad", False)):
+        _mark(window, box, base_solid, pad)
+
+    # The wall a rib stands on is measured through the part beneath its root - every part cell
+    # within one and a half rib thicknesses of the root, each credited to the nearest root cell's
+    # rib. A rib only reaches a voxel into the metal, so its own cells cannot see the wall's depth.
+    from scipy.spatial import cKDTree
+
+    reach = 1.5 * max(r.thickness_mm for r in ribs) / spacing
+    near_lo = np.maximum(cells.min(axis=0) - int(math.ceil(reach)), 0)
+    near_hi = np.minimum(cells.max(axis=0) + int(math.ceil(reach)) + 1, shape_box)
+    near = tuple(slice(int(a), int(b)) for a, b in zip(near_lo, near_hi, strict=True))
+    candidates = np.argwhere(base_solid[near]) + near_lo
+    away, nearest_root = cKDTree(cells).query(candidates, k=1, distance_upper_bound=reach + 1e-9)
+    beneath = np.isfinite(away) & (away <= reach)
+    beneath_owner = owner[nearest_root[beneath]]
+    beneath_depth = _depth(base_solid, candidates[beneath]) * spacing
+    design_depth = _depth(design_solid, cells) * spacing
+
+    for index in np.unique(owner):
+        if getattr(ribs[index], "pad", False):
+            continue
+        rows = owner == index
+        mine = cells[rows]
+        depth = beneath_depth[beneath_owner == index]
+        # The wall: the deepest the part goes under where this rib joins it.
+        wall = 2.0 * float(depth.max()) if depth.size else 0.0
+        section = 2.0 * float(design_depth[rows].max()) if mine.size else 0.0
+        ratio = section / wall if wall > 0.0 else 0.0
+        where = _centre_of(window, np.ravel_multi_index((mine[:1] + lo).T, window.grid.shape))
+        yield int(index), ratio, where, rules.rib_to_wall * wall - ribs[index].thickness_mm, wall
+
+
+def _depth(solid: np.ndarray, points: np.ndarray) -> np.ndarray:
+    """How deep each of ``points`` - cells of the box ``solid`` - lies in it: the distance, in
+    cells, to the nearest cell of the box that is not solid; nothing for a point not in it. What a
+    distance transform of the box says, asked of these cells only: the nearest cell not solid
+    always borders the solid, so only those are looked among."""
+    from scipy.spatial import cKDTree
+
+    out = np.zeros(len(points))
+    if not len(points):
+        return out
+    inside = solid[tuple(points.T)]
+    edge = np.argwhere(ndimage.binary_dilation(solid) & ~solid)
+    if not len(edge):
+        out[inside] = float(np.linalg.norm(solid.shape))
+        return out
+    found, _ = cKDTree(edge).query(points[inside], k=1)
+    out[inside] = found
+    return out
 
 
 def _mark(window: Window, box: tuple[slice, ...], solid: np.ndarray, shape) -> None:
@@ -1002,42 +1198,6 @@ def _tips(rib, spacing: float) -> tuple[np.ndarray, np.ndarray]:
         line = origin + np.linspace(0.0, length, count)[:, None] * along
     heights = rib.height_at(np.linspace(0.0, 1.0, len(line)))
     return line + (heights - 0.5 * spacing)[:, None] * up, up
-
-
-def _trilinear(window: Window, values: np.ndarray, points: np.ndarray) -> np.ndarray:
-    """Values stored per window cell, interpolated at arbitrary points inside the window."""
-    grid = window.grid
-    shape = np.asarray(grid.shape)
-    u = (points - np.asarray(grid.origin)) / grid.spacing_mm
-    base = np.clip(np.floor(u).astype(np.int64), 0, shape - 2)
-    f = np.clip(u - base, 0.0, 1.0)
-    table = values.reshape(*grid.shape, -1)
-    out = 0.0
-    for dx in (0, 1):
-        for dy in (0, 1):
-            for dz in (0, 1):
-                weight = (
-                    (f[:, 0] if dx else 1 - f[:, 0])
-                    * (f[:, 1] if dy else 1 - f[:, 1])
-                    * (f[:, 2] if dz else 1 - f[:, 2])
-                )
-                corner = table[base[:, 0] + dx, base[:, 1] + dy, base[:, 2] + dz]
-                out = out + weight[:, None] * corner
-    return out[:, 0] if out.shape[1] == 1 else out
-
-
-def _nearest_cell(window: Window, points: np.ndarray) -> np.ndarray:
-    """The window cell nearest each point."""
-    index = np.rint((points - np.asarray(window.grid.origin)) / window.grid.spacing_mm).astype(
-        np.int64
-    )
-    index = np.clip(index, 0, np.asarray(window.grid.shape) - 1)
-    return np.ravel_multi_index(tuple(index.T), window.grid.shape)
-
-
-def _unit(v: np.ndarray) -> np.ndarray:
-    length = np.linalg.norm(v, axis=1, keepdims=True)
-    return np.divide(v, length, out=np.zeros_like(v), where=length > 1e-12)
 
 
 def _box_around(shape: tuple, flat: np.ndarray, grow: int) -> tuple[tuple[slice, ...], np.ndarray]:

@@ -21,6 +21,7 @@ export const OUTCOMES: Record<string, { colour: [number, number, number]; label:
   one_thing: { colour: [0.85, 0.2, 0.2], label: "ends on one thing at both ends" },
   one_side: { colour: [0.9, 0.45, 0.45], label: "runs within one side, not from one side to the other" },
   thin_wall: { colour: [0.85, 0.3, 0.1], label: "ends on a wall too thin for it" },
+  thin_floor: { colour: [0.3, 0.3, 0.3], label: "left out: too thick for the floor under it" },
   closed: { colour: [0.75, 0.05, 0.35], label: "would reach a hole or bore the part keeps closed" },
   missed: { colour: [0.55, 0.55, 0.55], label: "misses where ribs stand" },
   pad: { colour: [0.9, 0.75, 0.1], label: "a pad: the wall thickened where a rib meets it" },
@@ -229,6 +230,7 @@ export function VerdictView({ verdict }: { verdict: Verdict }) {
   const shown = (row: VerdictRow) => row.outcome !== "pass" || row.check.startsWith("supports");
   const notPassed = rows.filter(shown);
   const passed = rows.filter((row) => !shown(row));
+  const steps = Object.entries(verdict.steps ?? {});
   return (
     <div className="rib-verdict">
       <div className="verdict-line">
@@ -241,7 +243,15 @@ export function VerdictView({ verdict }: { verdict: Verdict }) {
         {verdict.added_cm3.toLocaleString(undefined, { maximumFractionDigits: 0 })} cm³
         {verdict.mass_kg ? ` · ${verdict.mass_kg} kg ${verdict.material ?? ""}` : ""} ·{" "}
         {verdict.fidelity} · study v{verdict.study_version ?? verdict.spec_version} ·{" "}
-        {verdict.seconds} s
+        <span
+          title={
+            steps.length
+              ? steps.map(([step, seconds]) => `${step} ${seconds} s`).join("\n")
+              : undefined
+          }
+        >
+          {verdict.seconds} s
+        </span>
       </div>
       {notPassed.map((row) => (
         <FindingLine key={row.check} row={row} />
@@ -256,12 +266,17 @@ export function VerdictView({ verdict }: { verdict: Verdict }) {
   );
 }
 
-export function FindingLine({ row }: { row: Pick<VerdictRow, "check" | "outcome" | "reason" | "rule"> }) {
+export function FindingLine({
+  row,
+}: {
+  row: Pick<VerdictRow, "check" | "outcome" | "reason" | "rule" | "seconds">;
+}) {
   return (
     <div className="finding" data-outcome={row.outcome} title={row.rule}>
       <span className="mark">{row.outcome}</span>
       <span className="what">
         <b>{row.check}</b> {row.reason}
+        {row.seconds !== undefined ? <span className="dim"> · {row.seconds} s</span> : null}
       </span>
     </div>
   );

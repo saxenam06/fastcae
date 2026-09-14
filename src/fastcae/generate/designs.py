@@ -113,7 +113,9 @@ class Design:
     digest: str
     base: Field
     composition: Composition
-    surface: Surface
+    surface: Surface | None
+    """The design's surface, where it was drawn: a design built for a dataset has none until
+    someone opens it."""
     findings: list[Finding]
     stats: dict
     ribs: list = field(default_factory=list)
@@ -124,7 +126,7 @@ class Design:
     def outcome(self) -> str:
         return max((f.outcome for f in self.findings), key=_RANK.__getitem__, default="pass")
 
-    def changed_surface(self) -> tuple[Surface, np.ndarray]:
+    def changed_surface(self, faces: list[int] | set[int] = ()) -> tuple[Surface, np.ndarray]:
         """The surfaces this design changes, down to where they meet the part, and how far each of
         their vertices stands off it.
 
@@ -133,12 +135,18 @@ class Design:
         with a moved vertex is drawn. So what is drawn ends exactly on the part's own surface, and
         a rib's fillet runs all the way down to it instead of stopping short of it.
 
+        ``faces`` are the part's faces the viewer hides - those the design cuts, where a hole
+        through them must show as one: the design's own surface on them is drawn whole, and a
+        triangle round it besides, so it overlaps the faces beside them rather than leave a crack.
+
         ``standing`` is per vertex: 0 on the part, 1 half a cell or more off it. It is how far the
         field moved around the vertex, read between its cell's eight samples, so it is nothing
         where no sample changed and rises smoothly up a fillet; the viewer blends the part's colour
         into the design's by it, and the join reads as a join rather than as a jagged edge.
         """
         surface, part = self.surface, self.part_surface
+        if surface is None:
+            raise ValueError("this design's surface was not drawn: build it with its surface")
         if part is None or part.vertex_key is None or surface.vertex_key is None:
             raise ValueError("this design carries no surface of the part to compare with")
         same = np.clip(np.searchsorted(part.vertex_key, surface.vertex_key), 0, part.n_vertices - 1)
@@ -148,12 +156,21 @@ class Design:
         standing = np.zeros(surface.n_vertices)
         spacing = self.base.grid.spacing_mm
         standing[moved] = np.clip(np.abs(self._field_moved(moved)) / (0.5 * spacing), 0.0, 1.0)
-        changed, used = _subset(surface, moved[surface.triangles].any(axis=1))
+        keep = moved[surface.triangles].any(axis=1)
+        if len(faces):
+            hidden = np.isin(
+                surface.face_id, np.asarray(sorted(faces), dtype=surface.face_id.dtype)
+            )
+            ring = np.zeros(surface.n_vertices, dtype=bool)
+            ring[surface.triangles[hidden]] = True
+            keep |= ring[surface.triangles].any(axis=1)
+        changed, used = _subset(surface, keep)
         return changed, standing[used]
 
     def _field_moved(self, which: np.ndarray) -> np.ndarray:
         """How far the field moved at these vertices of the design's surface: the change at the
         eight samples of the cell each belongs to, weighted by where in the cell it sits."""
+        assert self.surface is not None
         grid = self.base.grid
         shape = np.asarray(grid.shape)
         cell = np.stack(

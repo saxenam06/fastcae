@@ -93,7 +93,13 @@ def weight(patch: Patch, points: np.ndarray, ramp_mm: float) -> np.ndarray:
     """
     near, _ = patch.inside.query(points, k=1, workers=-1)  # type: ignore[attr-defined]
     far, _ = patch.outside.query(points, k=1, workers=-1)  # type: ignore[attr-defined]
+    return ramped(near, far, ramp_mm)
 
+
+def ramped(near: np.ndarray, far: np.ndarray, ramp_mm: float) -> np.ndarray:
+    """How much points belong to a selection, from their distance to it and to everything else."""
+    near = np.asarray(near, dtype=np.float64)
+    far = np.asarray(far, dtype=np.float64)
     if ramp_mm <= 0.0:
         return (near <= far).astype(np.float64)
 

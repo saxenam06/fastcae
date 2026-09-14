@@ -34,9 +34,9 @@ What runs:
   Webs from something round - a bearing - stand along its axis, and each web hangs from the height
   of its own two ends, so walls that step up and down are joined all round. A sample of faces moved
   says how many move and how far, with *show them*.
-  A new variant of ribs starts from a starting point kept as data: 20 mm thick, 100 mm apart, as
-  tall as what they meet, two to ten of them, two suggested; root fillet, edge round and draft
-  each of three choices, the middle first.
+  A new variant of ribs starts from a starting point kept as data: 20 mm thick, 100 mm apart, two
+  to five times as tall as they are thick - three suggested - two to ten of them, two suggested;
+  root fillet, edge round and draft each of three choices, the middle first.
 - **What a variant may vary** - its shape: the settings that decide its designs first (for ribs the
   patterns, thickness, spacing, count, height), the rest under *More settings*; what spokes turn
   about and how they spread only while spokes are allowed, with *show*. Every setting applies to
@@ -47,8 +47,10 @@ What runs:
   numbers in place, as a range or one value, kept on Enter, on done or on clicking elsewhere once
   touched, marked until then, a range from a value to itself that value; what the engineer set
   marked, with *reset*. Every range the part suggests steps by five in its
-  own unit, its ends rounded inward onto fives; a height is a percentage stepping by five;
-  thinning stops at five millimetres and never below the least wall.
+  own unit, its ends rounded inward onto fives; a height is said in thicknesses of the rib, by
+  halves, among the settings shown first; thinning stops at five millimetres and never below the
+  least wall. Spokes turn only about round things with an axis - a face of a ring about the ring's
+  axis; one with nothing round about it is refused, saying why.
   The patterns ribs may take are choices among parallel, square grid, triangle grid, spokes and
   **free** - independent lines, each at an angle of the range and a place across the floor, drawn
   from a layout seed nobody sets - so "only square" is one choice and anything another. The card
@@ -119,28 +121,40 @@ What runs:
   design reads by variant - code, name, what it made and the values it took - with the variants it
   leaves out, what repair left out, and its recipe and seed. Its paths are drawn at once; its field,
   once built, is the surfaces it changes over the part - run down to where they meet it, taking the
-  part's colour there - and its new metal as cells; the designs that differ most are side by side
-  as plans.
+  part's colour there, and the faces it cuts hidden and drawn as its own surface, so a hole looks
+  like a hole - and its new metal as cells; its verdict says how long each check and each step
+  took. The designs that differ most are side by side as plans.
 - **Building a design**: its field at preview or full, from the copy of the variants its campaign
   kept - faces moved, each rib and pad filleted with its own root fillet, holes cut, mended, one
-  recontour - checked, and kept beside the campaign. Mould release is not among the checks while
-  variants hold no pull direction.
+  recontour - checked, and kept beside the campaign. Each window's exact distance to the part, and
+  the faces moved's nearest-face distances, on the GPU with NVIDIA Warp - the part's triangles split
+  to 16 mm first - or on the CPU without it, within 0.004 mm of each other. Every check and every
+  step timed; the root fillet read off the field; holes checked open through their plate. Mould
+  release is not among the checks while variants hold no pull direction.
+- **Building without a surface**, for datasets: `build_design(folder, index)` builds any design of
+  a launched campaign from its folder alone - no server, no session - the same field Build field
+  builds, with no recontour and no check that reads a surface, weighed from its field; it returns
+  the field, the verdict with each check's outcome and time, and the step times. A `Workshop` keeps
+  the part open between the designs one process builds.
 - **Kinds of change**, each read off the part round what the engineer gave:
   - **ribs** on a floor - faces in one plane - and **webs** with nothing under them, between what
-    they join; spans between supports, each end buried in what it meets, the top sloping or level;
-    held to the wall they meet - no thicker than 0.8 of it - with a pad round a rib's end where a
-    wall is too thin, and a floor thickened for ribs too thick for it, never either past twice
-    itself.
+    they join; spans between supports, each end buried in what it meets and no taller than what it
+    meets - never the metal behind it - a web no taller than the lower of what it joins, the top
+    sloping or level; held to the wall they meet - no thicker than 0.8 of it - with a pad round a
+    rib's end where a wall is too thin, never past twice the wall. A floor is never thickened: a
+    rib too thick for the floor under it is left out, and the design says so with the rule.
   - **faces thickened** - a wall, a plate, a boss - along their normal, blended into what is round
-    them; built exactly in a window round them; a variant that would move a bore is refused.
+    them; built exactly in a window round them, 262 faces in seconds; a variant that would move a
+    bore is refused.
   - **holes**: a square or staggered lattice through a plate, each hole a ligament of metal from the
     next, the plate's edges, the holes it has and the ribs of every variant; none over something
     standing under the plate.
 - **Reading the part**: holes go round (a fillet in a corner is not a hole; a cast hole with draft
   is); what a feature stands on is found across the fillets and chamfers at its foot; what rises
   round a floor across fillets, rounds and chamfers; what lies across the open space from an entity
-  by rays out of its metal; the plate and walls measured by rays through them; the smallest radius
-  is the drawing's note, cited.
+  by rays out of its metal; the plate and walls measured by rays through them; how tall a rib's end
+  stands by the faces of what it meets, within its width; the smallest radius is the drawing's
+  note, cited.
 
 Not yet: tapers and gussets; bulges, boss transitions, existing ribs varied; staggered crossings; a
 review loop turning objections into rules; the agent writing variants and campaigns. The zone and
@@ -201,10 +215,11 @@ about 60 ms once each block was known; 20 designs of three variants took 2 s abo
 - **The mesh, solver setup and results stages are not built** in the product; a design's M, S and R
   stay empty, and nothing ranks designs but their geometry and mass. The route is measured in the
   bench ([research/design-to-solution.md](research/design-to-solution.md),
-  [research/field-meshing-gate.md](research/field-meshing-gate.md)): built with the grid's distance on
-  the GPU, meshed from the field by a compiled CGAL mesher in 8-14 s with the seats' edges as lines,
-  solved by cuDSS - about 2 minutes a design; against the production housing's CAD, the field's answers
-  are within the noise of meshing itself. None of it is in the product yet.
+  [research/field-meshing-gate.md](research/field-meshing-gate.md)): meshed from the field by a
+  compiled CGAL mesher in 8-14 s with the seats' edges as lines, solved by cuDSS; against the
+  production housing's CAD, the field's answers are within the noise of meshing itself. The build
+  that feeds it - the grid's distance on the GPU, no surface drawn - is in the product; the meshing,
+  solving, "the mesh valid" in place of "the surface closed", and the runner are not.
 - **agenticCAE's meshing route changes the housing's geometry**: on the production housing gmsh leaves
   out six CAD faces, MeshFix lids their holes flat (up to 242 mm across) and the repair cuts up to
   24 mm into metal under a bearing seat - 20-53 % off on two seats' tilts. Its 490 designs were meshed
@@ -214,25 +229,18 @@ about 60 ms once each block was known; 20 designs of three variants took 2 s abo
 - **The design's surface crosses itself** where two sheets pass closer than the grid: dual contouring
   left 2,333 crossing faces on design #7, nearly all on one 556 mm column. A mesher from the surface
   cannot fill it without a repair; meshing from the field never makes the surface.
-- **Ribs grow as tall as the metal behind their ends.** An end's height is the tallest column of
-  metal found up to 60 mm into what it meets, and the housing's walls are 560-640 mm tall, so ribs
-  reach 105-241 mm and a web 422 mm - through a 494 mm column behind a 45 mm boss. No variant holds a
-  height limit, and the starting height is 100% of what each end meets. Fix agreed: height from what
-  an end actually meets, webs within where both sides overlap, height a setting in thicknesses.
-- **Spokes turn about freeform faces' middles.** A spoke centre that is a freeform face has no axis, so
-  spokes fan from a point on it - 296 mm off the bearing's axis on the housing. Fix agreed: only round
-  things with an axis.
-- **Floors are thickened under ribs too thick for them** - a layer over the whole floor face. Agreed:
-  no floor thickening; such a rib is left out.
-- **Holes look blind in the Field view, though they go through.** The view draws the part's CAD surface
-  and, over it, only the surfaces a design changes; the CAD faces a hole cuts are still drawn. Fix
-  agreed: hide the faces a design cuts, and a verdict check that holes go through.
-- **Builds block, show no progress and die with the development server.** A field build runs inside
-  the request; a reload of the development server kills it and nothing is saved. Thickening 262 faces
-  spends 30-40 minutes in one step of the face-moving pass - its nearest-face queries cover the whole
-  grid per group of faces - so such a design takes 45-60 minutes.
+- **The housing's floors are too thin for the starting ribs.** A floor is never thickened, and 20 mm
+  ribs - where a new variant starts - need 25 mm of floor under them: on the housing's ceilings and
+  floors they are left out. Design #7 of `w4zf5`, built today, keeps its webs - each no taller than
+  what its ends meet, 10 to 97 mm - and none of its ribs on a floor, so its build is rejected for
+  those variants. Starting ribs at 0.6-0.8 of the floor they stand on would keep them
+  ([build-plan.md](build-plan.md), Open).
+- **Builds in the interface block and die with the development server.** A field build runs inside
+  the request; a reload of the development server kills it and nothing is saved. A separate process
+  can build any design of a launched campaign from its folder (`build_design`); the runner that keeps
+  designs in progress that way is not built.
 
-Size: 50 Python files, ~23,900 lines; 21 TypeScript files, ~7,500 lines; 8 skills. Tests are kept
+Size: 53 Python files, ~25,800 lines; 21 TypeScript files, ~8,300 lines; 8 skills. Tests are kept
 locally as working checks and are not tracked.
 
 One project in `assets/`: **GRC Gearbox Housing** - the rib-free housing (`housing_baseline.brep`),
@@ -319,9 +327,12 @@ tight integration on the housing.
 | Screen 100 of three variants | about 4 s |
 | a campaign of 20 designs of three variants, pools included | 2 s |
 | a campaign of 4,000 designs of ten blocks, together | about 60 ms a design once each block is known |
-| a design built at preview - its field, surfaces and cells, checked, kept | 1.5 to 16 minutes the first time; 80 s once its windows are kept; 45-60 minutes with 262 faces thickened |
+| design #7 of `w4zf5` built at preview by a worker from the campaign's folder - 9 ribs, 9 pads | 8 s with no surface the first time, 5.7 s of it placing's first read of the part; 1.8 s after; 20 s with its surface, 12 of them the recontour |
+| its checks, each timed | 0.8 s in all: junction sections 0.56, nothing floating 0.19, root fillet read off the field 0.04, blend bridging 0.03 |
+| 262 faces thickened | 11 s the first time, 4-5 s once what they read off the part is kept |
+| the part's distance, cell by cell | on the GPU, 0.1-0.3 s a window of 200,000-370,000 cells within reach, where the CPU took 8-58 s; at most 0.0003 mm apart over 1.6 M cells; the part's triangles split to 16 mm, 5 s once |
 | the preview grid | 425 × 463 × 258 = 50.8 M cells at 3 mm, 5.5 M near the surface; the full grid at 1.5 mm about 403 M |
-| design #7 of `w4zf5` (15 ribs, 11 pads) built at preview, outside the interface | 1,962 s; 79 s with the grid's distance on the GPU (bench); 2.54 M surface triangles |
+| design #7 of `w4zf5` as built for the bench - 15 ribs, 11 pads, floors thickened | 1,962 s on the CPU; 79 s with the grid's distance on the GPU; 2.54 M surface triangles |
 | that design meshed as TET10 | 4-8 s from the field by the compiled CGAL mesher at the old sizes (46 s through pygalmesh), 840-860 k unknowns; 9-14 s with 2 elements through its ribs, 1.49 M; 73 s from its cleaned surface by gmsh; fTetWild 26-103 min |
 | its TET10 solve | 13 s by cuDSS at 1.06 M unknowns (5.2 GB of the card); 10 s at 1.49 M, part of the factor in host memory; 57 s Code_Aster, one core; cuDSS fails at 2.4 M |
 | the production housing, for the gate | 2,167 faces; its 3 mm field 101 s; meshed from the field 7.9 s, from its CAD surface 12.6 s, by agenticCAE's route 17 s - 1.1-1.2 M unknowns each; Code_Aster 2-2.5 min and 4.2-4.5 GB each |
@@ -331,12 +342,13 @@ tight integration on the housing.
 
 **Now** - the next phase in [build-plan.md](build-plan.md), in its order. The compiled mesher with
 feature sizes and the gate against the production housing's CAD are done in the bench; two calls wait
-on the engineer - counting the gate passed, and the solver for a design too big for the card. Then the
-route in the product - built on the GPU, meshed from the field, solved by cuDSS with agenticCAE's
-supports, run by a runner that keeps designs in progress on the GPU and the cores at once; designs
-made for runs, with the fixes the engineer asked for (rib height, no floor thickening, holes seen
-through); the 40-design check; then the data in rounds, the field model, and the agents that
-supervise it. Mould release with the pull and cores, and the engineer's review loop, after.
+on the engineer - counting the gate passed, and the solver for a design too big for the card. Designs
+are built for runs: on the GPU, each check timed, no surface drawn, from a campaign's folder by any
+process. Then the rest of the route in the product - meshed from the field, labelled from the part's
+CAD faces, weighed from the mesh and held to it being valid, solved by cuDSS with agenticCAE's
+supports, run by a runner that keeps designs in progress on the GPU and the cores at once; the
+40-design check; then the data in rounds, the field model, and the agents that supervise it. Mould
+release with the pull and cores, and the engineer's review loop, after.
 
 Alongside, on Extract:
 
@@ -368,8 +380,12 @@ Alongside, on Extract:
 | A rib | a web between two or more anchors, a floor optional; section, plane and pull direction from the variant |
 | The interface | five tabs - Drawing, CAD, Generate, Learn, Optimize - every one shown built or not; Design a variant on CAD; Generate is Campaign and Designs; the agent's bar hidden while it is paused |
 | Kinds of change | ribs and webs; faces moved along their normal - walls, plates, bosses; holes through a plate on a lattice. The part is cast in one material, which no variant changes. Built in one order - faces moved, then ribs and pads, then holes |
-| Design knowledge | data with its sources, in `knowledge/materials.json`: rib to wall 0.8, root gap 2 thicknesses, a hole's ligament one plate thickness, a least wall 8 mm, six casting materials with density, stiffness, strength and least wall from their standards; where a new variant of ribs starts - 20 mm thick, 100 mm apart, full height, two to ten, three choices of each radius and draft |
-| Pads | on unless the engineer says otherwise: a wall too thin for a rib is padded round its end, a floor too thin for its ribs thickened for them, never either past twice itself; off, the rib is left out or the design screened out |
+| Design knowledge | data with its sources, in `knowledge/materials.json`: rib to wall 0.8, root gap 2 thicknesses, a hole's ligament one plate thickness, a least wall 8 mm, six casting materials with density, stiffness, strength and least wall from their standards; where a new variant of ribs starts - 20 mm thick, 100 mm apart, 2 to 5 thicknesses tall, two to ten, three choices of each radius and draft |
+| Pads | on unless the engineer says otherwise: a wall too thin for a rib is padded round its end, never past twice itself; off, the rib is left out |
+| Floors | never thickened for their ribs: a rib too thick for the floor under it is left out, and the design says so with the rule it broke |
+| Rib height | in thicknesses of the rib, 2 to 5 by default; each end never taller than what it meets - the face or feature it runs into, never the metal behind it; a web no taller than the lower of what it joins, its top level by default |
+| The part's distance | exact, on the GPU with NVIDIA Warp when installed and a CUDA device is there - the part's triangles split to 16 mm first - the CPU's scan otherwise; the two within 0.004 mm |
+| Building a design | from its campaign's folder by any process (`build_design`); no surface unless asked; every check and step timed; the root fillet read off the field |
 | A design's stages | P paths, F field, M mesh, S setup, R results, each shown with how it came out; every design's paths kept with its campaign, drawn at once; a built field kept beside its campaign |
 | Rib ends | a rib ends on what it meets, buried in it, or stops at least the root gap short of any metal ahead - never a finger of sand between |
 | The model | paused; when it returns it writes variants and campaigns from words - never geometry, never a call per design, never scripted to an example |
@@ -388,7 +404,7 @@ Alongside, on Extract:
 | Conflicts | recorded, never resolved, and not shown until an association is confirmed |
 | Derived results | cached under `<project>/.fastcae/`, keyed on content and on the source that produced them; a miss is never an error |
 | Design representation | a signed distance field on a fixed grid; a design is its variants and their values, never stored geometry |
-| Contouring | manifold dual contouring; the baseline whole, once; a design re-contours only what it changed, spliced by key. The grid's outermost layer is never solid |
+| Contouring | manifold dual contouring; the baseline whole, once; a design re-contours only what it changed, spliced by key, and only when its surface is asked for. The grid's outermost layer is never solid |
 | Design grid | a quarter of the root fillet unless asked for; voxel sizes offered are round numbers |
 | Ports | API 8021, interface 5183 |
 | Checks enforced | `ruff` and `tsc`. `mypy --strict` is configured and does not pass |
