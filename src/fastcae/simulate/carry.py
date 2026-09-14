@@ -1,10 +1,10 @@
 """The deck's groups tied to the CAD, and carried to any other mesh of the part or of a design.
 
 **Anchoring.** Every group a support, coupling or load acts on is a patch of the deck mesh's
-surface.
-Its triangles - the skin triangles whose corners all belong to the group - are matched to the CAD
-face each lies on, by the CAD's own triangulation, so the group becomes a set of CAD faces. Single-
-node groups - the reference points couplings are held or loaded through - keep their coordinates.
+surface. Its triangles - the skin triangles whose corners all belong to the group - are matched to
+the CAD face each lies on, by the CAD's own triangulation, so the group becomes a set of CAD faces.
+Single-node groups - the reference points couplings are held or loaded through - keep their
+coordinates.
 
 **Carrying.** A new mesh is labelled face by face: a boundary triangle joins a group when its middle
 is nearest one of the group's faces and every corner lies within a tolerance of them - so a triangle

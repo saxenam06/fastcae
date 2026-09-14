@@ -9,8 +9,8 @@ can differ only in what they computed.
 
 - *deck* - what the deck itself reads off its answer (``POST_RELEVE_T``), under the deck's name;
 - *derived* - what fastcae computes from the answer by geometry alone: the tilt of a coupling
-  acting on
-  a cylindrical surface (its rotation square to the cylinder's axis), each held group's reaction,
+  acting on a cylindrical surface (its rotation square to the cylinder's axis), each held group's
+  reaction,
   the largest displacement, and von Mises at the 99.9th percentile of volume - the peak chases
   sharp corners and says more about the mesh than the part.
 """
@@ -359,11 +359,14 @@ def certificate(
         1e-4 if same_mesh else 1e-3,
         "N",
     )
-    for of, f, r in (("reference", f_a, r_a), ("other", f_b, r_b)):
+    for of, which, f, r in (
+        ("reference", "reference", f_a, r_a),
+        ("other", "reproduction", f_b, r_b),
+    ):
         # One answer's own balance: the load it applied, and what its reactions leave of it.
         rows.append(
             {
-                "quantity": f"out of balance, {'reference' if of == 'reference' else 'reproduction'}",
+                "quantity": f"out of balance, {which}",
                 "of": of,
                 "reference": float(np.linalg.norm(f)),
                 "other": float(np.linalg.norm(f + r)),
@@ -432,8 +435,9 @@ def certificate(
             "von Mises p99",
             percentile(a.von_mises, wa, 0.99),
             percentile(b.von_mises, wb, 0.99),
-            tight if same_mesh else 0.05,
+            tight if same_mesh else None,
             "MPa",
+            "" if same_mesh else "advisory: on another mesh p99 moved 8 % with the mesh alone",
         )
         add(
             "von Mises peak",
@@ -456,16 +460,49 @@ def certificate(
             "arcmin",
             "derived: rotation square to the bore's axis",
         )
-    deck = [(s, sb[k]) for k, s in sa.items() if k in sb and s.kind == "deck" and abs(s.value) > 0]
-    if deck:
-        worst = max(deck, key=lambda p: abs((p[1].value - p[0].value) / p[0].value))
-        add(
-            f"deck signals, worst ({worst[0].name} {worst[0].component})",
-            worst[0].value,
-            worst[1].value,
-            tight if same_mesh else 0.05,
-            worst[0].unit,
-            f"{len(deck)} signals the deck asks for",
+    # The deck's signals a point at a time: its translation and its rotation each compared as a
+    # vector - a component near zero in a motion that is not says nothing on its own.
+    motions: dict[tuple[str, str], list[tuple[Signal, Signal]]] = {}
+    for key, s in sa.items():
+        if s.kind != "deck" or key not in sb:
+            continue
+        part = (
+            "rotation"
+            if s.component in ROTATIONS
+            else "displacement"
+            if s.component in TRANSLATIONS
+            else s.component
+        )
+        motions.setdefault((s.name, part), []).append((s, sb[key]))
+    worst: dict[str, tuple[float, str, float, float, str]] = {}
+    for (name, part), pairs in motions.items():
+        va = np.array([p[0].value for p in pairs])
+        vb = np.array([p[1].value for p in pairs])
+        if not np.linalg.norm(va) > 0:
+            continue
+        rel = float(np.linalg.norm(vb - va) / np.linalg.norm(va))
+        if part not in worst or rel > worst[part][0]:
+            worst[part] = (
+                rel,
+                name,
+                float(np.linalg.norm(va)),
+                float(np.linalg.norm(vb)),
+                pairs[0][0].unit,
+            )
+    counted = sum(len(p) for p in motions.values())
+    for part, (rel, name, na, nb, unit) in sorted(worst.items()):
+        tolerance = tight if same_mesh else 0.05
+        rows.append(
+            {
+                "quantity": f"deck signals, worst {part} ({name})",
+                "reference": na,
+                "other": nb,
+                "difference": rel,
+                "unit": unit,
+                "tolerance": tolerance,
+                "holds": rel <= tolerance,
+                "note": f"{counted} signals the deck asks for; each point's {part} as a vector",
+            }
         )
     rows.append(
         {

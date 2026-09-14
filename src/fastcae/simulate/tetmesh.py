@@ -7,9 +7,9 @@ it - can be held to the same sizes point by point.
 
 **Lines** are the edges of the CAD faces a load goes in through: :func:`face_edges` follows each
 boundary loop of a set of faces on the CAD's own triangulation, so those faces come out exactly
-where
-a grid alone would round them. Vertices along them are kept about 8 mm apart: at the element size a
-line keeps other vertices off whatever small runs beside it, and much closer makes the faces dense.
+where a grid alone would round them. Vertices along them are kept about 8 mm apart: at the element
+size a line keeps other vertices off whatever small runs beside it, and much closer makes the faces
+dense.
 """
 
 from __future__ import annotations
@@ -53,8 +53,7 @@ def sizes_from_mesh(
     nearest: int = 4,
 ) -> SizeGrid:
     """The mean edge of the ``nearest`` tets round each point of a grid ``stride`` times coarser
-    than
-    the one given."""
+    than the one given."""
     from scipy.spatial import cKDTree
 
     p = nodes[tets[:, :4]]

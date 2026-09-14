@@ -58,8 +58,8 @@ rotation of each seat's reference node.
 
 ## 1. The compiled mesher
 
-`bench/solvers/cgal_field.cpp`, built into the WSL environment `fieldmesh` (conda-forge: CGAL 6.2.1,
-TBB, pybind11, a C++ compiler) by `build_cgal_field.sh`, driven by `mesh_cgal.py`. It holds the field
+`native/cgal_field/cgal_field.cpp`, built into the WSL environment `fieldmesh` (conda-forge: CGAL 6.2.1,
+TBB, pybind11, a C++ compiler) by `native/cgal_field/build.sh`, driven by `mesh_cgal.py`. It holds the field
 as an array and answers CGAL's questions by trilinear interpolation in C++; it can also mesh a closed
 triangulated surface (`mesh_surface`), and both take a size map and edge lines.
 

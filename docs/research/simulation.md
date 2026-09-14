@@ -217,7 +217,7 @@ Each tried on design #7 ([design-to-solution.md](design-to-solution.md) has the 
   [6.0.1, December 2024](https://www.cgal.org/2024/12/01/mesh3-improvements/); Python via
   [pygalmesh](https://github.com/meshpro/pygalmesh) (conda-forge, Linux - in WSL). *Measured here*:
   straight from the field, 46 s through pygalmesh - its questions answered in Python, its surface up
-  to 1.07 mm off - and 4-8 s compiled (`bench/solvers/cgal_field.cpp`), surface within 0.005 mm;
+  to 1.07 mm off - and 4-8 s compiled (`native/cgal_field/cgal_field.cpp`), surface within 0.005 mm;
   8-14 s with element sizes from rules and the seats' edges as lines. On the production housing its
   answers from the 3 mm field match meshing the CAD's surface within the noise of meshing itself
   ([field-meshing-gate.md](field-meshing-gate.md)) - the recommended mesher. GPL or commercial licence.

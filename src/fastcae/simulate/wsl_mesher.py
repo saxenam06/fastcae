@@ -1,12 +1,10 @@
 """Runs in WSL's ``fieldmesh`` environment, where the compiled mesher is: CGAL's Mesh_3 on a
-distance
-field or on a closed triangulated surface. Standalone - numpy and ``cgal_field`` only - and driven
-through files in one folder, so the Windows side needs nothing of Linux's but a path:
+distance field or on a closed triangulated surface. Standalone - numpy and ``cgal_field`` only - and
+driven through files in one folder, so the Windows side needs nothing of Linux's but a path:
 
 - ``params.json`` - the mode (``field`` or ``surface``) and the mesher's settings;
 - ``field.npz`` - the grid's origin, spacing, shape, inside bits, band and reach; or
-  ``surface.npz`` -
-  vertices and triangles;
+  ``surface.npz`` - vertices and triangles;
 - ``sizes.npz`` (optional) - an element-size grid: ``size``, ``origin``, ``spacing``;
 - ``lines.npz`` (optional) - polylines the mesh must follow, ``line0``, ``line1`` ...
 
@@ -26,8 +24,7 @@ import numpy as np
 
 # A regular tet's circumradius is 0.61 of its edge, an equilateral triangle's 0.58; held to those,
 # CGAL's tets come out at 0.81 and its boundary triangles at 0.75 of the size asked, so the bounds
-# are
-# set that much looser to get the size asked.
+# are set that much looser to get the size asked.
 CELL_OF_EDGE, FACET_OF_EDGE = 0.61 / 0.81, 0.58 / 0.75
 
 

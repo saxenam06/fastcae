@@ -214,7 +214,7 @@ the 8 GB card. Nearly all of CGAL's 46 s is 18 million questions to the field an
 
 ### The compiled field mesher
 
-`cgal_field.cpp` answers CGAL's questions in C++ (`build_cgal_field.sh` builds it into WSL's
+`native/cgal_field/cgal_field.cpp` answers CGAL's questions in C++ (`native/cgal_field/build.sh` builds it into WSL's
 `fieldmesh` environment; `mesh_cgal.py` drives it; `--python` keeps the pygalmesh way). pygalmesh left
 CGAL's surface tolerance at a thousandth of a sphere about the origin - up to 1.07 mm on the housing;
 the compiled mesher puts boundary nodes within 0.005 mm of the field. Design #7, the same sizes as

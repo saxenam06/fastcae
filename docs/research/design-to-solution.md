@@ -212,7 +212,7 @@ its default, a thousandth of a box round a sphere about the origin: surface poin
 from where the field is zero on the housing, whose sphere is 1,241 mm - part of the boundary spread
 above. Without feature lines it rounds sharp edges at the facet size.
 
-**Compiled** (`bench/solvers/cgal_field.cpp`), the questions are answered in C++ inside CGAL: the same
+**Compiled** (`native/cgal_field/cgal_field.cpp`), the questions are answered in C++ inside CGAL: the same
 sizes mesh in 4.4 s on four cores, the surface within 0.005 mm of the field; with element sizes from
 the rules and the seats' edges given as lines, 8-14 s. Measured, and checked against meshing the CAD
 itself, in [field-meshing-gate.md](field-meshing-gate.md).

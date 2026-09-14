@@ -290,7 +290,7 @@ product.
    methods: [../bench/solvers/RESULTS.md](../bench/solvers/RESULTS.md); why each got its result and
    what not choosing the others gives up: [research/solver-choice.md](research/solver-choice.md).
 4. **Meshing**: CGAL Mesh_3 straight from the design's field, through a compiled module built in
-   WSL (`bench/solvers/cgal_field.cpp`) - CGAL reads the field as a grid and interpolates it itself,
+   WSL (`native/cgal_field/cgal_field.cpp`) - CGAL reads the field as a grid and interpolates it itself,
    so none of its millions of questions leaves C++ - with surface points within 0.005 mm of the
    field. Element sizes come from a map computed on the field: at least 2 elements through the ribs a
    design adds, fine only where the design changes the part, up to 40 mm on the housing's own panels,
