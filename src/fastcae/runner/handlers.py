@@ -5,9 +5,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from ..simulate import campaign
 from ..simulate import jobs as simulate_jobs
 
 HANDLERS: dict[str, Callable] = {
+    "campaign.solve": campaign.solve_campaign,
     "baseline.cudss": simulate_jobs.solve_deck,
     "route.field": simulate_jobs.route_field,
     "route.mesh": simulate_jobs.route_mesh,

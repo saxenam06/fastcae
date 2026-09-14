@@ -698,11 +698,14 @@ function LaunchStep({ campaign: c, onOpenRun }: { campaign: Campaign; onOpenRun:
   );
 }
 
-/** Every campaign launched for the project, newest first - each opened on Designs. */
+/** Every campaign launched for the project, newest first - each chosen to watch its designs
+ * solved, or the card to compose another. */
 export function CampaignRuns(props: {
   launched: LaunchedCampaign[];
   going: string | null;
   onOpenRun: (run: string) => void;
+  selected?: string | null;
+  onNew?: () => void;
 }) {
   return (
     <nav className="index">
@@ -710,6 +713,13 @@ export function CampaignRuns(props: {
         <header>
           Campaigns <span className="count">{props.launched.length}</span>
         </header>
+        {props.onNew ? (
+          <div className="body">
+            <button data-active={!props.selected} onClick={props.onNew}>
+              New campaign
+            </button>
+          </div>
+        ) : null}
         {props.going ? <div className="body card-note busy-note">A campaign is running.</div> : null}
         {!props.launched.length ? (
           <div className="body card-note">
@@ -721,9 +731,10 @@ export function CampaignRuns(props: {
           <button
             key={run.run}
             className="row run-row"
+            data-selected={props.selected === run.run}
             onClick={() => props.onOpenRun(run.run)}
             disabled={run.state !== "done"}
-            title={run.state === "done" ? "Open its designs" : "It did not finish"}
+            title={run.state === "done" ? "Its designs, solved" : "It did not finish"}
           >
             <span className="run-name">
               <b>{run.name}</b> <span className="mono dim">{run.id}</span>

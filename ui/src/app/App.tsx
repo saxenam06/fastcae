@@ -33,6 +33,7 @@ import { Inspector } from "../panel/Inspector";
 import { VariantCard } from "../panel/VariantCard";
 import { Splitter } from "../panel/Splitter";
 import { CampaignCardView, CampaignRuns, useCampaign } from "../generate/Campaign";
+import { RunHealth } from "../generate/RunHealth";
 import { DesignReadout, DesignStage, DesignTabs, DesignsRail, useDesigns } from "../generate/Designs";
 import { DrawingStage } from "../stage/DrawingStage";
 import { UploadStage } from "../stage/UploadStage";
@@ -72,6 +73,8 @@ export function App() {
   const [view, setView] = useState<View>("input");
   const [inputTab, setInputTab] = useState<InputTab>("cad");
   const [variantTab, setVariantTab] = useState<VariantTab>("variants");
+  // The launched campaign whose designs the Campaign tab shows being solved; none shows the card.
+  const [campaignRun, setCampaignRun] = useState<string | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [face, setFace] = useState<FaceDetail | null>(null);
   const [hovered, setHovered] = useState<number | null>(null);
@@ -488,7 +491,13 @@ export function App() {
                 ) : onRoute ? (
                   <RouteRail state={deck} view={routeView} />
                 ) : view === "campaign" ? (
-                  <CampaignRuns launched={campaign.launched} going={campaign.going} onOpenRun={openRun} />
+                  <CampaignRuns
+                    launched={campaign.launched}
+                    going={campaign.going}
+                    onOpenRun={setCampaignRun}
+                    selected={campaignRun}
+                    onNew={() => setCampaignRun(null)}
+                  />
                 ) : view === "explore" ? (
                   <DesignsRail designs={designs} />
                 ) : (
@@ -627,11 +636,19 @@ export function App() {
                   ) : null}
                   {view === "campaign" ? (
                     <div className="stage-page">
-                      <CampaignCardView
-                        campaign={campaign}
-                        onOpenCard={openCard}
-                        onOpenRun={openRun}
-                      />
+                      {campaignRun ? (
+                        <RunHealth
+                          run={campaignRun}
+                          name={campaign.launched.find((r) => r.run === campaignRun)?.name}
+                          onOpen={openRun}
+                        />
+                      ) : (
+                        <CampaignCardView
+                          campaign={campaign}
+                          onOpenCard={openCard}
+                          onOpenRun={openRun}
+                        />
+                      )}
                     </div>
                   ) : null}
                   {onFe ? (

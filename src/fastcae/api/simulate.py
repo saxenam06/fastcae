@@ -12,9 +12,10 @@ import struct
 
 import numpy as np
 from fastapi import APIRouter, HTTPException, Response
+from pydantic import BaseModel, Field
 
 from .. import runner
-from ..simulate import baseline, fem, signals
+from ..simulate import baseline, campaign, fem, signals
 from ..simulate import jobs as simulate_jobs
 from ..simulate.fem import FEMesh
 from ..simulate.setup import FORCES, MOMENTS
@@ -460,6 +461,77 @@ def get_route_glyphs() -> dict:
         raise HTTPException(404, "the setup has not been carried yet")
     mesh = fem.load(carried)
     return glyphs(mesh, simulate_jobs._carried_setup(deck, mesh))
+
+
+# --- a campaign's designs, solved ----------------------------------------------------------------
+
+
+class SolveRun(BaseModel):
+    count: int = Field(default=20, ge=1, le=5000)
+    designs: list[int] | None = None
+    in_flight: int = Field(default=campaign.IN_FLIGHT, ge=1, le=4)
+
+
+@router.post("/api/runs/{run}/solve")
+def post_solve_run(run: str, request: SolveRun) -> dict:
+    """Solve a campaign's designs on the runner: those given, or the ``count`` that differ most."""
+    from ..generate.session import run_designs
+    from .app import _intent
+
+    project, _, _ = _deck()
+    designs = request.designs
+    if designs is None:
+        listed = run_designs(_intent(), run, show="varied", k=request.count)
+        if "cannot" in listed:
+            raise HTTPException(404, listed["cannot"])
+        designs = [row["index"] for row in listed["rows"]]
+        if len(designs) < request.count:
+            # Past the most different, the rest in the order they were made.
+            everyone = run_designs(_intent(), run, show="all", limit=request.count + len(designs))
+            designs += [r["index"] for r in everyone["rows"] if r["index"] not in designs]
+            designs = designs[: request.count]
+    job = runner.submit(
+        "campaign.solve",
+        project.name,
+        {"run": run, "designs": designs, "in_flight": request.in_flight},
+    )
+    return {"job": job.id, "designs": designs}
+
+
+@router.get("/api/runs/{run}/solving")
+def get_solving(run: str, since: int = 0) -> dict:
+    """A run's designs as the runner has them: the latest solve job, where each design is in it,
+    what its records say, and what happened, in order."""
+    project, _, _ = _deck()
+    mine = [
+        j
+        for j in runner.jobs(project=project.name, kind="campaign.solve", limit=200)
+        if (j.get("args") or {}).get("run") == run
+    ]
+    job = mine[0] if mine else None
+    live: dict[int, dict] = {}
+    events: list[dict] = []
+    if job is not None:
+        folder = runner.Job(job["id"]).folder / "designs"
+        for path in folder.glob("*.json") if folder.exists() else []:
+            try:
+                state = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            live[int(state["index"])] = state
+        events = runner.Job(job["id"]).events(since)
+    kept = campaign.run_status(project, run)["designs"]
+    for row in kept:
+        state = live.get(int(row["index"]))
+        if state is None or state.get("outcome") is not None:
+            live[int(row["index"])] = {**(state or {}), **row, "stage": "done"}
+    return {
+        "run": run,
+        "job": job,
+        "designs": sorted(live.values(), key=lambda s: (s.get("outcome") is not None, s["index"])),
+        "events": events[-200:],
+        "since": since + len(events),
+    }
 
 
 # --- jobs ----------------------------------------------------------------------------------------

@@ -29,9 +29,9 @@ entities, names and numbers - never CAD files or meshes. The provider is a setti
 approved one or a local model can take its place. The model is paused while variants and campaigns
 are made by hand.
 
-Extract and Model are built; Generate is being built. The other three are shown in the interface
-and not yet implemented — a shell that hides its unbuilt stages describes a tool; one that shows
-them describes a product.
+Extract and Model are built; Generate and Simulate are being built. Learn and Optimize are shown in
+the interface and not yet implemented — a shell that hides its unbuilt stages describes a tool; one
+that shows them describes a product.
 
 ## The rule that keeps it general
 
@@ -100,10 +100,18 @@ generate/      the part as a distance field; the part read for each kind of chan
                in the field - and checked.
 spec.py        a design's pieces - placements of ribs, faces moved, holes - and the words and
                fingerprints a variant shares.
+simulate/      the engineer's solver deck read as data, never run - its mesh, groups, setup and
+               answer - and tied to the CAD faces its groups lie on; the deck solved again by cuDSS;
+               a design meshed from its field by CGAL in WSL, given the deck's setup by CAD face,
+               solved and recorded; answers compared quantity by quantity.
+runner/        a process of its own, outside the server, working through jobs kept as folders: the
+               deck solved again, the route on the baseline, a campaign's designs two or three at a
+               time. One GPU job at a time.
+wsl.py         a script run in WSL, sent whole and stopped on Linux's side past its limit.
 agent/         a model with a few general tools over the engine, and skills on composing them;
                paused, its bar hidden, while variants and campaigns are made by hand.
 cli.py         batches of designs, run without the interface.
-api/app.py     HTTP surface. Routes contain no logic.
+api/           HTTP surface: app.py and simulate.py. Routes contain no logic.
 ```
 
 `project.json` is not configuration in the usual sense: it holds no facts and no settings, only
@@ -113,7 +121,11 @@ proposes each one; nothing in it is written except through an approval. Variants
 deleted is moved to `variants/.deleted/`. What campaigns make is output, not a decision, and lives
 outside the project in `_archived_designs/<project>/<code>-<name>/` beside `assets/`: the card, the
 part's digest, the code's commit and a copy of every variant as it was launched; every design kept,
-with its recipe, its hash and its seed; a summary; and each design built so far.
+with its recipe, its hash and its seed; a summary; each design built so far; and in `solved/` each
+design solved - its Zarr store, its record, and the run's table of metrics.
+
+The solver deck and its answer are the engineer's files like the CAD and the drawing, in the project
+folder; what fastcae solves from them is derived and lives in `.fastcae/solve/`.
 
 ## Nothing derived is computed twice
 
@@ -172,19 +184,28 @@ do.
 
 ## The interface
 
-**Five tabs, in the order the work happens**, in the bar at the top: **Drawing**, **CAD**,
-**Generate**, **Learn**, **Optimize**. Every one is shown whether or not it is built yet - a shell
-that hides its unbuilt stages describes a tool, one that shows them describes a product - and each
-names its *subject*: the rail on the left holds that subject's detail, the stage in the middle the
-subject itself, and the pane on the right what is done to it.
+**Six tabs, in the order the work happens**, in the bar at the top: **Input**, **Reproduce**,
+**Variant Setup**, **Campaign**, **Explore**, **Models**. Every one is shown whether or not it is
+built yet - a shell that hides its unbuilt stages describes a tool, one that shows them describes a
+product - and each names its *subject*: the rail on the left holds that subject's detail, the stage
+in the middle the subject itself, and the pane on the right what is done to it.
 
 | tab | rail | stage | right |
 |---|---|---|---|
-| **Drawing** | callout kinds, and the steps that read them, warnings included | every callout beside the literal text it was parsed from | - |
-| **CAD** | what the CAD yielded, its steps, axes, feature kinds; the selection | the part, pickable; a variant's sample drawn as paths | **Design a variant** |
-| **Generate · Campaign** | the campaigns launched, and the one going | the campaign card: Compose, Check, Sample & launch | - |
-| **Generate · Designs** | a campaign's designs, each with its stages and its variants | the design at a stage - its paths, its field; mesh, setup, results - or the plans of those that differ most | the design: what it is made of by variant, how it screened, its verdict; Build field |
-| **Learn**, **Optimize** | - | what each will do, and what it waits for | - |
+| **Input · Drawing** | callout kinds, and the steps that read them, warnings included | every callout beside the literal text it was parsed from | - |
+| **Input · CAD** | what the CAD yielded, its steps, axes, feature kinds; the selection | the part, pickable | - |
+| **Input · Mesh & setup** | the deck's files, mesh, material, the groups it acts on with their roles, load sets, signals, analysis, what was not read | the deck's mesh with its supports, couplings and loads drawn as agenticCAE drew them, named on hover | - |
+| **Input · Solve** | the engineer's answer and its signals | the answer as contours | - |
+| **Reproduce** | the answers - the engineer's, the same mesh by cuDSS, the field route - and the certificate | one answer, two side by side with one camera, or their difference | - |
+| **Variant Setup · Variants** | what the CAD yielded | the part, a variant's sample drawn as paths | **Design a variant** |
+| **Variant Setup · Route** | the four steps every design takes, walked on the baseline; what a design inherits | the route's mesh, its setup, its answer | - |
+| **Campaign** | the campaigns launched; a new one | the campaign card - Compose, Check, Sample & launch - or a launched campaign's designs being solved: how many solved and set aside, how many an hour, where each design is, what happened | - |
+| **Explore** | a campaign's designs, each with its stages and its variants | the design at a stage - its paths, its field; mesh, setup, results - or the plans of those that differ most | the design: what it is made of by variant, how it screened, its verdict; Build field |
+| **Models** | - | what it will do, and what it waits for | - |
+
+**Everything says where it came from**: imported from the engineer's files, derived from them
+without solving, or generated - meshed or solved by fastcae. A name on screen is the file's own: a
+bore is what the deck calls it, a signal what the deck asks for.
 
 The pipeline report has no tab of its own because it does not need one: every step belongs to an
 artifact, so it appears in that artifact's rail.
@@ -195,7 +216,7 @@ agent is doing and its answer. It is paused, and its bar hidden, while variants 
 made by hand; when it returns, what it writes lands on Design a variant, marked, for the engineer
 to keep or undo.
 
-**Design a variant is the design space, by hand.** On the CAD tab, where the faces it names are: a
+**Design a variant is the design space, by hand.** On Variant Setup, where the faces it names are: a
 tab for each variant kept and one for a new one. A variant starts from the faces selected and what
 to add there; it says what it stands on, ends on and keeps clear of - the part's named entities, or
 another variant's ribs or holes; webs, the two sides they run between - then what it may vary and

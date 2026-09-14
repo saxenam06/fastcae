@@ -152,14 +152,48 @@ export interface Certificate {
   holds: boolean;
 }
 
+/** Where one design of a run is: its stage now, or how it came out - with each stage's seconds. */
+export interface DesignState {
+  index: number;
+  stage?: "build" | "mesh" | "setup" | "solve" | "record" | "done";
+  outcome?: "solved" | "set aside" | null;
+  reason?: string;
+  route?: string;
+  seconds?: number;
+  stages?: Record<string, number>;
+  unknowns?: number | null;
+  mass_kg?: number | null;
+  updated?: number;
+}
+
+export interface CampaignJob extends JobStatus {
+  args?: { run: string; designs: number[]; in_flight: number };
+  solved?: number;
+  set_aside?: number;
+  in_flight?: number[];
+  per_hour?: number | null;
+  total?: number;
+}
+
+export interface Solving {
+  run: string;
+  job: CampaignJob | null;
+  designs: DesignState[];
+  events: { t: number; message: string; design?: number; outcome?: string }[];
+  since: number;
+}
+
 async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(path);
   if (!response.ok) throw new Error(`${path}: ${response.status} ${await response.text()}`);
   return response.json() as Promise<T>;
 }
 
-async function postJson<T>(path: string): Promise<T> {
-  const response = await fetch(path, { method: "POST" });
+async function postJson<T>(path: string, body?: unknown): Promise<T> {
+  const response = await fetch(path, {
+    method: "POST",
+    ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+  });
   if (!response.ok) throw new Error(`${path}: ${response.status} ${await response.text()}`);
   return response.json() as Promise<T>;
 }
@@ -223,4 +257,10 @@ export const sim = {
   jobs: (kind?: string) =>
     getJson<{ runner: Record<string, unknown> | null; jobs: JobStatus[] }>(`/api/jobs${kind ? `?kind=${kind}` : ""}`),
   cancel: (id: string) => postJson<{ cancelled: boolean }>(`/api/jobs/${encodeURIComponent(id)}/cancel`),
+  solveRun: (run: string, count: number, inFlight: number) =>
+    postJson<{ job: string; designs: number[] }>(`/api/runs/${encodeURIComponent(run)}/solve`, {
+      count,
+      in_flight: inFlight,
+    }),
+  solving: (run: string) => getJson<Solving>(`/api/runs/${encodeURIComponent(run)}/solving`),
 };
