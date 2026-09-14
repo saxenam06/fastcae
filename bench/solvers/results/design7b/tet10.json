@@ -1,0 +1,40 @@
+{
+ "edge_mm": 20.0,
+ "envelope_mm": 1.89607974864075,
+ "ftetwild": {
+  "epsilon": 0.001,
+  "stop_energy": 20.0,
+  "num_opt_iter": 40
+ },
+ "surface_triangles": {
+  "design": 2540560,
+  "meshed": 200000,
+  "decimate_s": 10.1
+ },
+ "linear_nodes": 34143,
+ "nodes": 216055,
+ "dof": 648165,
+ "tets": 119753,
+ "boundary_triangles": 55844,
+ "groups": {
+  "BORE_AX1_S1": 176,
+  "BORE_AX1_S4": 128,
+  "BORE_AX2_S2": 171,
+  "BORE_AX2_S3": 463,
+  "BORE_MAIN_S2": 409,
+  "BORE_MAIN_S3": 559,
+  "BOLTS": 1584
+ },
+ "boundary_gap_mm": {
+  "median": 0.8930034112360412,
+  "max": 2.123629873818048
+ },
+ "quality": {
+  "min": 0.15001568163991658,
+  "p1": 0.27459506907538783,
+  "below_0.1": 0
+ },
+ "volume_mm3": 128881758.19714944,
+ "seconds": 1883.8,
+ "bolt_positions": 25
+}

@@ -1,0 +1,25 @@
+{
+ "edge_mm": 20.0,
+ "linear_nodes": 57240,
+ "nodes": 366093,
+ "dof": 1098279,
+ "tets": 202496,
+ "boundary_triangles": 98054,
+ "groups": {
+  "BORE_AX1_S1": 240,
+  "BORE_AX1_S4": 142,
+  "BORE_AX2_S2": 234,
+  "BORE_AX2_S3": 803,
+  "BORE_MAIN_S2": 492,
+  "BORE_MAIN_S3": 704,
+  "BOLTS": 2379
+ },
+ "quality": {
+  "min": 0.007879944055255425,
+  "p1": 0.33664574813811304,
+  "below_0.1": 67
+ },
+ "volume_mm3": 128035692.7257206,
+ "seconds": 10.7,
+ "bolt_positions": 25
+}

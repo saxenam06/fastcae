@@ -1,0 +1,40 @@
+{
+ "problem_s": 27.037962436676025,
+ "seat_faces": {
+  "BORE_AX1_S1": {
+   "jaxfem": 240,
+   "labelled": 240
+  },
+  "BORE_AX1_S4": {
+   "jaxfem": 142,
+   "labelled": 142
+  },
+  "BORE_AX2_S2": {
+   "jaxfem": 234,
+   "labelled": 234
+  },
+  "BORE_AX2_S3": {
+   "jaxfem": 803,
+   "labelled": 803
+  },
+  "BORE_MAIN_S2": {
+   "jaxfem": 492,
+   "labelled": 492
+  },
+  "BORE_MAIN_S3": {
+   "jaxfem": 704,
+   "labelled": 704
+  }
+ },
+ "to_gpu_s": 18.363951683044434,
+ "factor_s": 13.875698328018188,
+ "solve_s": 0.12485265731811523,
+ "solver_total_s": 122.27179074287415,
+ "dof": 1098279,
+ "surface_map_sign": -1.0,
+ "devices": [
+  "cuda:0"
+ ],
+ "setup_s": 13.875698328018188,
+ "umax": 0.27478330953072866
+}
