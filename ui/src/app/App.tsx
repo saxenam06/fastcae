@@ -4,11 +4,12 @@
  * Starts empty. There is no model until something has been extracted, and nothing on screen is derived
  * from anything but the files in that project's folder.
  *
- * Five tabs, in the order the work happens: the Drawing as read; the CAD, where variants - one
- * change in one place, with what it may vary and every rule it holds - are authored by hand on
- * Design a variant; Generate, where a campaign composed of variants makes thousands of designs and
- * every design is followed through its stages; Learn and Optimize. The project's name comes from
- * its folder, so a `DEEPJEB_Bracket/` folder renames the whole application without a code change.
+ * Five tabs, in the order the work happens: Input - what the engineer brought, the drawing, the
+ * CAD, the solver deck's mesh and setup and the answer it gave, with fastcae's own answers to the same
+ * question beside it; Variant Setup - variants designed by hand on the CAD, and the route every
+ * variant takes; Explore, where a campaign composed of variants makes thousands of designs and every
+ * design is followed through its stages; Learn and Optimize. The project's name comes from its
+ * folder, so a `DEEPJEB_Bracket/` folder renames the whole application without a code change.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -40,8 +41,12 @@ import { HoverCard } from "../stage/HoverCard";
 import { SelectionBar } from "../stage/SelectionBar";
 import { DESIGN_PICK } from "../render/renderer";
 import type { ColourMode, LineSet } from "../render/renderer";
-import type { View } from "./product";
-import { ART, PRODUCT, VENDOR, VIEWS } from "./product";
+import { MeshRail, MeshStage, useMeshView } from "../input/MeshSetup";
+import { RouteRail, RouteStage, useRouteView } from "../input/Route";
+import { SolveRail, SolveStage, useSolveView } from "../input/Solve";
+import { useDeck } from "../input/useDeck";
+import type { InputTab, VariantTab, View } from "./product";
+import { ART, INPUT_TABS, PRODUCT, VARIANT_TABS, VENDOR, VIEWS } from "./product";
 
 interface Model {
   summary: Summary;
@@ -54,9 +59,6 @@ interface Model {
   controlled: Set<number>;
 }
 
-/** Generate's two halves: launching campaigns, and the designs they kept. */
-type GenerateTab = "campaign" | "designs";
-
 /** The right-hand panes that fold away to the edge, one a place. */
 type Pane = "cad" | "designs";
 
@@ -67,8 +69,9 @@ export function App() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [view, setView] = useState<View>("drawing");
-  const [generateTab, setGenerateTab] = useState<GenerateTab>("campaign");
+  const [view, setView] = useState<View>("input");
+  const [inputTab, setInputTab] = useState<InputTab>("cad");
+  const [variantTab, setVariantTab] = useState<VariantTab>("variants");
   const [selection, setSelection] = useState<Selection | null>(null);
   const [face, setFace] = useState<FaceDetail | null>(null);
   const [hovered, setHovered] = useState<number | null>(null);
@@ -106,8 +109,17 @@ export function App() {
   }, [railWidth, cardWidth]);
 
   const project = session?.project?.name ?? null;
-  const campaign = useCampaign(view === "generate" && generateTab === "campaign", project);
-  const designs = useDesigns(view === "generate" && generateTab === "designs", project);
+  const campaign = useCampaign(view === "campaign", project);
+  const designs = useDesigns(view === "explore", project);
+  const onDeck =
+    (view === "input" && (inputTab === "mesh" || inputTab === "solve")) ||
+    view === "reproduce" ||
+    (view === "variants" && variantTab === "route");
+  const deck = useDeck(onDeck, project);
+  const meshView = useMeshView();
+  const answerView = useSolveView();
+  const solveView = useSolveView();
+  const routeView = useRouteView(view === "variants" && variantTab === "route", deck);
 
   const loadModel = useCallback(async () => {
     const [summary, steps, mesh, features, kinds, axes, callouts, controlled] =
@@ -168,14 +180,14 @@ export function App() {
   }, [session, extract]);
 
   const openCard = useCallback(() => {
-    setView("cad");
+    setView("variants");
+    setVariantTab("variants");
     setOpen((was) => ({ ...was, cad: true }));
   }, []);
 
   const openRun = useCallback(
     (run: string) => {
-      setView("generate");
-      setGenerateTab("designs");
+      setView("explore");
       designs.openRun(run);
     },
     [designs],
@@ -188,7 +200,8 @@ export function App() {
     setActiveSeed(null);
     setFace(null);
     setCardLines(null);
-    setView("drawing");
+    setView("input");
+    setInputTab("cad");
   }, []);
 
   // Filtering by kind is a server query, not a filter over what was already fetched. The features
@@ -338,9 +351,12 @@ export function App() {
     async (feature: Feature) => {
       selectFaces([...feature.face_ids]);
       if (feature.face_ids.length) setFace(await api.face(feature.face_ids[0]));
-      setView("cad");
+      if (!(view === "variants" && variantTab === "variants")) {
+        setView("input");
+        setInputTab("cad");
+      }
     },
-    [selectFaces],
+    [selectFaces, view, variantTab],
   );
 
   if (error && !session) return <div className="error">{error}</div>;
@@ -349,25 +365,35 @@ export function App() {
   const opened = session.stage === "model" && model !== null;
   const title = session.project?.title ?? "no project";
 
+  // Which sub-view is up: the drawing, the CAD (with or without the variant card), a finite-element
+  // view of the deck, or Explore's campaign and designs.
+  const onDrawing = view === "input" && inputTab === "drawing";
+  const onVariantCard = view === "variants" && variantTab === "variants";
+  const onCad = (view === "input" && inputTab === "cad") || onVariantCard;
+  const onMesh = view === "input" && inputTab === "mesh";
+  const onSolve = view === "input" && inputTab === "solve";
+  const onReproduce = view === "reproduce";
+  const onRoute = view === "variants" && variantTab === "route";
+  const onFe = onMesh || onSolve || onReproduce || onRoute;
+
   // What each tab lays out: a rail on the left, a pane on the right - and which pane.
-  const pane: Pane | null =
-    view === "cad" ? "cad" : view === "generate" && generateTab === "designs" ? "designs" : null;
-  const hasRail = view === "drawing" || view === "cad" || view === "generate";
+  const onDesigns = view === "explore";
+  const pane: Pane | null = onVariantCard ? "cad" : onDesigns ? "designs" : null;
+  const hasRail = view !== "models";
   const paneWidth = pane === null ? 0 : open[pane] ? cardWidth : 30;
 
   // The part in 3D is kept alive on every tab but the drawing, so going back and forth costs
   // nothing; what is drawn over it depends on the tab.
-  const onDesigns = view === "generate" && generateTab === "designs";
   const designField = onDesigns && designs.tab === "field";
   const designPaths = onDesigns && designs.tab === "paths";
   const overlay = designField ? designs.overlay : null;
-  const lines = view === "cad" ? cardLines : designPaths ? designs.lines : null;
+  const lines = onVariantCard ? cardLines : designPaths ? designs.lines : null;
   const voxels = designField && designs.showCells ? designs.cells : null;
   const partShown = designField ? showPart : true;
   const pageOver =
-    view === "learn" ||
-    view === "optimize" ||
-    (view === "generate" && generateTab === "campaign") ||
+    view === "models" ||
+    onFe ||
+    view === "campaign" ||
     (onDesigns && !designField && !designPaths);
 
   return (
@@ -438,7 +464,7 @@ export function App() {
           {hasRail ? (
             <div className="rail">
               <div className="rail-scroll">
-                {view === "drawing" ? (
+                {onDrawing ? (
                   <DrawingIndex
                     steps={model.steps}
                     callouts={model.callouts}
@@ -446,34 +472,25 @@ export function App() {
                     filter={calloutFilter}
                     onFilter={setCalloutFilter}
                   />
-                ) : view === "generate" ? (
-                  <>
-                    <nav className="segmented generate-tabs">
-                      <button
-                        data-active={generateTab === "campaign"}
-                        onClick={() => setGenerateTab("campaign")}
-                        title="Launch campaigns, with the whole pipeline in the open"
-                      >
-                        Campaign
-                      </button>
-                      <button
-                        data-active={generateTab === "designs"}
-                        onClick={() => setGenerateTab("designs")}
-                        title="Every design a campaign kept, and how far each has got"
-                      >
-                        Designs
-                      </button>
-                    </nav>
-                    {generateTab === "campaign" ? (
-                      <CampaignRuns
-                        launched={campaign.launched}
-                        going={campaign.going}
-                        onOpenRun={openRun}
-                      />
-                    ) : (
-                      <DesignsRail designs={designs} />
-                    )}
-                  </>
+                ) : onMesh ? (
+                  <MeshRail state={deck} view={meshView} />
+                ) : onSolve || onReproduce ? (
+                  <SolveRail
+                    state={deck}
+                    view={onSolve ? answerView : solveView}
+                    mode={onSolve ? "input" : "reproduce"}
+                    onReproduce={() => setView("reproduce")}
+                    onRoute={() => {
+                      setView("variants");
+                      setVariantTab("route");
+                    }}
+                  />
+                ) : onRoute ? (
+                  <RouteRail state={deck} view={routeView} />
+                ) : view === "campaign" ? (
+                  <CampaignRuns launched={campaign.launched} going={campaign.going} onOpenRun={openRun} />
+                ) : view === "explore" ? (
+                  <DesignsRail designs={designs} />
                 ) : (
                   <>
                     <ModelIndex
@@ -508,9 +525,27 @@ export function App() {
           ) : null}
 
           <div className="stage">
+            {view === "input" ? (
+              <nav className="stage-tabs">
+                {INPUT_TABS.map((tab) => (
+                  <button key={tab.id} data-active={inputTab === tab.id} onClick={() => setInputTab(tab.id)} title={tab.summary}>
+                    {tab.label}
+                  </button>
+                ))}
+              </nav>
+            ) : null}
+            {view === "variants" ? (
+              <nav className="stage-tabs">
+                {VARIANT_TABS.map((tab) => (
+                  <button key={tab.id} data-active={variantTab === tab.id} onClick={() => setVariantTab(tab.id)} title={tab.summary}>
+                    {tab.label}
+                  </button>
+                ))}
+              </nav>
+            ) : null}
             {onDesigns ? <DesignTabs designs={designs} /> : null}
             <div className="stage-body">
-              {view === "drawing" ? (
+              {onDrawing ? (
                 <DrawingStage
                   all={model.callouts}
                   callouts={
@@ -545,7 +580,7 @@ export function App() {
                     onHover={setHovered}
                     onPick={pick}
                   />
-                  {view === "cad" ? (
+                  {onCad ? (
                     <div className="overlay">
                       {(["surface", "frozen"] as ColourMode[]).map((mode) => (
                         <button
@@ -590,7 +625,7 @@ export function App() {
                       </div>
                     </>
                   ) : null}
-                  {view === "generate" && generateTab === "campaign" ? (
+                  {view === "campaign" ? (
                     <div className="stage-page">
                       <CampaignCardView
                         campaign={campaign}
@@ -599,9 +634,17 @@ export function App() {
                       />
                     </div>
                   ) : null}
-                  {view === "learn" || view === "optimize" ? (
+                  {onFe ? (
+                    <div className="fe-page">
+                      {onMesh ? <MeshStage state={deck} view={meshView} /> : null}
+                      {onSolve ? <SolveStage state={deck} view={answerView} /> : null}
+                      {onReproduce ? <SolveStage state={deck} view={solveView} /> : null}
+                      {onRoute ? <RouteStage state={deck} view={routeView} /> : null}
+                    </div>
+                  ) : null}
+                  {view === "models" ? (
                     <div className="stage-page">
-                      <Later view={view} />
+                      <Later />
                     </div>
                   ) : null}
                 </>
@@ -679,30 +722,20 @@ const PANE_NAMES: Record<Pane, string> = {
 /** The design's new surfaces: teal, a colour nothing else uses - selection is blue. */
 const DESIGN_TINT: [number, number, number] = [0.055, 0.431, 0.455];
 
-/** A tab not built yet: what it will do, and what it waits for. */
-function Later({ view }: { view: "learn" | "optimize" }) {
-  return view === "learn" ? (
+/** Models, not built yet: what it will do, and what it waits for. */
+function Later() {
+  return (
     <div className="later">
-      <h2>Learn - not built yet</h2>
+      <h2>Models - not built yet</h2>
       <p>
-        Learn trains surrogates on a campaign's results - what each design's solve gave back - and
-        says how far they can be believed on designs they were not trained on.
+        Surrogates trained on the designs a campaign accepted - what each design's solve gave back -
+        with how far they can be believed on designs they were not trained on, and the search run on
+        them: candidates proposed, the ones worth solving confirmed by the solver.
       </p>
       <p className="dim">
-        It waits for designs with results: on Generate → Designs, a design goes from its paths (P)
-        to its field (F), mesh (M), solver setup (S) and results (R). Fields are built today;
-        meshing, setup and results come next.
+        It waits for accepted designs: on Explore, a design goes from its paths (P) to its field (F),
+        mesh (M), solver setup (S) and results (R).
       </p>
-    </div>
-  ) : (
-    <div className="later">
-      <h2>Optimize - not built yet</h2>
-      <p>
-        Optimize searches the surrogate for designs that do better on the study's objectives,
-        proposes candidates, and verifies the ones worth solving - each a design of the same design
-        space, held to the same rules.
-      </p>
-      <p className="dim">It waits for a surrogate from Learn.</p>
     </div>
   );
 }
