@@ -330,8 +330,9 @@ product.
   seat's force through an RBE3), which the GPU route reproduces to 2·10⁻¹⁰, so results stand beside
   agenticCAE's 490 designs; or the bolt holes clamped. The choice moves the worst tilt by 40%.
 - **The mesher** - the build and the mesh now take the time, not the solve: design #7 took 33 minutes
-  to build and 31-103 minutes to mesh with fTetWild. Candidates: a coarser, cleaner surface before
-  fTetWild; gmsh's parallel mesher on a remeshed surface; MMG meshing the distance field directly.
+  to build and 31-103 minutes to mesh with fTetWild, and a coarser input neither speeds fTetWild up
+  nor keeps the part intact. Candidates: MMG meshing the distance field directly; TetGen or gmsh's
+  parallel mesher on a cleanly remeshed surface.
 
 ## Later
 
