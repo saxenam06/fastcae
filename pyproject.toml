@@ -36,6 +36,20 @@ dev = [
     "ruff>=0.7",
     "mypy>=1.13",
 ]
+# Reading solver decks and results, tying them to the CAD, writing training records.
+simulate = [
+    "h5py>=3.12",
+    "libigl>=2.6",
+    "zarr>=3.0",
+    "pyarrow>=18",
+]
+# The GPU route: the build's distances (Warp), assembly (CuPy), the solve (cuDSS through nvmath).
+gpu = [
+    "warp-lang>=1.17",
+    "cupy-cuda12x[ctk]>=14.2",
+    "nvmath-python[cu12]>=1.0",
+    "nvidia-cudss-cu12>=0.8",
+]
 
 [project.scripts]
 fastcae = "fastcae.cli:main"

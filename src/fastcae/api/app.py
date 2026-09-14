@@ -2002,3 +2002,9 @@ def post_agent_chat(request: ChatRequest) -> StreamingResponse:
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# Simulate: the baseline's deck and answers, the variant route, the runner's jobs.
+from . import simulate as simulate_routes  # noqa: E402 - after the state it reads
+
+app.include_router(simulate_routes.router)

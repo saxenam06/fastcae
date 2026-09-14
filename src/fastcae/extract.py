@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+import numpy as np
+
 from . import cache
 from . import drawing as drawing_reader
 from .drawing import CalloutKind, DrawingRead
@@ -76,6 +78,12 @@ CODE = (
     "geometry/brep.py",
     "geometry/health.py",
     "geometry/atlas.py",
+    "simulate/aster.py",
+    "simulate/med.py",
+    "simulate/fem.py",
+    "simulate/setup.py",
+    "simulate/carry.py",
+    "simulate/baseline.py",
 )
 
 
@@ -147,10 +155,18 @@ class Extraction:
     features: FeatureSet | None = None
     drawing: DrawingRead | None = None
     controlled: dict[str, Fact[bool]] = field(default_factory=dict)
+    deck: dict[str, Any] | None = None
+    """What the solver deck asks for, in words that do not depend on the solver, and its files."""
+    anchoring: dict[str, Any] | None = None
+    """Which CAD faces each group the deck acts on lies on, and where its reference points are."""
 
     @property
     def ok(self) -> bool:
-        return not any(s.status is StepStatus.FAILED for s in self.steps)
+        """Whether the part can be opened. A solver deck that cannot be read is reported on its own
+        steps and leaves the part itself open - the deck is context, the CAD is the part."""
+        return not any(
+            s.status is StepStatus.FAILED and not s.id.startswith("deck.") for s in self.steps
+        )
 
     @property
     def seconds(self) -> float:
@@ -275,6 +291,34 @@ def _run(project: Project, artifacts: list[Artifact]) -> Extraction:
         _crosscheck,
         needs=(ArtifactKind.CAD, ArtifactKind.DRAWING),
         available=result.features is not None and result.drawing is not None,
+    )
+
+    from .simulate import baseline as solver_deck
+
+    files = solver_deck.deck_files(project)
+    _step(
+        result,
+        "deck.read",
+        "Read the solver deck",
+        _read_deck,
+        needs=(ArtifactKind.FEM,),
+        available=files.complete,
+    )
+    _step(
+        result,
+        "deck.results",
+        "Read the solver's results",
+        _read_results,
+        needs=(ArtifactKind.RESULTS,),
+        available=result.deck is not None and files.results is not None,
+    )
+    _step(
+        result,
+        "deck.anchor",
+        "Tie the deck's groups to the CAD",
+        _anchor_deck,
+        needs=(ArtifactKind.CAD, ArtifactKind.FEM),
+        available=result.deck is not None and result.tess is not None,
     )
 
     # The B-rep does not survive being stored, and nothing after this point asks for it: health and
@@ -634,6 +678,90 @@ def _crosscheck(result: Extraction) -> str:
         f"{matched} of {matched + len(ambiguous) + len(unmatched)} callouts associated, "
         f"{len(ambiguous)} ambiguous, {len(result.controlled_face_ids())} controlled faces, "
         f"{len(result.log.conflicts)} unresolved"
+    )
+
+
+def _read_deck(result: Extraction) -> str:
+    """The deck's commands read - never run - its mesh and groups, and what it asks for."""
+    from .simulate import baseline as solver_deck
+
+    deck = solver_deck.read_deck(result.project)
+    assert deck is not None
+    summary = solver_deck.summary(deck)
+    kept = ("files", "mesh", "groups", "setup", "io", "skipped", "warnings", "digest")
+    result.deck = {k: summary[k] for k in kept}
+    setup = deck.setup
+    step = result.steps[-1]
+    step.produced = {
+        "commands": deck.files.comm.name if deck.files.comm else None,
+        "mesh": deck.files.mesh.name if deck.files.mesh else None,
+        "nodes": summary["mesh"]["nodes"],
+        "cells": summary["mesh"]["cells"],
+        "groups": len(summary["groups"]),
+        "held": len(setup.held),
+        "rigid_couplings": len(setup.rigid),
+        "distributing_couplings": len(setup.distributing),
+        "loads": len(setup.nodal_loads) + len(setup.surface_loads),
+        "signals": len(setup.outputs),
+    }
+    step.warnings.extend(f"not read: {line}" for line in deck.skipped[:10])
+    step.warnings.extend(f"not interpreted: {line}" for line in setup.not_read[:10])
+    step.warnings.extend(summary["warnings"][:10])
+    if deck.mesh.tet10 is None:
+        step.warnings.append(
+            "the mesh's volume is not quadratic tetrahedra alone; fastcae solves TET10 only"
+        )
+    return (
+        f"{summary['mesh']['nodes']:,} nodes, {len(summary['groups'])} groups; "
+        f"{len(setup.held)} held, {len(setup.rigid)} rigid and "
+        f"{len(setup.distributing)} distributing couplings, "
+        f"{len(setup.nodal_loads) + len(setup.surface_loads)} loads, {len(setup.outputs)} signals"
+    )
+
+
+def _read_results(result: Extraction) -> str:
+    """Which fields and tables the solver wrote back."""
+    from .simulate import baseline as solver_deck
+
+    deck = solver_deck.read_deck(result.project)
+    assert deck is not None
+    fields = {name: f.components for name, f in deck.fields.items()}
+    tables = deck.tables()
+    assert result.deck is not None
+    result.deck["fields"] = [{"name": n, "components": c} for n, c in fields.items()]
+    result.deck["tables"] = [{"columns": t.columns, "rows": len(t.rows)} for t in tables]
+    result.steps[-1].produced = {
+        "results": deck.files.results.name if deck.files.results else None,
+        "fields": list(fields),
+        "tables": len(tables),
+        "rows": sum(len(t.rows) for t in tables),
+    }
+    return f"{len(fields)} fields ({', '.join(fields)}), {len(tables)} tables"
+
+
+def _anchor_deck(result: Extraction) -> str:
+    """Each group the deck acts on, as the CAD faces it lies on."""
+    from .simulate import baseline as solver_deck
+    from .simulate.carry import anchor
+
+    deck = solver_deck.read_deck(result.project)
+    assert deck is not None and result.tess is not None
+    tess = result.tess
+    anchored = anchor(deck.mesh, deck.setup, tess.vertices, tess.triangles, tess.face_id)
+    result.anchoring = anchored.to_json()
+    step = result.steps[-1]
+    gaps = [a.gap for a in anchored.groups.values() if np.isfinite(a.gap)]
+    step.produced = {
+        "groups": len(anchored.groups),
+        "reference_points": len(anchored.references),
+        "largest_gap_mm": round(max(gaps), 3) if gaps else None,
+        "not_anchored": anchored.not_anchored,
+    }
+    if anchored.not_anchored:
+        step.warnings.append(f"not on the CAD's surface: {', '.join(anchored.not_anchored)}")
+    return (
+        f"{len(anchored.groups)} groups on CAD faces, {len(anchored.references)} reference points; "
+        f"the mesh's patches lie within {max(gaps) if gaps else 0:.2f} mm of the CAD"
     )
 
 

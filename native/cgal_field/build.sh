@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Builds cgal_field - CGAL's mesher on a distance field, compiled - into the WSL micromamba environment
-# `fieldmesh`, made once with:
+# Builds cgal_field - CGAL's mesher on a distance field or a closed surface, compiled - into the WSL
+# micromamba environment `fieldmesh`, made once with:
 #   micromamba create -n fieldmesh -c conda-forge python=3.12 numpy scipy cgal-cpp tbb-devel pybind11 cxx-compiler
+# then, from WSL:  bash native/cgal_field/build.sh
+# fastcae calls it through src/fastcae/simulate/wsl_mesher.py.
 set -euo pipefail
 PREFIX="${MAMBA_ROOT_PREFIX:-$HOME/.local/share/mamba}/envs/fieldmesh"
 PY="$PREFIX/bin/python"

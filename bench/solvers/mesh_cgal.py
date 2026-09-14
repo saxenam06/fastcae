@@ -5,7 +5,7 @@ facets lie within a set distance of where the field is zero, holds the cells to 
 slivers.
 
 By default the field is answered in C++ by ``cgal_field`` (``cgal_field.cpp``, built by
-``build_cgal_field.sh`` into the WSL micromamba environment ``fieldmesh``), surface points found to
+``native/cgal_field/build.sh`` into the WSL micromamba environment ``fieldmesh``), surface points found to
 5e-6 of the grid's diagonal. ``--python`` answers it in Python through pygalmesh instead, in the
 ``galmesh`` environment, where CGAL keeps its default of 1e-3 of a sphere about the origin:
 

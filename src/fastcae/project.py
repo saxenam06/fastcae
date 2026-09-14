@@ -49,6 +49,7 @@ class ArtifactKind(StrEnum):
     CAD = "cad"
     DRAWING = "drawing"
     FEM = "fem"
+    RESULTS = "results"
     DATA = "data"
     UNKNOWN = "unknown"
 
@@ -57,7 +58,8 @@ class ArtifactKind(StrEnum):
         return {
             ArtifactKind.CAD: "CAD",
             ArtifactKind.DRAWING: "Drawing",
-            ArtifactKind.FEM: "FEM setup",
+            ArtifactKind.FEM: "Solver deck",
+            ArtifactKind.RESULTS: "Solver results",
             ArtifactKind.DATA: "Data",
             ArtifactKind.UNKNOWN: "Unrecognised",
         }[self]
@@ -72,10 +74,15 @@ _EXTENSIONS = {
     ".pdf": ArtifactKind.DRAWING,
     ".dwg": ArtifactKind.DRAWING,
     ".dxf": ArtifactKind.DRAWING,
-    ".med": ArtifactKind.FEM,
-    ".inp": ArtifactKind.FEM,
+    ".export": ArtifactKind.FEM,
     ".comm": ArtifactKind.FEM,
+    ".med": ArtifactKind.FEM,
+    ".mail": ArtifactKind.FEM,
+    ".inp": ArtifactKind.FEM,
     ".bdf": ArtifactKind.FEM,
+    ".rmed": ArtifactKind.RESULTS,
+    ".resu": ArtifactKind.RESULTS,
+    ".mess": ArtifactKind.RESULTS,
     ".csv": ArtifactKind.DATA,
     ".json": ArtifactKind.DATA,
     ".tdms": ArtifactKind.DATA,

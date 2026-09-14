@@ -3,7 +3,7 @@
 // trilinear interpolation of the grid, never by Python. Element sizes are constants, or read from a
 // second grid. The same mesher also meshes a closed triangulated surface - a CAD part's own - with its
 // sharp edges kept, to the same sizes, so the two can be compared. Built into the WSL micromamba
-// environment `fieldmesh` by build_cgal_field.sh; driven by mesh_cgal.py and gate_cad.py.
+// environment `fieldmesh` by build.sh beside it; driven by mesh_cgal.py and gate_cad.py.
 
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
