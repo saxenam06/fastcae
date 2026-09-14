@@ -33,9 +33,11 @@ def most_varied(
     designs: list[dict], k: int, axes: tuple[np.ndarray, np.ndarray] | None = None
 ) -> list[int]:
     """The positions in ``designs`` of the ``k`` that differ most from each other - which way ribs
-    run and where they lie measured on the plane of ``axes``, else x and y."""
-    if len(designs) <= k:
-        return list(range(len(designs)))
+    run and where they lie measured on the plane of ``axes``, else x and y - most different first,
+    so the first few of them are the few that differ most however many are asked for."""
+    k = min(k, len(designs))
+    if k <= 0:
+        return []
     points = properties(designs, axes)
     middle = points.mean(axis=0)
     chosen = [int(np.argmax(np.linalg.norm(points - middle, axis=1)))]
@@ -46,6 +48,10 @@ def most_varied(
             break
         chosen.append(far)
         nearest = np.minimum(nearest, np.linalg.norm(points - points[far], axis=1))
+    if len(chosen) < k:
+        # What is left is alike to one already chosen: after them, in the order it was made.
+        taken = set(chosen)
+        chosen += [i for i in range(len(designs)) if i not in taken][: k - len(chosen)]
     return chosen
 
 

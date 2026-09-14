@@ -486,30 +486,34 @@ def _factor_and_solve(k: sp.csr_matrix, f: np.ndarray, gpu: bool) -> tuple[np.nd
         HybridMemoryModeOptions,
     )
 
-    cp.get_default_memory_pool().free_all_blocks()
-    cp.get_default_pinned_memory_pool().free_all_blocks()
+    from ..gpu import release
+
+    release()
     a = csp.csr_matrix(k)
     b = cp.asarray(f)
     options = {"sparse_system_type": DirectSolverMatrixType.SPD, "multithreading_lib": _mtlayer()}
     execution = ExecutionCUDA(
         hybrid_memory_mode_options=HybridMemoryModeOptions(hybrid_memory_mode=True)
     )
-    with DirectSolver(a, b.reshape(-1, 1), options=options, execution=execution) as solver:
-        t0 = time.time()
-        solver.plan()
-        cp.cuda.Device().synchronize()
-        plan = time.time() - t0
-        t0 = time.time()
-        solver.factorize()
-        cp.cuda.Device().synchronize()
-        factor = time.time() - t0
-        t0 = time.time()
-        x = solver.solve()
-        cp.cuda.Device().synchronize()
-        solve_s = time.time() - t0
-    x = cp.asnumpy(x).ravel()
-    del a, b
-    cp.get_default_memory_pool().free_all_blocks()
+    try:
+        with DirectSolver(a, b.reshape(-1, 1), options=options, execution=execution) as solver:
+            t0 = time.time()
+            solver.plan()
+            cp.cuda.Device().synchronize()
+            plan = time.time() - t0
+            t0 = time.time()
+            solver.factorize()
+            cp.cuda.Device().synchronize()
+            factor = time.time() - t0
+            t0 = time.time()
+            x = solver.solve()
+            cp.cuda.Device().synchronize()
+            solve_s = time.time() - t0
+        x = cp.asnumpy(x).ravel()
+    finally:
+        # Whether it solved or ran out: the card handed back, for the next build or solve.
+        a = b = None
+        release()
     residual = float(np.linalg.norm(k @ x - f) / max(np.linalg.norm(f), 1e-300))
     return x, {
         "solver": "cuDSS",

@@ -26,6 +26,8 @@ on side by side, under the deck's names.
 from __future__ import annotations
 
 import json
+import shutil
+import tempfile
 from importlib import metadata
 from pathlib import Path
 
@@ -114,20 +116,34 @@ def write_store(path: Path, mesh: FEMesh, answer: Answer, groups: list[str], att
         "finite": bool(all(np.isfinite(v).all() for k, v in arrays.items() if k != "stress")),
         "load_cases": list(LOAD_CASES),
     }
-    root = zarr.open_group(str(path), mode="w")
-    for name, value in arrays.items():
-        root.create_array(name, shape=value.shape, dtype=value.dtype, chunks=value.shape)[...] = (
-            value
-        )
-    held = root.create_group("groups")
-    for name in groups:
-        members = renumber[mesh.group_nodes(name)]
-        members = members[members >= 0].astype(np.int32)
-        if len(members):
-            held.create_array(name, shape=members.shape, dtype=members.dtype, chunks=members.shape)[
+    final = Path(path).resolve()
+    if final.suffix != ".zarr":
+        raise ValueError(f"a design's store ends in .zarr, not {final.name}")
+    # Written where paths are short, then moved into place whole: Zarr's own temporary names add
+    # 45 characters, and a campaign's folder can be deep enough for Windows' 260 to run out.
+    staging = Path(tempfile.mkdtemp(prefix="fcz"))
+    try:
+        store = staging / final.name
+        root = zarr.open_group(str(store), mode="w")
+        for name, value in arrays.items():
+            root.create_array(name, shape=value.shape, dtype=value.dtype, chunks=value.shape)[
                 ...
-            ] = members
-    root.attrs.update({**attrs, "qa": qa})
+            ] = value
+        held = root.create_group("groups")
+        for name in groups:
+            members = renumber[mesh.group_nodes(name)]
+            members = members[members >= 0].astype(np.int32)
+            if len(members):
+                held.create_array(
+                    name, shape=members.shape, dtype=members.dtype, chunks=members.shape
+                )[...] = members
+        root.attrs.update({**attrs, "qa": qa})
+        if final.exists():
+            shutil.rmtree(final)  # this design's own store, made again
+        final.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(store), str(final))
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
     return qa
 
 

@@ -38,6 +38,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .. import machine
+from ..gpu import release
 from ..project import Project, open_project
 from . import aster, baseline, carry, fem, med, records, signals, sizes, solve, tetmesh
 from .jobs import ROUTE
@@ -45,6 +47,8 @@ from .jobs import ROUTE
 IN_FLIGHT = 3
 MESHING_AT_ONCE = 2
 DESIGN_LIMIT_S = 15 * 60
+# A design waits to start while the runner holds more than this share of the machine's memory.
+MEMORY_SHARE = 0.6
 # A design whose boundary holds less than this share of a group's area in the deck lost that face.
 LEAST_SHARE = 0.5
 STAGES = ("build", "mesh", "setup", "solve", "record")
@@ -175,6 +179,26 @@ class Tracker:
         )
 
 
+def _room(tracker: Tracker, index: int) -> float:
+    """Wait, before a design takes its first stage, while the runner holds more of the machine's
+    memory than :data:`MEMORY_SHARE` - the others in flight finish and hand theirs back. Returns
+    the seconds waited."""
+    limit = MEMORY_SHARE * machine.physical_gb()
+    t0 = time.time()
+    said = False
+    while machine.committed_gb() > limit and not tracker.job.cancelled():
+        if not said:
+            tracker.set(index, stage="waiting")
+            tracker.job.event(
+                f"design {index}: waiting - the runner holds {machine.committed_gb():.1f} GB "
+                f"of the {limit:.1f} GB it may use",
+                design=index,
+            )
+            said = True
+        time.sleep(5.0)
+    return time.time() - t0
+
+
 def _timed(tracker: Tracker, index: int, name: str, started: float):  # type: ignore[no-untyped-def]
     """Enter a stage: say so, and refuse when the design has already run too long."""
     if time.time() - started > DESIGN_LIMIT_S:
@@ -284,6 +308,10 @@ def solve_one(shared: Shared, tracker: Tracker, index: int) -> dict:
     record: dict = {"run": shared.folder.name, "index": index, "started": started, "stages": {}}
     route: list[str] = []
     try:
+        waited = _room(tracker, index)
+        if waited:
+            record["waited_s"] = waited
+            started = time.time()  # the time limit counts from when it could start
         design = shared.shop.design(index)  # type: ignore[attr-defined]
         record.update(
             values=design.get("values"),
@@ -293,7 +321,10 @@ def solve_one(shared: Shared, tracker: Tracker, index: int) -> dict:
         t = _timed(tracker, index, "build", started)
         try:
             with GPU:
-                built = build_design(shared.folder, index, workshop=shared.shop)
+                try:
+                    built = build_design(shared.folder, index, workshop=shared.shop)
+                finally:
+                    release()  # the card handed back, whatever the build did with it
         except BuildError as error:
             raise SetAside(f"build: {error}") from error
         record["stages"]["build"] = time.time() - t
@@ -341,21 +372,34 @@ def solve_one(shared: Shared, tracker: Tracker, index: int) -> dict:
 
         t = _timed(tracker, index, "solve", started)
         setup = copy.deepcopy(carried.setup)
-        try:
-            with GPU:
-                solution = solve.solve(carried.mesh, setup, gpu=True, log=lambda _: None)
+        solution, failures = None, []
+        # cuDSS, and once more after the card is handed back - memory other work left in a pool
+        # is the likeliest reason it failed; Code_Aster only when it fails again.
+        for _attempt in range(2):
+            try:
+                with GPU:
+                    solution = solve.solve(carried.mesh, setup, gpu=True, log=lambda _: None)
+                break
+            except Exception as error:  # noqa: BLE001 - any failure of the GPU solve is retried
+                failures.append(f"{type(error).__name__}: {error}"[:300])
+                release()
+        if solution is not None:
             answer = signals.from_solution(solution, "cuDSS")
             record["solver"] = {
                 "name": "cuDSS",
                 "residual": solution.info.get("residual"),
                 "times": solution.times,
                 "unknowns": solution.unknowns,
+                **({"retried_after": failures[0]} if failures else {}),
             }
-            route.append("cuDSS")
-        except Exception as error:  # noqa: BLE001 - any failure of the GPU solve goes to the fallback
-            job.event(f"design {index}: cuDSS failed ({error}); Code_Aster instead", design=index)
+            route.append("cuDSS, second try" if failures else "cuDSS")
+        else:
+            job.event(
+                f"design {index}: cuDSS failed twice ({failures[-1]}); Code_Aster instead",
+                design=index,
+            )
             answer = _solve_aster(shared, carried, index)
-            record["solver"] = {"name": "Code_Aster", "fallback_for": str(error)[:300]}
+            record["solver"] = {"name": "Code_Aster", "fallback_for": failures}
             route.append("Code_Aster")
         record["solver"]["versions"] = records.versions()
         record["stages"]["solve"] = time.time() - t
