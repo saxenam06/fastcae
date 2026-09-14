@@ -269,12 +269,13 @@ product.
 2. **Physics.** Linear static first, with agenticCAE's load case as it is - DLC 1.3 extreme, 401 kN·m on
    the low-speed shaft - so results compare with its 490 solved designs; one load case to start, the
    16-unit-load basis kept switchable. Modal and harmonic later, by agenticCAE's method.
-3. **The solving route, by measurement.** Design #7 of campaign `w4zf5`, meshed with quadratic tets
-   (TET10), solved by Code_Aster locally as the reference; by a GPU iterative solver on the same mesh;
-   by NVIDIA Warp on the design's voxel grid; by FEniCSx on the mesh and as a cut-cell (finite cell)
-   solve on the grid; JAX-FEM, PETSc on GPU and cuDSS as each earns a place. Compared on agenticCAE's
-   metrics - bearing tilt, gear-mesh misalignment, 99.9th-percentile von Mises, largest displacement -
-   for accuracy, time and memory: [../bench/solvers/](../bench/solvers/README.md).
+3. **The solving route, by measurement** - measured: design #7 of campaign `w4zf5` and agenticCAE's
+   design e56235, meshed with quadratic tets (TET10), solved by Code_Aster locally as the reference
+   and by cuDSS, two GPU multigrid solvers, CHOLMOD, FEniCSx and JAX-FEM on the same mesh, and
+   without a mesh by NVIDIA Warp on the voxel grid and as a cut-cell (finite cell) solve. Compared on
+   agenticCAE's metrics - bearing tilt, gear-mesh misalignment, 99.9th-percentile von Mises, largest
+   displacement - for accuracy, time and memory:
+   [../bench/solvers/RESULTS.md](../bench/solvers/RESULTS.md).
 4. **Data in rounds**, not 4,000 at once: about 300 spread evenly, train, then batches the agent picks
    from the last results, up to 4,000. A fixed test set of about 300 is never trained on.
 5. **The field model**: stress and displacement anywhere on the part, from the design's distance
@@ -319,7 +320,18 @@ product.
   promising, 20% random (see [research/optimization.md](research/optimization.md)).
 - **Rib thickness from the floor** - with no floor thickening, 20 mm ribs on a 15 mm floor are left
   out; starting ribs at 0.6-0.8 of the floor they stand on would keep them.
-- **The solving route**, once the comparison is in.
+- **The solving route** - recommended by the measurement: TET10 solved by **cuDSS on the GPU** - Code_Aster's
+  answer to 3·10⁻¹⁰, 13 s at 1.06 M unknowns in 5.2 GB of the card, against Code_Aster's 57 s;
+  PETSc's multigrid on the GPU as the fallback for a design too big for the card; Code_Aster as the
+  audit a sample is re-solved against. The grid routes are not accurate enough for labels yet: the
+  voxel grid is 14-17% off on the worst tilt and worse as it refines; the cut-cell grid 6% low on it
+  and 17-19% low on the gear-mesh lead.
+- **The supports** - agenticCAE's couplings (each bolt position a rigid body about a held point, each
+  seat's force through an RBE3), which the GPU route reproduces to 2·10⁻¹⁰, so results stand beside
+  agenticCAE's 490 designs; or the bolt holes clamped. The choice moves the worst tilt by 40%.
+- **The mesher** - the build and the mesh now take the time, not the solve: design #7 took 33 minutes
+  to build and 31-103 minutes to mesh with fTetWild. Candidates: a coarser, cleaner surface before
+  fTetWild; gmsh's parallel mesher on a remeshed surface; MMG meshing the distance field directly.
 
 ## Later
 

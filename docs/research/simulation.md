@@ -57,6 +57,36 @@ surface 2`; `occ.healShapes()` fails; surface meshing at 6 mm ran past 10 minute
 grid is not workable (an R8 fillet needs ≲ 1 mm voxels to be resolved to a few voxels across its
 radius); a narrow band is.
 
+## Measured here: every candidate against Code_Aster
+
+Design #7 of campaign `w4zf5` and agenticCAE's design e56235, each meshed as TET10 at 20 mm (about
+1.06-1.1 M unknowns), agenticCAE's load case, the 25 bolt positions held, agenticCAE's metrics - on
+this workstation. Full tables: [../../bench/solvers/RESULTS.md](../../bench/solvers/RESULTS.md).
+
+| Design #7, 1.06 M unknowns | Total | Against Code_Aster |
+|---|---:|---|
+| cuDSS, sparse Cholesky, GPU | 13 s | 3·10⁻¹⁰, 5.2 GB of the card |
+| PETSc CG + GAMG, GPU | 35 s | 2·10⁻⁹ |
+| CG + PyAMG levels, CuPy V-cycles, GPU | 51 s | 1·10⁻⁹ |
+| Code_Aster 18, MUMPS block low-rank, one core | 57 s | the reference |
+| CHOLMOD, CPU | 61 s | 3·10⁻¹⁰ |
+| JAX-FEM, autodiff assembly + cuDSS | 112 s | 3·10⁻¹⁰ |
+| FEniCSx P2, its own assembly, CG + GAMG, one core | 253 s | 7·10⁻⁸ |
+| Voxel grid, Warp, 6 mm / 5 mm (2.3 M / 3.8 M unknowns) | 51 s / 109 s | worst tilt +14% / +17% |
+| Cut cells, Warp + cuDSS, linear, 12 mm / 10 mm | 9 s / 43 s | worst tilt -6%, gear-mesh lead -17 to -19%, p99.9 within 0.4% |
+
+- On one mesh every TET10 solver gives the same answer; the difference is time. cuDSS is the
+  fastest and exact, and a design whose factorisation outgrows the card falls back to a multigrid.
+- The voxel grid moves further from the answer as it refines - its supports and loads land on the
+  grid nodes nearest the surface. Cut cells get stress right but their linear cells are too stiff in
+  bending; quadratic cells need a multigrid solver on the grid before they fit the card.
+- The supports matter more than the solver: agenticCAE's couplings, which let each bolt hole turn
+  about its bolt, give 2.07' on the worst bore where clamping the holes gives 1.25'. With its
+  couplings, on its own mesh, this setup reproduces agenticCAE's recorded tilts within 10% and its
+  gear-mesh lead within 2.4%; the GPU solves the couplings to Code_Aster's answer at 2·10⁻¹⁰.
+- The design took 33 minutes to build and 31-103 minutes to mesh with fTetWild: meshing and building,
+  not solving, now set the pace.
+
 ## What a "GPU solver" means
 
 The solver does not care how the elements were made. Either way, the finite element method ends with
@@ -84,8 +114,8 @@ memory:
 - CalculiX has iterative options, less robust.
 - On GPU: NVIDIA AMGX (GPU algebraic multigrid for any sparse matrix, mainly Linux), PETSc on GPU
   (Linux; [a blocked GPU AMG path for elasticity](https://arxiv.org/abs/2606.24748), June 2026), cuDSS
-  (direct; the 1.27 M-unknown TET10 mesh likely does not fit in 8 GB). Warp fem, JAX-FEM and torch-fem
-  also do quadratic tets.
+  (direct - measured below: a 1.06-1.1 M-unknown TET10 system factors in 5-6 GB of an 8 GB card). Warp
+  fem, JAX-FEM and torch-fem also do quadratic tets.
 
 Scale shown by GPU topology optimisation, on regular grids like fastcae's:
 [Träff et al., CMAME 2023](https://www.sciencedirect.com/science/article/pii/S0045782523001676)
@@ -238,8 +268,8 @@ place for well over 10,000 designs or for live previews in the interface.
 
 ## Where fastcae stands
 
-The route is decided by measurement, on the same load case, supports and metrics as agenticCAE
-(bearing tilt, gear-mesh misalignment, 99.9th-percentile von Mises, largest displacement): TET10 with
-a GPU iterative solver, and the plain voxel grid on Warp - with a cut-cell solve if it earns its place
-- each against Code_Aster on TET10 solved locally, as the reference. See
-[../build-plan.md](../build-plan.md).
+Measured, on the same load case, supports and metrics as agenticCAE: TET10 solved by cuDSS on the GPU
+gives Code_Aster's answer four times faster, and is the recommended route; PETSc's multigrid on the
+GPU is its fallback, Code_Aster its audit. The grid routes stay for previews and a low-fidelity level
+until a cut-cell solve with quadratic cells and a grid multigrid earns its place. What is slow now is
+the mesher. See [../build-plan.md](../build-plan.md).
