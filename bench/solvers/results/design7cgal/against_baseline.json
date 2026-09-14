@@ -1,0 +1,72 @@
+{
+ "case": "design7cgal",
+ "baseline": "design7",
+ "rows": [
+  {
+   "what": "tilt BORE_AX1_S1",
+   "route": 0.53779,
+   "baseline": 0.52557,
+   "diff_pct": 2.3250946591319916
+  },
+  {
+   "what": "tilt BORE_AX1_S4",
+   "route": 1.07155,
+   "baseline": 1.07023,
+   "diff_pct": 0.12333797408033674
+  },
+  {
+   "what": "tilt BORE_AX2_S2",
+   "route": 1.14547,
+   "baseline": 1.13057,
+   "diff_pct": 1.3179192796553874
+  },
+  {
+   "what": "tilt BORE_AX2_S3",
+   "route": 1.28687,
+   "baseline": 1.28599,
+   "diff_pct": 0.06842977006041975
+  },
+  {
+   "what": "tilt BORE_MAIN_S2",
+   "route": 1.49,
+   "baseline": 1.46782,
+   "diff_pct": 1.5110844653976707
+  },
+  {
+   "what": "tilt BORE_MAIN_S3",
+   "route": 0.66362,
+   "baseline": 0.67286,
+   "diff_pct": -1.3732425764646472
+  },
+  {
+   "what": "lead IMS_82_23",
+   "route": 0.3896790499038437,
+   "baseline": 0.3943487489316399,
+   "diff_pct": -1.18415464495506
+  },
+  {
+   "what": "lead HSS_88_22",
+   "route": 0.36484031350426654,
+   "baseline": 0.3659602246621149,
+   "diff_pct": -0.30601991210448354
+  },
+  {
+   "what": "p99.9 von Mises",
+   "route": 112.54911845089272,
+   "baseline": 113.96224771972304,
+   "diff_pct": -1.2399977160030624
+  },
+  {
+   "what": "p99 von Mises",
+   "route": 49.120191127699854,
+   "baseline": 49.81623817243447,
+   "diff_pct": -1.3972292374331996
+  },
+  {
+   "what": "largest displacement",
+   "route": 0.8557105935827887,
+   "baseline": 0.854044799789319,
+   "diff_pct": 0.19504758929280736
+  }
+ ]
+}

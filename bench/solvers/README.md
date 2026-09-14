@@ -77,6 +77,13 @@ python check_couplings.py e56235   # the GPU's couplings against Code_Aster's
 Beyond the solvers: `mesh_gmsh.py` tries gmsh in place of fTetWild, and `distance_gpu.py` times the
 build's slowest step - the grid's exact distance to the part - on the GPU and against libigl.
 
+The fast route: `build_gpu.py` rebuilds the design with that step on the GPU (a trial - it swaps the
+function at run time, the product code unchanged); `mesh_clean.py 20 25 1.0 --gmsh` remeshes the
+field's surface, repairs it and fills it with gmsh; `against_baseline.py design7gpu` sets the
+answer beside the slow route's. Needs `pymeshlab`, `pymeshfix`, `gmsh` (and `tetgen` to try it).
+Straight from the field: `mesh_cgal.py` in WSL's `galmesh` environment (pygalmesh 0.10.7, CGAL 6.2),
+then `finish_mesh.py cgal_tets.npz`; `mesh_field.py` is the MMG attempt (`mmgpy`).
+
 Two things to know when running on one 8 GB card and 16 GB of RAM: run one GPU job at a time - a
 PETSc or CuPy process keeps its GPU memory pool until it exits - and run Code_Aster from a Linux
 directory (`$ASTER_RUNS`): MUMPS writes its factors there, and through WSL's bridge to a Windows

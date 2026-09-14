@@ -2,7 +2,8 @@
 
 Measured 14 September 2026 on the workstation (i7-13700HX 16 cores, 15.7 GB RAM, RTX 5060 Laptop 8 GB;
 WSL Ubuntu 24.04 given 12 GB). Setup, cases and scripts: [README.md](README.md). Per-case tables with
-every seat: `results/<case>/results.md`.
+every seat: `results/<case>/results.md`. What every approach means and what was learned, in plain
+words: [docs/research/design-to-solution.md](../../docs/research/design-to-solution.md).
 
 ## The answer
 
@@ -11,8 +12,11 @@ to a relative field error of 3·10⁻¹⁰ - every metric identical to four deci
 Code_Aster's 57 s, using 5.2 GB of the card. With agenticCAE's own supports (an RBE2 per bolt, an
 RBE3 per seat) it reproduces Code_Aster's `LIAISON_SOLIDE` + `LIAISON_RBE3` to 2·10⁻¹⁰, in 14 s.
 
-**Solving is no longer the bottleneck. Building and meshing are:** design #7 took 33 min to build at
-preview and 31-103 min to mesh with fTetWild; the solve takes 13 s.
+**Build on the GPU and mesh straight from the field.** The slow route took 33 min to build design #7
+and 103 min to mesh it with fTetWild. Built with the grid's distance on the GPU it takes 79 s and is
+the same design; meshed from its field by CGAL, 46 s; with cuDSS, about 2.5 minutes a design, within
+2.3 % of the slow route on every metric. See [The fast route](#the-fast-route---built-on-the-gpu-meshed-from-the-cleaned-surface)
+and [Meshing straight from the field](#meshing-straight-from-the-field).
 
 **The grid routes are not label-grade at a size this card holds:** the voxel grid is off by 14-17 %
 on the worst tilt and moves further off as it refines; the cut-cell grid (finite cell method, linear
@@ -107,7 +111,7 @@ every tilt.
 With the bolt holes clamped instead, BORE_MAIN_S2 tilts 1.248' against 2.066' - the support model
 moves the answer by 40 %; the solver, by nothing.
 
-## Per design, end to end
+## Per design, the slow route
 
 | Step | Design #7 | |
 |---|---|---|
@@ -117,9 +121,9 @@ moves the answer by 40 %; the solver, by nothing.
 | Assemble on the GPU | 4-8 s | |
 | Solve, cuDSS | 13 s | |
 
-At today's build and mesh times a design takes 1-2.3 hours - 4,000 of them, 6-12 months one at a
-time on this machine; their solves alone, 15 hours. The next speed work is the build and the mesher,
-not the solver.
+At the slow route's build and mesh times a design takes 1-2.3 hours - 4,000 of them, 6-12 months one
+at a time on this machine; their solves alone, 15 hours. What follows makes the build and the mesh
+fast.
 
 **The mesher.** fTetWild took 103 minutes on the surface decimated to 400,000 triangles with a
 0.95 mm envelope, and 31 minutes on 200,000 with a 1.9 mm envelope and lighter optimisation. A
@@ -134,9 +138,84 @@ somewhere else - the distance field itself, or a cleanly remeshed surface.
 surface, point against triangle on the CPU - about 70,000 cells a second. The same query against a
 bounding-volume hierarchy on the GPU (Warp, `distance_gpu.py`) answers all 5.9 M cells of design #7's
 band in 0.02 s, after 3 s to build the hierarchy once for the part: about 4,600× faster. In single
-precision it misreads 0.6% of the cells within a few hundredths of a millimetre of the surface, by
-up to 0.26 mm - thin triangles along fillets - so those cells need an exact recheck. libigl's
-double-precision tree on the CPU is exact but only 1.7× faster than today's code.
+precision it misreads the cells nearest OCC's sliver triangles - chords across big faces, 570 mm long
+and a millimetre high - by up to 0.43 mm (8,414 of the band's 5.9 M cells, all at the surface).
+Split into pieces no longer than 16 mm - the same surface - it agrees with the exact answer to
+0.004 mm on every cell, and needs no recheck (`build_gpu.py`). libigl's double-precision tree on the
+CPU is exact but only 1.7× faster than today's code.
+
+## The fast route - built on the GPU, meshed from the cleaned surface
+
+The same design #7, end to end, in under three minutes instead of 2.3 hours:
+
+| Step | Slow route | Fast route |
+|---|---:|---:|
+| Build at preview | 1,962 s | **79 s** - the grid's distance to the part on the GPU (`build_gpu.py`) |
+| Mesh | 6,174 s - fTetWild | **73 s** - the field's surface remeshed evenly (58 s), repaired where it crosses itself (2 s), filled by gmsh's parallel mesher (9 s), made TET10 (`mesh_clean.py`) |
+| Assemble on the GPU and solve | 57 s - Code_Aster | **10 s** - cuDSS |
+
+**The build is the same design.** Not one of the field's 50.8 M cells changes side; its distances
+agree to 0.005 mm; the surface has the same triangles, 8 of its 1.27 M vertices more than 0.01 mm
+apart. The GPU's single precision misread the distance to OCC's sliver triangles - 570 mm long, a
+millimetre high - so each long triangle is first split into pieces no longer than 16 mm, once for
+the part; after that no cell differs by more than 0.004 mm from the exact CPU answer. What is left
+of the build is contouring the surface (23 s), the checks (25 s) and moving faces (17 s).
+
+**The mesh.** The field's dual-contoured surface - 2.54 M triangles - remeshed to 100,000 even
+triangles within 1 mm of it, finer where it curves, its sharp edges kept. It crosses itself at 2,333
+faces, nearly all on one 556 mm column where two sheets pass closer than the 3 mm grid; MeshFix
+removes them and patches the gaps, within 2.4 mm of the design. gmsh fills that surface - kept as
+given - with 167,713 tets: 985,905 unknowns, beside the slow route's 1,056,945; volume within
+0.04 % of the design; 0.75 % of the tets thin slivers at the surface (TetGen made more, and failed
+outright on the unrepaired surface).
+
+**The answer**, against the slow route's Code_Aster:
+
+| | Fast route | Slow route | |
+|---|---:|---:|---:|
+| BORE_AX1_S1 tilt | 0.5337' | 0.5256' | +1.5 % |
+| BORE_AX1_S4 | 1.0723' | 1.0702' | +0.2 % |
+| BORE_AX2_S2 | 1.1343' | 1.1306' | +0.3 % |
+| BORE_AX2_S3 | 1.2877' | 1.2860' | +0.1 % |
+| BORE_MAIN_S2 | 1.4695' | 1.4678' | +0.1 % |
+| BORE_MAIN_S3 | 0.6647' | 0.6729' | -1.2 % |
+| IMS gear-mesh lead | 0.3895 mrad | 0.3943 mrad | -1.2 % |
+| HSS gear-mesh lead | 0.3671 mrad | 0.3660 mrad | +0.3 % |
+| p99.9 von Mises | 114.8 MPa | 114.0 MPa | +0.8 % |
+| Largest displacement | 0.8520 mm | 0.8540 mm | -0.2 % |
+
+Within the 1.8-3.5 % the slow route's own two meshes differ by, and inside the accuracy the build
+plan asks of the data. At about three minutes a design, 4,000 designs take eight days on this
+machine one at a time.
+
+### Meshing straight from the field
+
+No surface at all: CGAL's mesher (Mesh_3, through pygalmesh, in WSL) asks the design's distance
+field, point by point, whether it is inside and how far from the surface - trilinear across the
+3 mm grid, exact within its band - and builds tets whose surface facets lie within a set distance of
+where the field is zero, then removes slivers (`mesh_cgal.py`, finished by `finish_mesh.py`).
+
+| | From the field (CGAL) | From the cleaned surface (gmsh) | Slow route (fTetWild) |
+|---|---:|---:|---:|
+| Mesh time | 46 s, + 5 s to make TET10 and label | 73 s | 6,174 s |
+| Unknowns | 905,154 | 985,905 | 1,056,945 |
+| Worst element quality | 0.175 - no slivers | 0.005 - 0.75 % slivers | 0.30 |
+| Surface repair | none needed | 2,333 crossing faces patched | none |
+| Boundary from the design's surface | median 0.3 mm, 99 % within 1.0 mm | within 2.4 mm | within 1.95 mm |
+| Tilts against the slow route | within 2.3 % (worst seat +1.5 %) | within 1.6 % | - |
+| Gear-mesh leads | -1.2 %, -0.3 % | -1.2 %, +0.3 % | - |
+| p99.9 von Mises | -1.2 % | +0.8 % | - |
+| Largest displacement | +0.2 % | -0.2 % | - |
+
+Holding the facets within 2 mm of the surface gives these 905,154 unknowns; within 1 mm, 3.4 million -
+CGAL refines every small fillet and hole to hold it - and neither its assembly nor cuDSS then fits
+the 8 GB card. Nearly all of CGAL's 46 s is 18 million questions to the field answered in Python; a
+compiled field function would take it to seconds.
+
+MMG, the other way to mesh from a field - the field's grid cut into tets, cut again at the zero of
+the distance and remeshed - refined instead of coarsening: on a crop of the housing it turned 2,484
+tets into 12,000-26,000 whatever the target size, chasing the facets the lattice cut leaves, and on
+the whole design it had not finished after 15 minutes on one core (`mesh_field.py`).
 
 ## What the measurements rule out, and why
 
@@ -153,6 +232,11 @@ double-precision tree on the CPU is exact but only 1.7× faster than today's cod
 - **Voxel grids:** wrong in the direction that matters, and worse with refinement.
 - **Cut cells:** promising for stress and for previews - no mesh, 9 s at 12 mm - but not yet accurate
   enough in bending for labels; quadratic cells need a grid multigrid solver first.
+- **fTetWild for the campaign:** robust, but 26-103 minutes a design whatever it is given.
+- **gmsh re-parametrising the surface:** stalled past 30 minutes; gmsh filling a surface given as it
+  is works, in 9 s.
+- **TetGen:** fast, but slivers, and it refuses a surface that crosses itself.
+- **MMG on the field's grid:** refines instead of coarsening; past 15 minutes on one core.
 
 ## Caveats
 
@@ -165,3 +249,8 @@ double-precision tree on the CPU is exact but only 1.7× faster than today's cod
   (`-matmatmult_backend_cpu`, `-matptap_backend_cpu`); cuSPARSE's want more than 8 GB here.
 - The cut-cell stiffness is integrated in single precision, so its matrix is factored by LU, not
   Cholesky.
+- The GPU build and both fast meshers are bench trials: `build_gpu.py` swaps the build's distance
+  function in at run time, and the meshers run beside the product, not in it.
+- Accuracy of the fast routes is against the slow route's Code_Aster answer, itself a 20 mm TET10
+  mesh; its own two meshes differ by 1.8-3.5 %, so differences below that are within the meshes'
+  own uncertainty, not errors of the route.
