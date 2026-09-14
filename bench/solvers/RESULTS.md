@@ -121,6 +121,19 @@ At today's build and mesh times a design takes 1-2.3 hours - 4,000 of them, 6-12
 time on this machine; their solves alone, 15 hours. The next speed work is the build and the mesher,
 not the solver.
 
+**The mesher.** fTetWild took 103 minutes on the surface decimated to 400,000 triangles with a
+0.95 mm envelope, and 31 minutes on 200,000 with a 1.9 mm envelope and lighter optimisation. gmsh,
+asked to split the 200,000-triangle surface into patches and re-parametrise them before its parallel
+mesher, had not finished that first step after 30 minutes (`mesh_gmsh.py`).
+
+**The build's slowest step** is the exact distance from the design's grid cells to the part's
+surface, point against triangle on the CPU - about 70,000 cells a second. The same query against a
+bounding-volume hierarchy on the GPU (Warp, `distance_gpu.py`) answers all 5.9 M cells of design #7's
+band in 0.02 s, after 3 s to build the hierarchy once for the part: about 4,600× faster. In single
+precision it misreads 0.6% of the cells within a few hundredths of a millimetre of the surface, by
+up to 0.26 mm - thin triangles along fillets - so those cells need an exact recheck. libigl's
+double-precision tree on the CPU is exact but only 1.7× faster than today's code.
+
 ## What the measurements rule out, and why
 
 - **Code_Aster for the campaign:** exact, but 4-9× slower than cuDSS here and CPU-bound; it stays

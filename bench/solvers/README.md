@@ -74,6 +74,8 @@ python check_couplings.py e56235   # the GPU's couplings against Code_Aster's
 
 `case_e56235.py` builds the second case from agenticCAE's mesh; `labels.py e56235` labels it.
 `system_tet10.py` assembles the TET10 system on the GPU once for every solver that reads it.
+Beyond the solvers: `mesh_gmsh.py` tries gmsh in place of fTetWild, and `distance_gpu.py` times the
+build's slowest step - the grid's exact distance to the part - on the GPU and against libigl.
 
 Two things to know when running on one 8 GB card and 16 GB of RAM: run one GPU job at a time - a
 PETSc or CuPy process keeps its GPU memory pool until it exits - and run Code_Aster from a Linux
