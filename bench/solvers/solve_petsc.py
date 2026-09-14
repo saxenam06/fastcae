@@ -10,6 +10,9 @@
     PETSC_OPTIONS=-use_gpu_aware_mpi\\ 0 micromamba run -n petscgpu python solve_petsc.py /mnt/c/.../<case> [methods]
 
 Writes ``petsc_<method>.npz`` - displacement at every TET10 node - and ``petsc.json`` with the times.
+With ``couplings`` among the arguments it solves agenticCAE's supports instead
+(``system_couplings.npz``: the free nodes' displacements and three rotations a bolt, u = T q) and
+writes ``petsc_couplings_<method>.npz`` holding q.
 """
 
 from __future__ import annotations
@@ -22,7 +25,8 @@ from pathlib import Path
 import numpy as np
 
 HERE = Path(sys.argv[1])
-METHODS = sys.argv[2:] or ["gamg_gpu", "gamg_cpu", "cholmod"]
+COUPLINGS = "couplings" in sys.argv[2:]
+METHODS = [m for m in sys.argv[2:] if m != "couplings"] or ["gamg_gpu", "gamg_cpu", "cholmod"]
 
 
 def rigid_modes(points: np.ndarray) -> np.ndarray:
@@ -40,7 +44,7 @@ def rigid_modes(points: np.ndarray) -> np.ndarray:
 def main() -> None:
     from petsc4py import PETSc
 
-    s = np.load(HERE / "system.npz")
+    s = np.load(HERE / ("system_couplings.npz" if COUPLINGS else "system.npz"))
     nodes = np.load(HERE / "tet10.npz")["nodes"]
     indptr, indices, data = (
         s["indptr"].astype(PETSc.IntType),
@@ -49,16 +53,28 @@ def main() -> None:
     )
     n = int(s["shape"][0])
     f = s["f"]
-    free_nodes = s["free_nodes"]
-    modes = rigid_modes(nodes[free_nodes])
-    report = json.loads((HERE / "petsc.json").read_text()) if (HERE / "petsc.json").exists() else {}
+    if COUPLINGS:
+        # The unknowns: the free nodes' displacements, then three rotations a bolt. A rigid rotation
+        # about x, y or z turns every bolt by the same; the translations leave them alone.
+        free_nodes = np.setdiff1d(np.arange(len(nodes)), s["held"])
+        bolts = (n - 3 * len(free_nodes)) // 3
+        modes = np.zeros((n, 6))
+        modes[: 3 * len(free_nodes)] = rigid_modes(nodes[free_nodes])
+        turn = np.zeros((3 * bolts, 6))
+        turn[2::3, 3] = turn[0::3, 4] = turn[1::3, 5] = 1.0  # modes 3, 4, 5 turn about z, x, y
+        modes[3 * len(free_nodes) :] = turn
+    else:
+        free_nodes = s["free_nodes"]
+        modes = rigid_modes(nodes[free_nodes])
+    name = "petsc_couplings.json" if COUPLINGS else "petsc.json"
+    report = json.loads((HERE / name).read_text()) if (HERE / name).exists() else {}
     for method in METHODS:
         try:
-            report[method] = run(method, indptr, indices, data, n, f, modes, nodes, free_nodes)
+            report[method] = run(method, indptr, indices, data, n, f, modes, nodes, None if COUPLINGS else free_nodes)
         except Exception as error:  # noqa: BLE001 - one method failing must not lose the others
             report[method] = {"error": str(error).splitlines()[0][:300]}
         print(method, json.dumps(report[method]), flush=True)
-        (HERE / "petsc.json").write_text(json.dumps(report, indent=1))
+        (HERE / name).write_text(json.dumps(report, indent=1))
 
 
 def run(method, indptr, indices, data, n, f, modes, nodes, free_nodes) -> dict:
@@ -121,9 +137,12 @@ def run(method, indptr, indices, data, n, f, modes, nodes, free_nodes) -> dict:
     r = b.duplicate()
     a.mult(x, r)
     r.aypx(-1.0, b)
-    u = np.zeros((len(nodes), 3))
-    u[free_nodes] = values.reshape(-1, 3)
-    np.savez_compressed(HERE / f"petsc_{method}.npz", u=u)
+    if free_nodes is None:
+        np.savez_compressed(HERE / f"petsc_couplings_{method}.npz", q=values)
+    else:
+        u = np.zeros((len(nodes), 3))
+        u[free_nodes] = values.reshape(-1, 3)
+        np.savez_compressed(HERE / f"petsc_{method}.npz", u=u)
     out = {
         "matrix_s": made,
         "setup_s": setup,

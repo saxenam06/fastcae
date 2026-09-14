@@ -41,3 +41,7 @@ tests/
 
 # Designs Go kept: generated data, a folder per project and run - rebuilt by running Go again.
 _archived_designs/
+
+# The bench's raw JSON records: written locally by its scripts, written again by running them. The
+# numbers that matter are in bench/solvers/RESULTS.md and each case's results.md.
+bench/solvers/results/**/*.json

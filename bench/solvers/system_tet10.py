@@ -25,11 +25,18 @@ QA, QB = 0.5854101966249685, 0.1381966011250105
 QUAD = np.array([[QA, QB, QB, QB], [QB, QA, QB, QB], [QB, QB, QA, QB], [QB, QB, QB, QA]])
 
 
+# Past this many unknowns the running sum no longer fits the 8 GB card beside a chunk's element
+# matrices, and each chunk's CSR is summed in host memory instead.
+ON_HOST_DOF = 1_600_000
+
+
 def stiffness_gpu(nodes: np.ndarray, tets: np.ndarray, chunk: int = 20_000) -> sp.csr_matrix:
     """The global stiffness, element matrices B^T D B computed on the GPU a chunk at a time and
-    summed into one CSR there."""
+    summed into one CSR there - or, for a mesh past ``ON_HOST_DOF``, in host memory."""
     import cupy as cp
     import cupyx.scipy.sparse as csp
+
+    on_host = 3 * len(nodes) > ON_HOST_DOF
 
     lam = E_MPA * NU / ((1 + NU) * (1 - 2 * NU))
     mu = E_MPA / (2 * (1 + NU))
@@ -72,10 +79,13 @@ def stiffness_gpu(nodes: np.ndarray, tets: np.ndarray, chunk: int = 20_000) -> s
         rows = cp.repeat(dof, 30, axis=1).ravel()
         cols = cp.tile(dof, (1, 30)).ravel()
         block = csp.coo_matrix((ke.ravel(), (rows, cols)), shape=(n, n)).tocsr()
+        if on_host:
+            block = block.get()
+            cp.get_default_memory_pool().free_all_blocks()
         total = block if total is None else total + block
         del ke, bm, gn, block
     cp.cuda.Device().synchronize()
-    return total.get()
+    return total if on_host else total.get()
 
 
 def loads(nodes, tris, group, setup) -> np.ndarray:

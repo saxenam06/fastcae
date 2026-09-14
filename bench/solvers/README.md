@@ -3,7 +3,8 @@
 Which way should fastcae solve thousands of generated designs? Every candidate solves the same
 design with the same load case, supports, material and metrics, and is judged against Code_Aster -
 agenticCAE's solver on this housing - on accuracy, time and memory. Results: [RESULTS.md](RESULTS.md);
-each case's tables and raw timings in `results/<case>/`.
+each case's table in `results/<case>/results.md`. The scripts' raw JSON records are written into
+`results/` locally and kept out of the repository; running a script again writes them again.
 
 A measurement harness for today's study, the GRC housing - not product code: the seats, loads and
 bolt circle are agenticCAE's, written in `common.py`, and the scripts read a scratch copy of the
@@ -81,8 +82,20 @@ The fast route: `build_gpu.py` rebuilds the design with that step on the GPU (a 
 function at run time, the product code unchanged); `mesh_clean.py 20 25 1.0 --gmsh` remeshes the
 field's surface, repairs it and fills it with gmsh; `against_baseline.py design7gpu` sets the
 answer beside the slow route's. Needs `pymeshlab`, `pymeshfix`, `gmsh` (and `tetgen` to try it).
-Straight from the field: `mesh_cgal.py` in WSL's `galmesh` environment (pygalmesh 0.10.7, CGAL 6.2),
-then `finish_mesh.py cgal_tets.npz`; `mesh_field.py` is the MMG attempt (`mmgpy`).
+Straight from the field: `mesh_cgal.py` in WSL - compiled (`cgal_field.cpp`, built into the
+`fieldmesh` environment by `build_cgal_field.sh`: conda-forge python 3.12, numpy, scipy, cgal-cpp,
+tbb-devel, pybind11, cxx-compiler), or `--python` through pygalmesh in the `galmesh` environment -
+then `finish_mesh.py cgal_tets.npz`; `mesh_field.py` is the MMG attempt (`mmgpy`). Its options:
+`--sizes` (a size map from `sizes.py`, or from another mesh by `sizes_from_mesh.py`), `--lines` (edge
+circles from `interface_lines.py [--seats]`) with `--edge` spacing, `--threads`, `--seed`, the sliver
+passes. `mesh_report.py` checks a mesh against its size map.
+
+The gate, on the production housing: `gate_part.py` (its field and surfaces, in a scratch project),
+`gate_regular.py` (agenticCAE's gmsh-weld-collapse-MeshFix route, `GATE_REGULAR=agentic` for its own
+sizes), `gate_cad.py` (the compiled mesher on the CAD's triangulated surface), `gate_gmsh.py` (gmsh on
+the STEP itself - it does not mesh it), `labels.py <case> --within 2.0`, `solve_aster.py <case>
+couplings`, `gate_compare.py <reference> <test> --out ...`, `gate_geometry.py` (where each mesh
+leaves the CAD), `snap_to_cad.py` (boundary nodes onto the CAD - measured, not used).
 
 Two things to know when running on one 8 GB card and 16 GB of RAM: run one GPU job at a time - a
 PETSc or CuPy process keeps its GPU memory pool until it exits - and run Code_Aster from a Linux

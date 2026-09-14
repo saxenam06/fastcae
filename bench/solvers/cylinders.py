@@ -1,6 +1,7 @@
 """The six bearing seats' and the 25 flange bolt holes' cylinders, read off the CAD: axis point, axis,
 radius and height of each - what any mesh of this housing needs to find its supports and loads by
-geometry, whoever meshed it. Written to ``cylinders.json`` beside the other shared data.
+geometry, whoever meshed it. Written to ``cylinders.json`` beside the other shared data; a case with
+a part of its own (the gate's) keeps its own ``cylinders.json``.
 
     python cylinders.py
 """
@@ -19,7 +20,18 @@ PROJECT = SCRATCH / "e2e" / "projects" / "GRC_Gearbox_Housing"
 
 
 def main() -> None:
-    features = extract.run(Project(root=PROJECT)).features
+    out = find(extract.run(Project(root=PROJECT)).features)
+    path = SCRATCH / "solve" / "cylinders.json"
+    path.write_text(json.dumps(out, indent=1), encoding="utf-8")
+    radii = sorted({round(b["radius_mm"], 2) for b in out["bolts"]})
+    print(
+        f"{len(out['bolts'])} bolt faces, radii {radii}; seats "
+        + ", ".join(f"{n}: {len(f)}" for n, f in out["seats"].items())
+    )
+
+
+def find(features) -> dict:
+    """The seats' and the flange bolt holes' cylinders among a part's CAD faces."""
     out: dict = {"seats": {}, "bolts": []}
     for name, seat in SEATS.items():
         found = []
@@ -53,13 +65,7 @@ def main() -> None:
                 "z": z.tolist(),
             }
         )
-    path = SCRATCH / "solve" / "cylinders.json"
-    path.write_text(json.dumps(out, indent=1), encoding="utf-8")
-    radii = sorted({round(b["radius_mm"], 2) for b in out["bolts"]})
-    print(
-        f"{len(out['bolts'])} bolt faces, radii {radii}; seats "
-        + ", ".join(f"{n}: {len(f)}" for n, f in out["seats"].items())
-    )
+    return out
 
 
 if __name__ == "__main__":

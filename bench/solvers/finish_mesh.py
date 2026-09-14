@@ -1,6 +1,7 @@
-"""Linear tets made elsewhere - CGAL in WSL - finished as every mesher here finishes them: TET10 with
-straight mid-side nodes, boundary triangles labelled by the design's CAD faces, the mesh's distance
-from the design's surface measured.
+"""Linear tets made elsewhere - CGAL in WSL, gmsh on the CAD - finished as every mesher here finishes
+them: TET10 with straight mid-side nodes, each boundary triangle labelled by the CAD face of the
+surface triangle nearest it (the design's surface, or the part's own), the mesh's distance from that
+surface measured.
 
     python finish_mesh.py cgal_tets.npz     # BENCH_CASE picks the case folder
 """
@@ -13,7 +14,6 @@ import sys
 import numpy as np
 from common import OUT, SEATS
 from mesh_tet10 import boundary, midside, quadratic, volume_quality
-from scipy.spatial import cKDTree
 
 
 def main() -> None:
@@ -28,11 +28,14 @@ def main() -> None:
     setup = json.loads((OUT / "setup.json").read_text(encoding="utf-8"))
     vertices, triangles, face_id = surface["vertices"], surface["triangles"], surface["face_id"]
 
+    import igl
+
     nodes10, tets10, edge_node = quadratic(nodes, tets)
     tris = boundary(tets)
     tris6 = np.hstack([tris, midside(tris, edge_node)])
-    tree = cKDTree(vertices[triangles].mean(axis=1))
-    _, nearest = tree.query(nodes[tris].mean(axis=1))
+    # The surface triangle truly nearest each boundary triangle's centre: a CAD triangulation has
+    # triangles hundreds of millimetres long, whose centres say nothing about what lies near them.
+    _, nearest, _ = igl.point_mesh_squared_distance(nodes[tris].mean(axis=1), vertices, triangles.astype(np.int64))
     tri_face = face_id[nearest]
     group = np.full(len(tris), -1, np.int64)
     names = list(SEATS)
@@ -48,8 +51,6 @@ def main() -> None:
         names=np.array([*names, "BOLTS"]),
         linear_nodes=len(nodes),
     )
-    import igl
-
     squared, _, _ = igl.point_mesh_squared_distance(nodes[np.unique(tris)], vertices, triangles.astype(np.int64))
     gap = np.sqrt(squared)
     info = {

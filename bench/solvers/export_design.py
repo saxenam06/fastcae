@@ -1,6 +1,7 @@
 """A campaign design rebuilt on the scratch copy of the project and written out for the solvers:
 its whole surface - each triangle with the CAD face it lies on - its distance field at the grid it
-was built on, and the faces of its six bearing seats and 25 flange bolt holes, found by geometry.
+was built on with the samples the design changed, and the faces of its six bearing seats and 25
+flange bolt holes, found by geometry.
 
     python export_design.py [index]     # 6 is design #7 of campaign w4zf5
 
@@ -111,6 +112,7 @@ def main() -> None:
         band_index=field.band_index,
         band_mm=field.band_mm,
         reach_mm=float(field.reach_mm),
+        changed=made.design.composition.changed.astype(np.int64),
     )
     force = loads()
     (OUT / "setup.json").write_text(
