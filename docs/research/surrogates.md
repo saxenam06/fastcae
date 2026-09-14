@@ -91,6 +91,45 @@ well they do on structural parts, and how to generate the least data that trains
 - **How much data vendors use** (see [geometry-generation.md](geometry-generation.md#the-training-data-problem)):
   about 30-100 FE solves for a surrogate on scalar metrics, hundreds for full stress fields.
 
+## How many designs, and what training costs
+
+- **Learning curves flatten.** Transolver on DrivAerStar ([2510.16857](https://arxiv.org/html/2510.16857),
+  drag, fixed test set): validation loss 0.0375 / 0.0335 / 0.0286 / 0.0266 at 400 / 800 / 1,200 /
+  12,000 designs - 24 % better to 1,200, then about 7 % for ten times the data. RegDGCNN on DrivAerNet
+  ([2403.08055](https://arxiv.org/html/2403.08055)) still improved from 560 to 2,800; on DrivAerNet++
+  variety cost about as much as size gained (R² 0.90 on one body style, 0.64 across all). Smooth
+  scalars - tilts, misalignment - level off in the hundreds; local stress keeps improving longer
+  ([de Hoop et al.](https://arxiv.org/abs/2203.13181): error falls as N^-1/2 at best, slower for
+  non-smooth outputs).
+- **Vendors train on tens to hundreds.** Ansys SimAI "typically 30 to 100 simulation results … 2 days
+  of training" ([FAQ](https://ansys.synopsys.com/products/ai/simai)); Altair PhysicsAI "at least 10 …
+  many require dozens or even hundreds" ([FAQ](https://altair.com/physicsai-studio)); a Siemens
+  gear-stress study, 64 designs trained and 17 tested ([blog](https://blogs.sw.siemens.com/simcenter/ai-accelerated-gear-stress-analysis/));
+  Rescale, "a few dozen … highly non-linear responses typically require hundreds"; PhysicsX fine-tunes
+  a pretrained model "with as little as a few tens of simulations". Thousands appear in showcases on
+  GPU fleets.
+- **Training may cost more than the data.** AB-UPT took 13.5-25 h on one H100 for 1-2 thousand designs
+  ([2510.15808](https://arxiv.org/html/2510.15808v1)); DoMINO trained on 1,000 SHIFT-SUV samples in
+  13.7 h on eight H100s. At about a minute a design, data for a round is hours; its training is a day.
+- **Mixing coarse and fine solves pays only when fine ones are dear.** A multi-fidelity scaling study
+  ([2511.01830](https://arxiv.org/html/2511.01830)) found cheap data helps at small budgets and pure
+  high fidelity wins at large ones - and gave nothing on wall shear stress, where the two fidelities
+  disagree; a coarse model would bias exactly the local stress here.
+- **Choosing designs by the model's uncertainty helps modestly.** [AL4PDE](https://arxiv.org/html/2408.01536v2):
+  up to 71 % lower error on 1D Burgers, not significant on Navier-Stokes, greedy picks sometimes worse
+  than random - so each round keeps a random share.
+- **Training on derivatives** ([DINO](https://arxiv.org/abs/2206.10745)) gains 10-20 % when data is
+  scarce - less than one doubling of data - and needs meshes consistent between neighbouring designs,
+  which ribs appearing and disappearing break.
+- **Datasets lose runs**: DeepJEB++ kept 67 % of what its pipeline tried ([2606.12994](https://arxiv.org/html/2606.12994));
+  SHIFT-Wing 2,276 of 3,000+; Inductiva's windtunnel 19,812 of 20,000. Yield is a number to report.
+- **Formats for several model families at once**: DoMINO reads an STL, a distance grid and sampled
+  surface and volume points; Transolver point clouds from the same Zarr; GINO a distance grid and
+  points; MeshGraphNet the mesh. NVIDIA's PhysicsNeMo-Curator writes Zarr or memory-mapped `.pmsh` -
+  VTU's XML parsing made its data loader 35-88× slower ([blog](https://nvidia.github.io/physicsnemo/blog/2026/04/07/physicsnemo-mesh/)).
+  [PLAID](https://arxiv.org/html/2505.02974v3) pairs CGNS files with YAML problem definitions;
+  [Croissant](https://arxiv.org/abs/2403.19546) is the standard for dataset-level metadata.
+
 ## Benchmark datasets and what they teach
 
 - [SimJEB](https://arxiv.org/abs/2105.03534) (2021): 381 brackets, 4 load cases each.
@@ -122,5 +161,8 @@ A rule-driven family of one part is closer to the parametric bracket family (2-4
 diverse one (about 30%), except where new ribs create new hot spots - the weak spot of every model.
 fastcae already has what the grid-based families need as input: a distance field per design. The
 plan takes the field model (a distance-field encoder with a point decoder, PhysicsNeMo), accuracy
-targets on a fixed test set, and active-learning rounds with a random share - see
-[../build-plan.md](../build-plan.md).
+targets on a fixed test set, and rounds that double - 300, 600, 1,200, 2,400, 4,000 - at least half
+random, stopping when a doubling stops helping - see [../build-plan.md](../build-plan.md). The labels
+carry the mesh's own noise: at about 1.2 M unknowns the same shape meshed twice differs by up to 7 %
+on the smallest seat's tilt and about 18 % on element stresses
+([field-meshing-gate.md](field-meshing-gate.md)).

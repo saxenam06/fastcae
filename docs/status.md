@@ -199,10 +199,18 @@ about 60 ms once each block was known; 20 designs of three variants took 2 s abo
 - **Bosses and bores are not yet required to go round.** Holes are; convex cylinders are still all
   bosses, and 216 on the housing are mostly rounded wall corners and edge rounds.
 - **The mesh, solver setup and results stages are not built** in the product; a design's M, S and R
-  stay empty, and nothing ranks designs but their geometry and mass. The route is measured on
-  design #7 in the bench ([research/design-to-solution.md](research/design-to-solution.md)): built with
-  the grid's distance on the GPU, meshed straight from the field by CGAL, solved by cuDSS - about 2.5
-  minutes a design, within 2.3 % of Code_Aster on the slow route; none of it is in the product yet.
+  stay empty, and nothing ranks designs but their geometry and mass. The route is measured in the
+  bench ([research/design-to-solution.md](research/design-to-solution.md),
+  [research/field-meshing-gate.md](research/field-meshing-gate.md)): built with the grid's distance on
+  the GPU, meshed from the field by a compiled CGAL mesher in 8-14 s with the seats' edges as lines,
+  solved by cuDSS - about 2 minutes a design; against the production housing's CAD, the field's answers
+  are within the noise of meshing itself. None of it is in the product yet.
+- **agenticCAE's meshing route changes the housing's geometry**: on the production housing gmsh leaves
+  out six CAD faces, MeshFix lids their holes flat (up to 242 mm across) and the repair cuts up to
+  24 mm into metal under a bearing seat - 20-53 % off on two seats' tilts. Its 490 designs were meshed
+  this way.
+- **At about 1.2 M unknowns the mesh is the largest noise**: the same field meshed twice differs by up
+  to 7 % on the smallest seat's tilt, 18 % on element stresses, 30 % on single peaks.
 - **The design's surface crosses itself** where two sheets pass closer than the grid: dual contouring
   left 2,333 crossing faces on design #7, nearly all on one 556 mm column. A mesher from the surface
   cannot fill it without a repair; meshing from the field never makes the surface.
@@ -314,19 +322,21 @@ tight integration on the housing.
 | a design built at preview - its field, surfaces and cells, checked, kept | 1.5 to 16 minutes the first time; 80 s once its windows are kept; 45-60 minutes with 262 faces thickened |
 | the preview grid | 425 × 463 × 258 = 50.8 M cells at 3 mm, 5.5 M near the surface; the full grid at 1.5 mm about 403 M |
 | design #7 of `w4zf5` (15 ribs, 11 pads) built at preview, outside the interface | 1,962 s; 79 s with the grid's distance on the GPU (bench); 2.54 M surface triangles |
-| that design meshed as TET10 | 46 s straight from the field by CGAL, 905 k unknowns; 73 s from its cleaned surface by gmsh; fTetWild 26-103 min |
-| its TET10 solve, 1.06 M unknowns | 13 s by cuDSS on the GPU (5.2 GB); 35 s PETSc multigrid on the GPU; 57 s Code_Aster, one core |
+| that design meshed as TET10 | 4-8 s from the field by the compiled CGAL mesher at the old sizes (46 s through pygalmesh), 840-860 k unknowns; 9-14 s with 2 elements through its ribs, 1.49 M; 73 s from its cleaned surface by gmsh; fTetWild 26-103 min |
+| its TET10 solve | 13 s by cuDSS at 1.06 M unknowns (5.2 GB of the card); 10 s at 1.49 M, part of the factor in host memory; 57 s Code_Aster, one core; cuDSS fails at 2.4 M |
+| the production housing, for the gate | 2,167 faces; its 3 mm field 101 s; meshed from the field 7.9 s, from its CAD surface 12.6 s, by agenticCAE's route 17 s - 1.1-1.2 M unknowns each; Code_Aster 2-2.5 min and 4.2-4.5 GB each |
 | the workstation | i7-13700HX (16 cores, 24 threads), 15.7 GB RAM, RTX 5060 Laptop 8 GB; WSL Ubuntu 24.04 with 12 GB |
 
 ## Next
 
-**Now** - the next phase in [build-plan.md](build-plan.md): first the fixes the engineer asked for
-(rib height, no floor thickening, holes seen through, builds that finish - on the GPU); the route
-and the supports decided from the measurement on design #7
-([research/design-to-solution.md](research/design-to-solution.md)) - GPU build, CGAL from the field,
-cuDSS recommended - and brought into the product; then the pipeline that meshes, solves and records
-each design, the data in rounds, the field model, and the agents that supervise it. Mould release
-with the pull and cores, and the engineer's review loop, after.
+**Now** - the next phase in [build-plan.md](build-plan.md), in its order. The compiled mesher with
+feature sizes and the gate against the production housing's CAD are done in the bench; two calls wait
+on the engineer - counting the gate passed, and the solver for a design too big for the card. Then the
+route in the product - built on the GPU, meshed from the field, solved by cuDSS with agenticCAE's
+supports, run by a runner that keeps designs in progress on the GPU and the cores at once; designs
+made for runs, with the fixes the engineer asked for (rib height, no floor thickening, holes seen
+through); the 40-design check; then the data in rounds, the field model, and the agents that
+supervise it. Mould release with the pull and cores, and the engineer's review loop, after.
 
 Alongside, on Extract:
 
@@ -364,7 +374,7 @@ Alongside, on Extract:
 | Rib ends | a rib ends on what it meets, buried in it, or stops at least the root gap short of any metal ahead - never a finger of sand between |
 | The model | paused; when it returns it writes variants and campaigns from words - never geometry, never a call per design, never scripted to an example |
 | Learning | within a project; within a client only if it opts in; never across clients |
-| Simulation | Code_Aster or CalculiX, the same design twice agreeing within 0.1%, and analysis on the distance field; results kept apart, never folded into one number |
+| Simulation | agenticCAE's load case, material and supports - kinematic couplings at the bolts, distributed couplings at the bearing bores, loads at their centre nodes; TET10 meshed from the design's field by the compiled CGAL mesher, the seats' edges as lines, labels checked corner by corner against the CAD faces; solved by cuDSS on the GPU, Code_Aster re-solving a sample; PETSc not used; results kept apart, never folded into one number |
 | Agent stack | kept in `agent/`: LangChain agent loop on LangGraph, OpenRouter (DeepSeek by default), LangSmith; conversation and checkpoints in SQLite with the project; credentials from the environment |
 | Constraints and checks | checks are code, tested against failing parts, thresholds from the variant, basis shown. A model may add rules, never checks |
 | Fidelity | preview on a coarser grid with nothing else relaxed; accept only at full |

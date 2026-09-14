@@ -252,7 +252,17 @@ Each step names what is built and what shows it done. Every step keeps the tests
 ## Next: from designs to a trained, trusted surrogate
 
 Agreed with the engineer on 14 September 2026. The research behind each choice is in
-[research/](research/README.md).
+[research/](research/README.md); how the companies building physics AI make their data, in
+[research/data-factories.md](research/data-factories.md); the field meshed against the real CAD, in
+[research/field-meshing-gate.md](research/field-meshing-gate.md).
+
+**How speed is judged.** A trusted model, not 4,000 solves, is the goal, so the data comes in rounds
+that stop when they stop helping. What counts is designs finished an hour - how many run at once times
+how fast each is. The slowest step is worked first; a step is deleted before it is sped up, compiled
+before it is moved to the GPU, and never called back and forth once per point. Speed never moves the
+answer: the setup is settled before data is made, since how bolts are held moves results 40 % where a
+mesher moves them 2 %. At thousands of designs, failures and the slowest designs matter more than the
+average.
 
 **What it is for.** ZenryxAI first as a **castable training-data factory**: a plain STEP file and its
 rules in; castable variants, meshes, solved labels and standard records out, ready for any physics-AI
@@ -263,40 +273,103 @@ product.
 ### Decided
 
 1. **Compute.** Open-source solvers. This workstation first (RTX 5060 Laptop 8 GB, 16 cores, 16 GB
-   RAM): what needs Linux (Code_Aster, PETSc, JAX) runs in WSL, the rest on Windows. RunPod for GPU
-   training when the laptop is not enough; Google Cloud, with agenticCAE's cluster, for bursts of CPU
-   solves.
-2. **Physics.** Linear static first, with agenticCAE's load case as it is - DLC 1.3 extreme, 401 kN·m on
-   the low-speed shaft - so results compare with its 490 solved designs; one load case to start, the
-   16-unit-load basis kept switchable. Modal and harmonic later, by agenticCAE's method.
-3. **The solving route, by measurement** - measured: design #7 of campaign `w4zf5` and agenticCAE's
-   design e56235, meshed with quadratic tets (TET10), solved by Code_Aster locally as the reference
-   and by cuDSS, two GPU multigrid solvers, CHOLMOD, FEniCSx and JAX-FEM on the same mesh, and
-   without a mesh by NVIDIA Warp on the voxel grid and as a cut-cell (finite cell) solve. Compared on
-   agenticCAE's metrics - bearing tilt, gear-mesh misalignment, 99.9th-percentile von Mises, largest
-   displacement - for accuracy, time and memory:
-   [../bench/solvers/RESULTS.md](../bench/solvers/RESULTS.md).
-4. **Data in rounds**, not 4,000 at once: about 300 spread evenly, train, then batches the agent picks
-   from the last results, up to 4,000. A fixed test set of about 300 is never trained on.
-5. **The field model**: stress and displacement anywhere on the part, from the design's distance
-   field (PhysicsNeMo); agenticCAE's metrics; mass computed exactly from geometry, never learned.
-6. **Accuracy and stopping**, on the test set: tilt and misalignment within 5%, p99.9 stress within
-   10%, displacement maps within 5%, stress maps within 15%, confidence ranges holding the true value
-   90% of the time. Stop when a round improves these by less than 10%, or at 4,000 designs.
-7. **Data format**: a PhysicsNeMo Zarr folder per design, a Parquet table of metrics, and a record per
-   design - its recipe, loads, solver version and every check it passed.
-8. **Publishing**: the validated GRC dataset openly, on Hugging Face under an open licence; the
-   generator stays private.
-9. **Validation**: against real FE solves now; against NREL's measured data later.
-10. **Agents**: one copilot the engineer talks to, in a dedicated Agent tab with a live log; helpers
+   RAM), its GPU and cores working at once: what needs Linux (the compiled mesher, Code_Aster) runs
+   in WSL, the rest on Windows. The same Linux build later on rented GPUs (RunPod) for large rounds,
+   and for training when the laptop is not enough.
+2. **Physics: agenticCAE's setup as it is, one version.** Linear static; DLC 1.3 extreme, 401 kN·m on
+   the low-speed shaft; its material; its supports - each of the 25 bolt positions a kinematic
+   coupling to a centre node held fixed, each of the 9 bearing bores a distributed coupling to a
+   centre node on its axis, where the service loads go in. Which nodes a coupling takes and how each
+   result is measured follow agenticCAE's code, so every design stands beside its 490 solved
+   designs. One load case to start, the 16-unit-load basis kept switchable. Modal and harmonic
+   later, by agenticCAE's method.
+3. **Solving**: quadratic tets (TET10) by cuDSS on the GPU - Code_Aster's answer to 3·10⁻¹⁰, 5 s at
+   0.9 M unknowns; past what the card holds, cuDSS keeping part of its factor in host memory (1.49 M
+   unknowns in 10 s); Code_Aster re-solving a sample as the audit. PETSc is not used. Measured on
+   design #7 of campaign `w4zf5` and agenticCAE's design e56235 against six other solvers and two grid
+   methods: [../bench/solvers/RESULTS.md](../bench/solvers/RESULTS.md); why each got its result and
+   what not choosing the others gives up: [research/solver-choice.md](research/solver-choice.md).
+4. **Meshing**: CGAL Mesh_3 straight from the design's field, through a compiled module built in
+   WSL (`bench/solvers/cgal_field.cpp`) - CGAL reads the field as a grid and interpolates it itself,
+   so none of its millions of questions leaves C++ - with surface points within 0.005 mm of the
+   field. Element sizes come from a map computed on the field: at least 2 elements through the ribs a
+   design adds, fine only where the design changes the part, up to 40 mm on the housing's own panels,
+   sizes growing 1 mm per mm away. The edges of the faces loads and supports go on - the seats' edge
+   circles - are given to the mesher as lines with vertices 8 mm apart, so those faces come out
+   exactly: at the element size the lines cut off a shoulder under a seat, at 3 mm they made the
+   seats too dense for Code_Aster's couplings. The bolt holes' circles are not given - they doubled
+   the mesh and the holes already come out right. A mesh report per design checks the sizes. Measured
+   on design #7: 1.49 M unknowns, meshed in about 10 s and solved in about 10 s on the 8 GB card;
+   against the coarser mesh it moves the worst tilt 2.8%, the largest displacement 6.4% and p99.9 4.7%
+   - the coarser mesh was too stiff. The same rules over every rib, fillet and hole of the housing
+   would take about 44 M unknowns; fillets and holes held finer only where the design changes, 2.4 M,
+   past the card. The fallback: the field's surface evened out, repaired and filled by gmsh.
+5. **The gate: the field route against real CAD** - run. The production housing with its ribs and
+   fillets (`assets/_archive/254492_0_closed_volume.step`), in a scratch project, never a project's
+   part or a source for designs, meshed four ways: the CAD's own surface by the same compiled mesher
+   (the judge); its 3 mm field (fastcae's route); the field again from another random start (the
+   noise of meshing itself); and agenticCAE's route as it ran its 490 designs - gmsh on the CAD's
+   faces, weld, collapse, MeshFix, gmsh tets. All four held to the element sizes of agenticCAE's own
+   mesh of the part (1.1-1.2 M unknowns), the same seat edge lines and labels, solved by Code_Aster
+   with agenticCAE's couplings. **The field matches the CAD within the noise of meshing itself**:
+   the leads, p99.9 and the displacement map meet their marks; the worst seat's tilt (7%), the stress
+   map (17%) and the peaks miss theirs by the same amounts meshing the same field twice moves them -
+   marks tighter than a mesh of this size holds, whichever route made it. A 3 mm field is enough.
+   agenticCAE's route leaves out six faces, lids their holes flat and cuts into metal under a seat -
+   20-53% off on two seats. Snapping the field mesh's boundary onto the CAD changed nothing that
+   matters and distorted elements. Measured in
+   [research/field-meshing-gate.md](research/field-meshing-gate.md).
+6. **A design in a run**: built with the grid's distance on the GPU; floors never thickened; faces
+   moved with their nearest-face queries on the GPU; its surface drawn only when someone opens it;
+   labelled from the part's own CAD faces - a triangle a seat's or bolt hole's when its middle is
+   nearest that face and every corner lies within 2 mm of it; weighed from its mesh; the rib-root
+   fillet measured on the field, and "the surface closed" replaced by "the mesh valid"; every check
+   timed, the slow ones made fast. About a minute a design.
+7. **Runs**: a runner outside the development server keeps 2-3 designs in progress like a conveyor -
+   the GPU builds and solves, the cores mesh, one solve at a time. A failed design is tried once more
+   on the fallback, then set aside with its reason, and the run goes on. The run's design list shows
+   each design's stage and time, designs an hour and how many were set aside; the Agent tab's log
+   the same events. A run uses the whole workstation unless a setting leaves room. The effect is
+   shown on 20 designs run one, two and three at a time, as a timeline.
+8. **The 40-design check**, before round 1: 40 designs as varied as the variants allow; at most 1 in
+   50 fails; Code_Aster re-solves 10 on the same mesh and agrees within 0.1%; every mesh report shows
+   the features held.
+9. **Data in rounds**, not 4,000 at once: 300 spread evenly, with a fixed test set of 300 never
+   trained on; then 600, 1,200, 2,400 and 4,000. At least half of each round is random, the rest
+   picked by the agent from the last results.
+10. **The field model**: stress and displacement anywhere on the part, from the design's distance
+    field (PhysicsNeMo); agenticCAE's metrics; mass computed exactly from geometry, never learned.
+11. **Accuracy and stopping**, on the test set: tilt and misalignment within 5%, p99.9 stress within
+    10%, displacement maps within 5%, stress maps within 15%, confidence ranges holding the true value
+    90% of the time. Stop when a doubling improves these by less than 10%, or at 4,000 designs.
+12. **Data format**: a PhysicsNeMo Zarr folder per design, a Parquet table of metrics, and a record per
+    design - its recipe, loads, solver version and every check it passed.
+13. **Publishing**: the validated GRC dataset openly, on Hugging Face under an open licence; the
+    generator stays private.
+14. **Validation**: the gate against real CAD and Code_Aster's re-solves now; NREL's measured data
+    later.
+15. **Agents**: one copilot the engineer talks to, in a dedicated Agent tab with a live log; helpers
     behind it - failed runs, data checks, the next batch, explanations - each labelled in the log.
     Safe, undoable steps they do themselves; anything that changes the design space or spends money
     waits for the engineer's yes. Built on LangGraph; models through OpenRouter chosen per helper - a
     cheap one for routine watching, Claude for next batches and explanations - each switchable to
     DeepSeek. No Slack or Teams.
-11. **GRC only** for now; a second part once the loop runs.
+16. **GRC only** for now; a second part once the loop runs.
 
-### First, before anything new
+### In this order
+
+1. The compiled mesher, with the size rules, the edge lines and the mesh report - built, in the
+   bench.
+2. The gate against real CAD - run; the field matches the CAD within the noise of meshing.
+3. The route in the product: each design built, meshed, solved and recorded by the runner, its
+   conveyor, and the run's design list.
+4. Designs made for runs: the fixes below, faces moved on the GPU, the surface drawn when opened,
+   labels from CAD faces, mass from the mesh, every check timed and the slow ones made fast.
+5. Runs one, two and three at a time, as a timeline.
+6. The 40-design check.
+7. Round 1.
+
+### Fixes to the designs, before the 40-design check
 
 1. **Rib height.** An end is as tall as what it actually meets, never the metal found behind it (a
    web reached 422 mm through a 494 mm column behind a 45 mm boss). Webs are no taller than where both
@@ -307,37 +380,17 @@ product.
    out, saying why.
 3. **Holes see-through.** The Field view hides the CAD faces a design cuts and draws the design's own
    surface there; the verdict adds a check that holes go through.
-4. **Builds that finish.** The face-moving step fixed (262 faces thickened spent 30-40 minutes in one
-   step); builds as background jobs with progress, outside the development server, each design saved
-   as it finishes. The build's slowest step - each grid cell's exact distance to the part - measured on
-   the GPU: design #7 in 79 s instead of 33 minutes, the same design to 0.005 mm, once the part's long
-   sliver triangles are split (see [research/design-to-solution.md](research/design-to-solution.md)).
-
 ### Open
 
-- **Job runner** - an own queue now, Dagster when the published dataset needs its lineage (see
-  [research/orchestration-and-agents.md](research/orchestration-and-agents.md)).
+- **Counting the gate passed** - the field is within the noise of meshing the CAD, but three of the
+  marks agreed are tighter than any mesh of this size holds; recommended: passed, the marks for tilt,
+  stress map and peaks read against that noise.
+- **A design too big for the card** - past what cuDSS holds with its factor partly in host memory;
+  recommended: Code_Aster in WSL, about 2-3 minutes a design, rare.
 - **Optimisation** - repair weighted by each piece's worth; pymoo on the surrogate with CP-SAT as its
-  repair, then BoTorch/Ax with real solves; the next-batch mix, recommended 50% least sure, 30% most
-  promising, 20% random (see [research/optimization.md](research/optimization.md)).
+  repair, then BoTorch/Ax with real solves (see [research/optimization.md](research/optimization.md)).
 - **Rib thickness from the floor** - with no floor thickening, 20 mm ribs on a 15 mm floor are left
   out; starting ribs at 0.6-0.8 of the floor they stand on would keep them.
-- **The solving route** - recommended by the measurement: TET10 solved by **cuDSS on the GPU** - Code_Aster's
-  answer to 3·10⁻¹⁰, 13 s at 1.06 M unknowns in 5.2 GB of the card, against Code_Aster's 57 s;
-  PETSc's multigrid on the GPU as the fallback for a design too big for the card; Code_Aster as the
-  audit a sample is re-solved against. The grid routes are not accurate enough for labels yet: the
-  voxel grid is 14-17% off on the worst tilt and worse as it refines; the cut-cell grid 6% low on it
-  and 17-19% low on the gear-mesh lead.
-- **The supports** - agenticCAE's couplings (each bolt position a rigid body about a held point, each
-  seat's force through an RBE3), which the GPU route reproduces to 2·10⁻¹⁰, so results stand beside
-  agenticCAE's 490 designs; or the bolt holes clamped. The choice moves the worst tilt by 40%.
-- **The mesher** - recommended by the measurement: **straight from the field with CGAL** - 46 s on
-  design #7, 905,154 unknowns, no slivers, nothing to repair, its answer within 2.3 % of the slow
-  route; the field's surface remeshed evenly, repaired where it crosses itself and filled by gmsh as
-  the fallback - 73 s, within 1.6 %. Ruled out by it: fTetWild (26-103 minutes, whatever its input),
-  gmsh re-parametrising the surface (stalled), TetGen (slivers; refuses a surface that crosses
-  itself), MMG on the field's grid (refines instead of coarsening). With the GPU build and cuDSS, a
-  design takes about 2.5 minutes end to end ([research/design-to-solution.md](research/design-to-solution.md)).
 
 ## Later
 
@@ -355,7 +408,13 @@ product.
 - **The part's regions and what they are for**, computed from the geometry and the drawing,
   approved by the engineer; the names the card, the agent and the results share.
 - **Scale**: an unseen housing with no code changed; campaigns spread over every core; orchestration
-  and data versioning when campaigns outgrow one machine.
+  (Dagster, when the published dataset needs its lineage) and data versioning when campaigns outgrow
+  one machine.
+- **A finer-mesh study** on a few designs, if the mesh reports ever leave doubt - the gate measured the
+  noise of meshing at 1.2 M unknowns: up to 7 % on the smallest seat's tilt, 18 % on element stresses.
+- **Fillets held to their radius** where a design changes the part - 1.72 M unknowns on design #7,
+  likely within the card - tried once the runner exists.
+- **NVIDIA's GPU mesher for implicit fields** (PhysicsNeMo 2.2, tets of one size): a one-day trial.
 
 ## Always
 

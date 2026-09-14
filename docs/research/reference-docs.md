@@ -6,9 +6,11 @@ positioning.
 - **A:** `docs/Neural Concept EV Powertrain Role  GRC Gearbox Demonstration Strategy.md`
 - **B:** `docs/End-to-End CAE + Physics-AI Portfolio for Neural Concept.md`
 - **C:** `docs/physical_ai_cast_housing_design_generation_research.md`
+- **D:** `docs/I want to reduce computational time of build and m.md`
 
-A and B are plans for applying to Neural Concept roles; C is about fastcae's own problem. None sets a
-numeric accuracy target, and none covers meshing a design that exists only as a distance field.
+A and B are plans for applying to Neural Concept roles; C is about fastcae's own problem; D is a
+study of how to shorten the build and the mesh. None of A-C sets a numeric accuracy target, and none
+covers meshing a design that exists only as a distance field.
 
 ## A. The EV powertrain role: the GRC gearbox strategy
 
@@ -73,6 +75,33 @@ DVC then lakeFS, PostgreSQL, Parquet; a design's identity is its recipe hash. "A
 silently determine ... whether a design is castable." Active learning keeps "a fixed random
 exploration fraction". It varies the alloy - which conflicts with fastcae's rule that a part is cast in
 one material; fastcae keeps one material.
+
+## D. Shortening the build and the mesh
+
+**What it proposes.** Delete work before speeding it up: skip contouring when meshing from the field,
+cache the part's field and search structure per part, express pads and moved faces as distance
+primitives, split checks into parameter, field and mesh levels; answer CGAL's field questions in
+compiled C++ with the GIL released and TBB threads; tune CGAL's sliver passes; morph a reference mesh
+for designs of the same topology; sparse narrow-band fields (OpenVDB, NanoVDB); a staged runner with
+persistent workers, one GPU owner and bounded queues; fewer high-fidelity solves through
+multi-fidelity active learning; at least two GPUs for a four-to-six-hour end-to-end campaign.
+
+**What checked out, and what fastcae took.** Answering CGAL's questions in C++ - the field mesh went
+from 46 s to 4-8 s at the same settings ([field-meshing-gate.md](field-meshing-gate.md)); CGAL's
+`Parallel_tag`, its default sliver passes, gmsh's thread options, Warp's kernel caching, OpenVDB's
+composition and VTK Flying Edges' speed are as it says. The staged runner and deleting work (the
+surface drawn only when a design is opened, floors never thickened) are in the plan.
+
+**What does not apply.** Morphing needs every design to keep the same topology; fastcae's ribs appear
+and disappear. Multi-fidelity pays when high-fidelity solves are dear; at about a minute a design they
+are not ([surrogates.md](surrogates.md)). Contouring cannot simply be skipped today: the labels, two
+checks, mass and the viewer read the surface - labels and mass move to the CAD faces and the mesh.
+
+**Its sources.** Eight footnotes point to pages that do not support the claim beside them - every
+CGAL claim cites a meshio issue, gmsh cites a piwheels page, Warp's caching a ParaView plugin, PyGeM
+a different project, fTetWild a vcpkg port, CutFEM a GitHub topic, Dask the meshio repository,
+OpenVDB's composition the mesh-to-volume header - and three links are dead. Its claims were checked
+against the tools' own documentation instead ([data-factories.md](data-factories.md)).
 
 ## Decided across them, and left open
 

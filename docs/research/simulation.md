@@ -15,7 +15,7 @@ at full) and a contoured triangle surface. From there:
 |---|---|---|
 | What happens | grid → surface → solid elements (quadratic tets, TET10/C3D10) → solver | each cell of the design's grid becomes an element; no mesh |
 | Can it fail? | meshing sometimes (fTetWild succeeds on about 98.7% of a hard test set) | no |
-| Time per design, measured here | mesh 46 s straight from the field (CGAL), solve 13 s (cuDSS on the GPU); fTetWild took 26-103 min, Code_Aster 57 s | 9-109 s on the laptop GPU (voxels, cut cells) |
+| Time per design, measured here | mesh 8-14 s straight from the field (compiled CGAL), solve 10-13 s (cuDSS on the GPU); fTetWild took 26-103 min, Code_Aster 57 s | 9-109 s on the laptop GPU (voxels, cut cells) |
 | Bearing tilt, misalignment, deflection | accurate - every TET10 solver agrees to 10⁻⁸ | measured 6-17 % off on the worst tilt, up to 36 % on the gear-mesh lead |
 | Natural frequencies | accurate | close |
 | Stress at fillets and rib roots | accurate with a fine TET10 mesh | unreliable: the grid's stair-step boundary distorts surface stress. A 99.9th-percentile stress fares better than the peak - cut cells measured within 0.4 % - but is still biased |
@@ -76,7 +76,10 @@ this workstation. Full tables: [../../bench/solvers/RESULTS.md](../../bench/solv
 | Cut cells, Warp + cuDSS, linear, 12 mm / 10 mm | 9 s / 43 s | worst tilt -6%, gear-mesh lead -17 to -19%, p99.9 within 0.4% |
 
 - On one mesh every TET10 solver gives the same answer; the difference is time. cuDSS is the
-  fastest and exact, and a design whose factorisation outgrows the card falls back to a multigrid.
+  fastest and exact; keeping part of its factor in host memory it holds 1.49 M unknowns on the card.
+  PETSc is not used; a design past that is proposed for Code_Aster. Why each solver got its result,
+  who uses the CPU and who the GPU, and what not choosing the others gives up:
+  [solver-choice.md](solver-choice.md).
 - The voxel grid moves further from the answer as it refines - its supports and loads land on the
   grid nodes nearest the surface. Cut cells get stress right but their linear cells are too stiff in
   bending; quadratic cells need a multigrid solver on the grid before they fit the card.
@@ -86,9 +89,9 @@ this workstation. Full tables: [../../bench/solvers/RESULTS.md](../../bench/solv
   gear-mesh lead within 2.4%; the GPU solves the couplings to Code_Aster's answer at 2·10⁻¹⁰.
 - The design took 33 minutes to build and 31-103 minutes to mesh with fTetWild - and both can be fast.
   Built with the grid's distance on the GPU it takes 79 s and is the same design; meshed straight
-  from its field by CGAL, 46 s, 905,154 unknowns, no slivers; solved by cuDSS, within 2.3 % of the slow
-  route everywhere. About 2.5 minutes a design, end to end. Every approach tried, and why each won or
-  failed: [design-to-solution.md](design-to-solution.md).
+  from its field by CGAL, 46 s through Python and 4-14 s compiled, no slivers; solved by cuDSS, within
+  2.3 % of the slow route everywhere. About 2 minutes a design, end to end. Every approach tried, and
+  why each won or failed: [design-to-solution.md](design-to-solution.md).
 
 ## What a "GPU solver" means
 
@@ -101,8 +104,9 @@ There are two ways to solve it:
    CalculiX). One factorisation serves many load cases at almost no extra cost. On GPU: NVIDIA cuDSS
    ([nvmath-python API](https://docs.nvidia.com/cuda/nvmath-python/latest/host-apis/sparse/generated/nvmath.sparse.advanced.direct_solver.html)),
    adopted by [COMSOL 6.4 (November 2025)](https://www.comsol.com/blogs/faster-simulation-with-nvidia-gpu-support-for-comsolmph)
-   and OptiStruct, which accepts SciPy CSR matrices - only if the factorisation fits in GPU memory,
-   roughly 1-2 M unknowns on 8 GB.
+   and OptiStruct, which accepts SciPy CSR matrices - only if the factorisation fits in GPU memory:
+   measured here, about 1.1 M unknowns wholly on the 8 GB card, 1.49 M with part of the factor in host
+   memory.
 2. **Iterative**: start from a guess and improve it step by step - conjugate gradient with a
    preconditioner, usually multigrid. Little memory, very fast on GPUs. On a regular grid every cell
    is identical, so the GPU never stores K at all: it applies it on the fly ("matrix-free"). This is
@@ -212,8 +216,11 @@ Each tried on design #7 ([design-to-solution.md](design-to-solution.md) has the 
   functions and labelled images; sharp-feature protection improved in
   [6.0.1, December 2024](https://www.cgal.org/2024/12/01/mesh3-improvements/); Python via
   [pygalmesh](https://github.com/meshpro/pygalmesh) (conda-forge, Linux - in WSL). *Measured here*:
-  straight from the field, 46 s, 905,154 unknowns, no slivers, no repair, within 2.3 % of the slow
-  route - the recommended mesher. GPL or commercial licence.
+  straight from the field, 46 s through pygalmesh - its questions answered in Python, its surface up
+  to 1.07 mm off - and 4-8 s compiled (`bench/solvers/cgal_field.cpp`), surface within 0.005 mm;
+  8-14 s with element sizes from rules and the seats' edges as lines. On the production housing its
+  answers from the 3 mm field match meshing the CAD's surface within the noise of meshing itself
+  ([field-meshing-gate.md](field-meshing-gate.md)) - the recommended mesher. GPL or commercial licence.
 - **MeshLab and MeshFix**, for the surface route: MeshLab's isotropic remeshing makes the field's
   2.54 M-triangle surface 100,000 even triangles in about 60 s; the surface, it turned out, crosses
   itself where two sheets pass closer than the grid (2,333 faces on design #7), and MeshFix patches
@@ -222,9 +229,11 @@ Each tried on design #7 ([design-to-solution.md](design-to-solution.md) has the 
   ([Labelle & Shewchuk 2007](https://people.eecs.berkeley.edu/~jrs/papers/stuffing.pdf); dihedral angles
   guaranteed between 10.7° and 164.8°). Never fails on a distance field, but element size is uniform:
   low fidelity.
-- **Tip:** after building TET10, move the mid-side nodes onto the distance field's zero surface
-  (along its gradient) - fillet curvature restored cheaply. agenticCAE's TET10 had mid-side nodes on
-  straight edges.
+- **Snapping boundary nodes onto the surface** after building TET10 - corners and mid-side nodes
+  moved onto the CAD - was measured on the production housing: it changed no answer that matters and
+  distorted elements at curved places (the stress map 27 % apart, one mesh failing in Code_Aster), so
+  it is not used ([field-meshing-gate.md](field-meshing-gate.md)). Mid-side nodes stay straight, as
+  agenticCAE's were.
 
 ## Solvers and realistic runtimes
 
@@ -276,16 +285,19 @@ place for well over 10,000 designs or for live previews in the interface.
 - **Fine cells only near ribs and fillets**, coarse elsewhere: Warp's sparse NanoVDB grids support it.
 - **On the mesh route**: gmsh's parallel mesher; PaStiX (faster than MUMPS below 1 M nodes); an AMG
   iterative solver on GPU; one factorisation shared by several load cases (Code_Aster
-  `MACRO_ELAS_MULT`); mid-side nodes snapped to the surface rather than a finer mesh.
+  `MACRO_ELAS_MULT`, or cuDSS's 0.04 s a further load case); fine elements only where a design
+  changes the part.
 - **On this laptop** (i7-13700HX, 16 cores/24 threads, 15.7 GB RAM, RTX 5060 Laptop 8 GB): one
   Code_Aster TET10 solve at a time fits (about 10 GB); memory, not cores, limits parallel work.
 
 ## Where fastcae stands
 
 Measured, on the same load case, supports and metrics as agenticCAE: the design built with its
-grid's distance on the GPU, meshed straight from its field by CGAL, solved as TET10 by cuDSS - about
-2.5 minutes a design, within 2.3 % of the slow route's Code_Aster answer - is the recommended route;
-the cleaned surface filled by gmsh is the meshing fallback, PETSc's multigrid on the GPU the solving
-fallback for a design too big for the card, Code_Aster the audit. The grid routes stay for previews
-and a low-fidelity level until a cut-cell solve with quadratic cells and a grid multigrid earns its
-place. See [design-to-solution.md](design-to-solution.md) and [../build-plan.md](../build-plan.md).
+grid's distance on the GPU, meshed straight from its field by the compiled CGAL mesher, solved as
+TET10 by cuDSS - about 2 minutes a design - is the recommended route; meshing from the 3 mm field
+matches meshing the CAD within the noise of meshing itself, while agenticCAE's own route changes the
+production housing's geometry. The cleaned surface filled by gmsh is the meshing fallback, Code_Aster
+the audit; PETSc is not used, and the solver for a design too big for the card is open. The grid
+routes stay for previews and a low-fidelity level until a cut-cell solve with quadratic cells and a
+grid multigrid earns its place. See [design-to-solution.md](design-to-solution.md),
+[field-meshing-gate.md](field-meshing-gate.md) and [../build-plan.md](../build-plan.md).

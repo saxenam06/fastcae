@@ -28,13 +28,23 @@ EDA placement legalisation, Dessia's logic programming. Applying it to casting-f
 plain STEP part, feeding FE and optimisation, looks genuinely distinctive. A team could approximate it
 on nTop with scripting and sample-and-reject, but no vendor ships it as a feature.
 
-| How variants are made | Can it add or remove ribs and holes? | How clashes (a rib over a hole) are handled |
-|---|---|---|
-| Parametric CAD sweeps (NX, CATIA driven by HEEDS or optiSLang) | only features built into the model | try, and throw away failures; nTop says 70-80% of such sweeps fail |
-| Mesh morphing (ANSA, HyperMorph) | no: shapes stretch, features stay | no new features, so no new clashes |
-| Implicit modelling (nTop) | yes | the shape never breaks, but the engineer hand-builds the clash logic in each workflow |
-| Learned generators (GeomAI, PhysicsAI Generate) | yes | plausible because they imitate past designs; checked afterwards, with no guarantee |
-| **fastcae (rules plus CP-SAT)** | **yes** | **every piece is placed from the rules, then CP-SAT keeps the largest set of pieces that obeys every rule between them, so no clash can remain - no rib has ever crossed a hole** |
+## Every way of iterating on geometry, and fastcae
+
+fastcae does not look for one best shape, and it is not a CAD modeller. It takes a plain STEP of an
+existing casting and generates thousands of variants that obey every rule encoded, then meshes and
+solves them. The other approaches start from scratch, work inside a fixed shape, or learn from past
+designs.
+
+| Approach | How variants are made | Can ribs and holes appear or disappear? | How feasibility is handled | Starts from | What comes out |
+|---|---|---|---|---|---|
+| Parametric CAD - SolidWorks, Onshape, Inventor and Fusion, NX, CATIA (AutoCAD is mostly 2D) | parameters in the feature tree changed by hand, or swept by a DOE tool (HEEDS, optiSLang) | only features modelled beforehand and switched off | the rebuild succeeds or fails - nTop says 70-80 % of automated sweeps fail; manufacturing rules checked afterwards, if at all | a clean parametric model - a legacy STEP has no tree | editable CAD |
+| Morphing - ANSA, HyperMorph, RBF Morph, PyGeM | control points push a baseline mesh | no: shapes stretch, features stay | mesh quality only | one baseline mesh | a morphed mesh |
+| Shape optimisation - OptiStruct, Tosca, adjoint solvers | one design's surface moved along its sensitivities | no | some constraints - least thickness, draw direction | a good starting design and its loads | one improved design |
+| Topology optimisation - OptiStruct, Ansys, Fusion | material laid out from the loads | yes | draw direction and least member size available; the result is a density field, redrawn by hand | a design space and its loads | a handful of organic shapes per setup |
+| Generative design - Fusion, nTop | topology-optimisation-style options with manufacturing presets | yes | presets - draft, parting line, least wall; the shapes still need cleaning up | loads and keep-outs | new organic shapes, not variants of an existing part |
+| Learned generators - Ansys GeomAI, Siemens PhysicsAI Generate, Neural Concept's Copilot | a model trained on past designs | yes | imitates the style of past designs; rules not checked - 6-69 % validity in independent tests | many past designs | plausible shapes, not guaranteed |
+| Implicit modelling - nTop | field-based workflows; ribs from 2D pattern graphs | yes | the geometry never breaks - 2,400 variants, no failures; clash logic hand-built in each workflow, no solver for combinations | a workflow the engineer builds per part | geometry and meshes |
+| **fastcae** | **variants - each one change in one place - placed by rules, repaired by CP-SAT, built as a distance field** | **yes: which ribs, pads and holes exist is part of the design space** | **every design obeys every encoded rule, each piece left out says why, nothing to heal - no rib has ever crossed a hole** | **a plain STEP and its drawing** | **field, mesh, labels and solved results** |
 
 ## Parametric CAD with optimiser wrappers
 
@@ -172,9 +182,74 @@ What is not distinctive: generating ribs (nTop, Synera, OptiStruct), robust geom
 surrogate optimisation (everyone), rule checking (DFMPro, Knowledge Expert), the mathematics
 (independent sets, SAT, Dessia).
 
-Limits of the current repair (`src/fastcae/generate/repair.py`): it minimises the number of pieces
-left out, holes before ribs on a tie; it is deterministic (one worker, seed 0), which suits
-optimisation; it is value-blind - it keeps the most pieces, not the most useful ones, not knowing
+### What it gives
+
+- **Starts from a plain STEP.** No feature tree, and no parametric model built by hand - what the
+  delivery teams build per customer ([data-factories.md](data-factories.md)).
+- **Topology is part of the design space.** Ribs, pads and holes appear, disappear and combine;
+  morphing and shape optimisation cannot do that.
+- **Valid by construction, at scale.** Placing and screening a design takes tens of milliseconds; every
+  design comes back from its seed and recipe hash; nothing fails to rebuild silently.
+- **Robust geometry.** A distance field is always a closed solid, and it meshes straight from the field
+  with nothing to heal. On the production housing the regular CAD route left out six faces, and MeshFix
+  lidded their holes flat, up to 242 mm across ([field-meshing-gate.md](field-meshing-gate.md)).
+- **Interfaces held.** Bearing seats, bolt holes and the faces a drawing controls come out unchanged,
+  cell for cell.
+- **Explainable.** Each rule has a source; each piece left out names the rule it broke.
+- **Data-ready.** It is the training-data factory the market is short of.
+
+### Where it is not enough yet
+
+- **Feasible is not yet fully castable.** Mould release - the pull direction, cores, draft,
+  undercuts - is not checked; there is no solidification or porosity simulation; the thick-spot check is
+  a geometric stand-in.
+- **Only the rules and changes encoded**: ribs, webs, faces moved, holes. Ribs stand only on flat
+  faces; a rib that would reach a hole is left out rather than ended short; nothing organic.
+- **Not an optimiser on its own.** It makes feasible designs; choosing the best needs the surrogate
+  and the optimiser planned.
+- **Variety stays within the patterns** - parallel ribs, grids, spokes, free lines - until free layouts
+  grown from a graph of legal connections come, the solver choosing which to join.
+- **No editable CAD feature tree comes out.**
+- **Fidelity**: the 3 mm grid rounds sharp edges by about a millimetre. On the production housing the
+  field's answers match meshing the CAD within the noise of meshing itself
+  ([field-meshing-gate.md](field-meshing-gate.md)). The drawn surface can cross itself where two
+  sheets pass closer than the grid; meshing from the field never draws it.
+
+### How the gaps close
+
+- **Mould release** with the pull direction and cores; then draft and undercut maps.
+- **A casting-process check** on the top candidates, in MAGMA or Inspire Cast.
+- **Free layouts** from the graph of legal connections, for layouts no pattern makes.
+- **Optimisation**: the surrogate and optimiser choose the best feasible design; shape optimisation or
+  morphing then polishes it within its fixed topology.
+- **Topology optimisation as a proposer**: its density field suggests where ribs want to be, and
+  CP-SAT picks feasible layouts that follow it.
+- **CAD for the winners only**: each recipe is parametric - rib paths, thicknesses, fillets - so the
+  chosen few can be rebuilt as B-rep features.
+- **Learned generators as customers**: rule-valid datasets are what they train on.
+
+### How every variant is feasible
+
+Feasible means it obeys every rule encoded and checked. The rules are enforced in layers, cheapest
+first; whatever fails a layer is mended or dropped before the next:
+
+1. **Only checkable rules are offered.** A rule the pipeline cannot hold a design to is not on the card.
+2. **Each piece is placed by the rules.** A rib stands on a support with its ends buried in what it
+   meets; keeps clear of named faces, measured from its footprint; keeps clear of holes and bores in
+   three dimensions; is no taller than its limit; walls too thin for it get pads.
+3. **CP-SAT holds the rules between pieces** - root gap, wedges of sand, hole ligaments, X crossings:
+   it keeps the most pieces that obey them all and records what it left out.
+4. **Screening** re-checks the placed design.
+5. **The field build cannot make an invalid solid**: there are no Booleans to fail, and protected
+   cells keep the interfaces untouched.
+6. **Checks on the built shape**: rib thickness, root gap, fillets achieved, sand fingers at rib ends,
+   blends not bridging or clipped, thick spots, nothing floating, the surface closed. A design that
+   fails is rejected; one repair cannot save is drawn again.
+
+### Limits of the repair
+
+The repair (`src/fastcae/generate/repair.py`) minimises the number of pieces left out, holes before
+ribs on a tie; it is deterministic (one worker, seed 0), which suits optimisation; it is value-blind - it keeps the most pieces, not the most useful ones, not knowing
 which rib carries load; it makes the mapping from an optimiser's proposal to the realised design
 discontinuous; pairwise rules are not castability - hot spots, feeding and porosity still need
 screening or casting simulation; and the guarantee is only as good as the rule set.

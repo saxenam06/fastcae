@@ -5,23 +5,24 @@ than one way on this workstation (i7-13700HX, 16 cores, 15.7 GB RAM, RTX 5060 La
 12 GB). The design: #7 of campaign `w4zf5` - six variants, 15 ribs and 11 pads on the GRC housing,
 128,942 cm³, 915.5 kg. The yardstick: the slow route - a 33-minute build, a 103-minute fTetWild
 mesh, Code_Aster - on agenticCAE's load case, supports and metrics. September 2026; everything here
-measured, nothing estimated. Tables and raw timings: [../../bench/solvers/RESULTS.md](../../bench/solvers/RESULTS.md)
-and `bench/solvers/results/`.
+measured, nothing estimated. Tables: [../../bench/solvers/RESULTS.md](../../bench/solvers/RESULTS.md);
+the scripts write their raw records locally into `bench/solvers/results/`.
 
 ## In one table
 
 | Step | Slow route | Fast route | Fallback |
 |---|---:|---:|---:|
 | Build the design | 1,962 s - exact distances on the CPU | **79 s** - the same distances on the GPU | - |
-| Mesh it | 6,174 s - fTetWild | **51 s** - CGAL meshing the field itself | 73 s - the field's surface cleaned, gmsh |
-| Assemble and solve | 57 s - Code_Aster, one core | **10 s** - cuDSS on the GPU | 35 s - PETSc multigrid on the GPU |
-| A design, end to end | about 2.3 hours | **about 2.5 minutes** | about 3 minutes |
+| Mesh it | 6,174 s - fTetWild | **4-14 s** - CGAL meshing the field itself, compiled (46 s through Python) | 73 s - the field's surface cleaned, gmsh |
+| Assemble and solve | 57 s - Code_Aster, one core | **10 s** - cuDSS on the GPU | Code_Aster, for a design too big for the card (proposed) |
+| A design, end to end | about 2.3 hours | **about 2 minutes** - about 1 with the agreed build changes | about 3-4 minutes |
 
-The fast route's answer against the slow route's: every seat's tilt within 2.3 %, the gear-mesh
-leads within 1.2 %, the 99.9th-percentile stress within 1.2 %, the largest displacement within 0.2 %
-- the spread the slow route's own two meshes of this design show (1.8-3.5 %), and inside the accuracy
-the build plan asks of training data. At 2.5 minutes a design, 4,000 designs take about a week on
-this machine one at a time.
+The fast route's answer against the slow route's (the field meshed through Python, 905,154
+unknowns): every seat's tilt within 2.3 %, the gear-mesh leads within 1.2 %, the 99.9th-percentile
+stress within 1.2 %, the largest displacement within 0.2 % - the spread the slow route's own two
+meshes of this design show (1.8-3.5 %), and inside the accuracy the build plan asks of training data.
+At about 2 minutes a design, 4,000 designs take five to six days on this machine one at a time; at
+about a minute, under three.
 
 ## The words, plainly
 
@@ -66,10 +67,67 @@ this machine one at a time.
 
 ## 1. Building the design
 
-The build takes the part's cached field, blends in ribs and pads with their fillets, moves faces and
-cuts holes. The fillets need the part's exact distance near every rib, so the build measures, cell by
-cell, the distance to the CAD's triangles - point against triangle, on the CPU, about 70,000 cells a
-second. That one step was nearly all of design #7's 33 minutes.
+Every design is stored as a distance map: a grid of points 3 mm apart at preview, each knowing how far
+it is from the part's surface, negative inside the metal and positive outside. The surface is where
+the distance is zero. Adding a rib, thickening a floor or cutting a hole is an edit to the map;
+drawing the surface at the end turns the map back into a shape that can be seen and checked. How each
+edit is made: [../generate.md](../generate.md).
+
+### Once per part, kept
+
+1. **The CAD read**: its faces, and their triangles - 133,102 on the housing - each triangle knowing
+   the CAD face it came from.
+2. **The part's own distance map**, exact within 3 cells (9 mm) either side of the surface - the band -
+   and only a sign beyond. 101 s on the CPU for the production housing at 3 mm.
+3. **The part's surface**, contoured whole.
+4. **For the GPU**, the part's triangles split to at most 16 mm (3 s; below).
+
+### Each design, once its patterns are decided
+
+Design #7 - six variants, 15 ribs and 11 pads - on the fast build (`bench/solvers/build_gpu.py`):
+
+| Step | What happens | Where | Design #7 |
+|---|---|---|---:|
+| 1. Place | From the variant's settings and the design's seed, pattern lines are laid on each floor. Each line is cut into ribs where it runs between supports - walls, bosses, rings. Pads, holes and raised floors are added. A plan of where things go, nothing 3D yet | CPU | a fraction of a second |
+| 2. Repair | Where pieces clash - too close for the sand between them, a narrow wedge, a hole on a rib, an X crossing - CP-SAT drops the fewest pieces so the rest obey every rule; each dropped piece records why | CPU | milliseconds; 2 pieces left out |
+| 3. Screen | Quick rule checks on the plan before any 3D work | CPU | 0.01 s |
+| 4. Move faces | Floors marked for thickening pushed outward by editing the map near them - on #7, three floors raised 10, 10 and 5 mm: nearest-face searches, and the exact distance to the part in a window round the faces moved | CPU, GPU | 17 s |
+| 5. Exact distances round the new ribs | The stored map is exact only within 9 mm of the part, but tall ribs and their fillets reach further, so in a window round where the ribs go the exact distance to the part is computed, and protected areas - bearing seats and the like - are marked. Kept once per region | GPU, CPU | 3 s |
+| 6. Blend ribs and pads in | Each rib's own shape - thickness, height, draft - merged into the map, with round fillets where it meets the floor and walls; pads the same way | CPU | 2.5 s |
+| 7. Cut holes | Hole shapes subtracted from the map | CPU | none on #7 |
+| 8. Draw the surface | Dual contouring re-draws the cells the design changed and splices them into the part's surface. Each triangle keeps the CAD face it is nearest, so seats and bolt faces are known later; volume and faults are reported | CPU | 23 s |
+| 9. Check | The [checks](../generate.md#checks): protected areas unchanged, within the grid, nothing floating, rib thickness, rib against wall, root gap, the root fillet (read off the surface), rib ends, blends bridging or clipped, thick spots, the surface closed (read off the surface) | CPU | 25 s |
+| 10. Weigh and save | Mass and added volume from the surface; the viewer's surfaces and the verdict saved. The bench also writes out the map, the surface and which faces are seats and bolts | CPU | - |
+
+The exact distances of steps 4 and 5 take 8 s on the GPU in all, 3 s of it splitting the part's
+triangles once; the same distances on the CPU were 33 minutes. The whole build: about 80 s.
+
+### After the build - the rest of the route, in the bench
+
+1. **Mesh**: CGAL straight from the map, compiled - 8-14 s with element sizes from the rules and the
+   seats' edges as lines; 1.49 M unknowns on design #7.
+2. **TET10 and labels**: mid-side nodes added; seats and bolt holes labelled from the CAD faces;
+   about 5 s.
+3. **Assemble and solve**: on the GPU with cuDSS, about 10-15 s.
+
+### What the agreed changes do to the list
+
+From the [build plan](../build-plan.md):
+
+- **Step 4 loses its floors.** Floors are never thickened for ribs; a rib too thick for its floor is
+  left out, saying why. Design #7's 17 s goes; a variant that moves faces itself keeps the step, its
+  nearest-face searches on the GPU.
+- **Step 8 is skipped for dataset designs.** The surface is drawn only when someone opens a design;
+  labels come straight from the part's CAD faces, and mass from the mesh.
+- **Step 9 is timed check by check** and the slow checks made fast; the two that read the surface move
+  to the field (the root fillet) and to the mesh ("the mesh valid" for "the surface closed").
+- A build of about 80 s becomes about 20 s, and a design end to end about a minute.
+
+### The slowest step, on the GPU
+
+The fillets need the part's exact distance near every rib, so the build measures, cell by cell, the
+distance to the CAD's triangles - point against triangle, on the CPU, about 70,000 cells a second.
+That one step was nearly all of design #7's 33 minutes.
 
 **On the GPU**, the same question against a bounding-volume hierarchy of the triangles (NVIDIA Warp)
 answers all 5.9 M cells of the design's band in 0.02 s, after 3 s to build the tree once for the part.
@@ -149,8 +207,15 @@ removes slivers.
 No surface is made, so nothing needs repairing. At 2 mm its answer is within 2.3 % of the slow route
 on every tilt, 1.2 % on the leads, 1.2 % on p99.9. At 1 mm CGAL refines every small fillet and hole;
 3.37 M unknowns neither assemble nor factor on the 8 GB card. Nearly all of the 46 s is 18 M questions
-to the field answered in Python, about 2.5 µs each - a compiled field function would take it to
-seconds. Without feature lines it rounds sharp edges at the facet size.
+to the field answered in Python, about 2.5 µs each. pygalmesh also leaves CGAL's surface tolerance at
+its default, a thousandth of a box round a sphere about the origin: surface points up to about 1.1 mm
+from where the field is zero on the housing, whose sphere is 1,241 mm - part of the boundary spread
+above. Without feature lines it rounds sharp edges at the facet size.
+
+**Compiled** (`bench/solvers/cgal_field.cpp`), the questions are answered in C++ inside CGAL: the same
+sizes mesh in 4.4 s on four cores, the surface within 0.005 mm of the field; with element sizes from
+the rules and the seats' edges given as lines, 8-14 s. Measured, and checked against meshing the CAD
+itself, in [field-meshing-gate.md](field-meshing-gate.md).
 
 ## 3. Solving
 
@@ -168,9 +233,10 @@ On one mesh every TET10 solver gives the same answer; what differs is time and m
 | FEniCSx, its own assembly, conjugate gradient + GAMG, one core | 253 s | 7·10⁻⁸ | 2 GB |
 | PETSc conjugate gradient + GAMG, CPU | 316 s | 2·10⁻⁹ | |
 
-- **cuDSS is the solver.** Exact, fastest, and it fits a design this size on the card. Its ceiling is
-  about 1.1 M unknowns (5.2-6.1 GB used); past it PETSc's multigrid on the GPU, whose setup products
-  run on the CPU.
+- **cuDSS is the solver.** Exact, fastest, and it fits a design this size on the card: about 1.1 M
+  unknowns wholly on it (5.2-6.1 GB used), 1.49 M with part of its factor in host memory; 2.4 M
+  failed. PETSc is not used; a design past that is proposed for Code_Aster. Why each solver got its
+  result, and what not choosing the others gives up: [solver-choice.md](solver-choice.md).
 - **FEniCSx** assembles the system itself and agrees to 7·10⁻⁸ - the independent check on the
   assembly every GPU solver shares.
 - **JAX-FEM** is exact once handed the seat faces; its value is gradients for optimisation, not speed.
@@ -205,23 +271,28 @@ On one mesh every TET10 solver gives the same answer; what differs is time and m
 ## The route this points to
 
 1. **Build** with the grid's distance on the GPU, the part's long triangles split once.
-2. **Mesh** straight from the field with CGAL, surface facets within 2 mm - about 0.9 M unknowns; the
-   cleaned surface filled by gmsh as the fallback.
-3. **TET10** with straight mid-side nodes, labelled by CAD face.
-4. **Assemble** on the GPU and **solve** with cuDSS; PETSc's multigrid on the GPU for a design too
-   big for the card; Code_Aster on a sample, as the audit.
+2. **Mesh** straight from the field with the compiled CGAL mesher - 8-14 s, surface within 0.005 mm
+   of the field - its sizes 2 elements through the ribs a design adds and up to 40 mm on the part's
+   panels (1.49 M unknowns on design #7), the seats' edges given as lines 8 mm apart; the cleaned
+   surface filled by gmsh as the fallback. Measured against meshing the CAD itself in
+   [field-meshing-gate.md](field-meshing-gate.md).
+3. **TET10** with straight mid-side nodes; a boundary triangle a seat's or bolt hole's when its middle
+   is nearest that CAD face and its corners lie within 2 mm of it.
+4. **Assemble** on the GPU and **solve** with cuDSS, part of its factor in host memory past what the
+   card holds (1.49 M unknowns in 10 s); Code_Aster on a sample, as the audit.
 
-About 2.5 minutes a design; the steps use different parts of the machine (CPU checks and contouring,
-GPU distances and solves, CGAL in WSL), so overlapping designs shortens a campaign further.
+About 2 minutes a design today; the steps use different parts of the machine (CPU checks and
+meshing, GPU distances and solves), so overlapping designs shortens a campaign further.
 
 ## What still has to happen
 
-- **Into the product**: the GPU distance in the build and the field mesher as a pipeline stage, with
-  tests; Warp and CGAL (pygalmesh) become dependencies.
-- **A compiled field function** for CGAL - its 46 s is Python answering questions.
+- **Into the product**: the GPU distance in the build, the compiled field mesher and the solve as
+  pipeline stages under a runner, with tests; Warp, CuPy, nvmath and CGAL become dependencies.
+- **A design too big for the card**: PETSc is not used; the fallback solver is open - Code_Aster in
+  WSL, about 2-3 minutes, is proposed.
 - **The contouring where sheets cross** - the design's surface should never pass through itself.
-- **The supports** - the engineer's decision: agenticCAE's couplings, which keep the data beside its
-  490 solved designs, or clamped holes.
+- **The supports**: agenticCAE's couplings, as decided - kinematic at the bolts, distributed at the
+  bearing bores, loads at their centre nodes.
 - **Licences**: MeshLab, MeshFix and gmsh are GPL, CGAL GPL or commercial, TetGen AGPL. A hosted
   service is not distribution; shipping the software to a customer would be.
 
@@ -251,4 +322,4 @@ GPU distances and solves, CGAL in WSL), so overlapping designs shortens a campai
 - **mmgpy 0.17** (MMG 5.8): vertices and elements set together, the level set as an N×1 array, the
   inside is reference 3.
 - **pygalmesh 0.10.7** is on conda-forge for Linux, not Windows; a domain written in Python costs
-  about 2.5 µs a question.
+  about 2.5 µs a question; it never sets CGAL's `relative_error_bound`.
