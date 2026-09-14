@@ -37,6 +37,7 @@ from .slots import (
     Given,
     _fillet_floor,
     _through,
+    height_setting,
     infer,
 )
 
@@ -105,8 +106,9 @@ def fill(
     values, the ``pull``, what is ``needed`` and wrong (``problems``), and why nothing can build
     it yet (``cannot``) - with a ``note`` on where each reading came from.
 
-    Every range the part suggests steps by five in its unit, its ends on fives - a height by five
-    percent - and ribs may take the free pattern among the rest: see :func:`_levers`."""
+    Every range the part suggests steps by five in its unit, its ends on fives - a height in
+    thicknesses by halves - and ribs may take the free pattern among the rest: see
+    :func:`_levers`."""
     filled = _fill(extraction, exit_along, block, floor_radius)
     if filled.get("free") is not None:
         _levers(filled["free"], block.get("add") or "ribs", block.get("given") or {})
@@ -125,19 +127,20 @@ def start(free: dict[str, dict], kind: str, given: dict[str, Any]) -> None:
         return
     start = knowledge.rib_start()
     basis = str(start["source"])
-    for name in ("thickness_mm", "spacing_mm", "height_fraction"):
+    for name in ("thickness_mm", "spacing_mm"):
         if name in free and name not in given and name in start:
             value = float(start[name])
             free[name] = {**free[name], "low": value, "high": value, "suggested": value}
             free[name].update(source="default", basis=basis)
-    if "count" in free and "count" not in given and "count" in start:
-        count = start["count"]
-        free["count"] = {
-            **free["count"],
-            **{k: count[k] for k in ("low", "high", "step", "suggested")},
-            "source": "default",
-            "basis": basis,
-        }
+    for name in ("count", "height_thicknesses"):
+        if name in free and name not in given and name in start:
+            ranged = start[name]
+            free[name] = {
+                **free[name],
+                **{k: ranged[k] for k in ("low", "high", "step", "suggested")},
+                "source": "default",
+                "basis": basis,
+            }
     most = int(start.get("choices") or 3)
     for name in ("root_fillet_mm", "edge_round_mm", "draft_deg"):
         domain = free.get(name)
@@ -150,10 +153,10 @@ def start(free: dict[str, dict], kind: str, given: dict[str, Any]) -> None:
         free[name].pop("weights", None)
 
 
-# How far apart what a range takes is, when the part suggests it: five in its own unit - a height,
-# five percent of what its ends meet.
+# How far apart what a range takes is, when the part suggests it: five in its own unit - a height
+# in thicknesses by halves, and one said as a share of what its ends meet by five percent.
 STEP = 5.0
-HEIGHT_STEP = 0.05
+STEPS = {"height_thicknesses": 0.5, "height_fraction": 0.05}
 # The most free layouts a block of ribs draws from: seeds, each the same lines every time.
 LAYOUTS = 9999
 
@@ -196,7 +199,7 @@ def _levers(free: dict[str, dict], kind: str, given: dict[str, dict]) -> None:
         low, high = domain.get("low"), domain.get("high")
         if low is None or high is None or low == high:
             continue
-        step = HEIGHT_STEP if name == "height_fraction" else STEP
+        step = STEPS.get(name, STEP)
         inner_low = math.ceil(round(float(low) / step, 9)) * step
         inner_high = math.floor(round(float(high) / step, 9)) * step
         if inner_low > inner_high:
@@ -774,14 +777,9 @@ def _hanging(
         "unit": "°",
         "basis": "a conventional draft",
     }
+    # Level, by default: a web stands where both of what it joins do, no taller than the lower.
     free["top"] = {"options": ["level", "slope"], "suggested": "level"}
-    free["height_fraction"] = {
-        "low": 0.5,
-        "high": 1.0,
-        "step": 0.1,
-        "suggested": 1.0,
-        "basis": "from half to all of what each end meets",
-    }
+    free["height_thicknesses"] = height_setting()
     free.update(given)
     section = given.get("section")
     if section is not None and "T" in (section.get("options") or []):

@@ -18,6 +18,8 @@ import copy
 import hashlib
 import json
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -27,14 +29,15 @@ from ..extract import Extraction
 from ..project import Project
 from ..spec import HoleSet, Placement, Version
 from ..study import INTERFACE_CLEARANCE_MM
-from .checks import Finding, Rules, check
+from .checks import Finding, Rules, check, holes_through, timed
 from .compose import CODE_COMPOSE, Composition, compose, margin_for, window_between
 from .designs import Design, _worst
+from .distance import backend
 from .field import Field, field_for
 from .holes import cut
 from .placement import Drilled, Placed, _Faces, place_all, root_gap_of
 from .repair import repair
-from .screen import face_offsets, measure_walls, raised_floors, screen
+from .screen import face_offsets, measure_walls, screen
 from .surface import Surface, recontour, surface_for
 from .thicken import move_faces, moved_faces
 
@@ -105,6 +108,26 @@ class Made:
     fidelity: str = "preview"
 
 
+class Clock:
+    """How long each step of a build takes, in seconds, by name - added up when a step runs
+    twice."""
+
+    def __init__(self) -> None:
+        self.times: dict[str, float] = {}
+
+    @contextmanager
+    def __call__(self, name: str) -> Iterator[None]:
+        started = time.perf_counter()
+        try:
+            yield
+        finally:
+            self.times[name] = self.times.get(name, 0.0) + time.perf_counter() - started
+
+    def said(self) -> dict[str, float]:
+        """Each step's time, to the millisecond."""
+        return {name: round(seconds, 3) for name, seconds in self.times.items()}
+
+
 def make(
     opened: Opened,
     version: Version,
@@ -112,13 +135,20 @@ def make(
     *,
     finder: _Faces | None = None,
     memo: dict | None = None,
+    surface: bool = True,
 ) -> Made:
     """The design ``version`` describes with ``levers`` applied. See the module note.
 
     In order: the faces it moves, exactly; its ribs and their pads, filleted to the part where it
-    now is; its holes, cut. Then the checks - on the part as moved, what ribs stand on and end on -
-    and what screening found besides."""
+    now is; its holes, cut; its surface drawn - re-contoured where it changed. Then the checks - on
+    the part as moved, what ribs stand on and end on - and what screening found besides. Every step
+    and every check is timed: ``stats["steps"]``, and each finding's ``seconds``.
+
+    ``surface`` False leaves the surface undrawn, and the one check that reads it: the field is
+    built and checked all the same, and weighed from the field - what a design built for a dataset
+    needs, whose surface is drawn only when someone opens it."""
     started = time.perf_counter()
+    clock = Clock()
     levers = dict(levers or {})
     placements = _apply(version, levers)
     extraction = opened.extraction
@@ -130,18 +160,20 @@ def make(
     # Each block after those it keeps clear of, on the part with its faces moved - then mended as
     # a campaign mended it, the fewest pieces left out so no rule between them breaks: the design
     # built is the design screened.
-    placed = place_all(
-        opened.base,
-        features,
-        extraction.atlas,
-        tess,
-        placements,
-        version.holes,
-        offsets=face_offsets(features, version.offsets),
-        finder=finder,
-        memo=memo,
-    )
-    mended = repair(opened.base, placements, version.holes, placed)
+    with clock("place"):
+        placed = place_all(
+            opened.base,
+            features,
+            extraction.atlas,
+            tess,
+            placements,
+            version.holes,
+            offsets=face_offsets(features, version.offsets),
+            finder=finder,
+            memo=memo,
+        )
+    with clock("repair"):
+        mended = repair(opened.base, placements, version.holes, placed)
     placed = mended.placed
     ribs = [rib for p in placements for rib in placed[p.id].ribs]
     pads = [pad for p in placements for pad in placed[p.id].pads]
@@ -155,22 +187,31 @@ def make(
     radii = [fillet_of[owner] for owner in owner_of]
     radius = max(radii, default=0.0)
 
-    constraints = [f for p in placements for f in _constraints(p, placed[p.id])]
-    constraints += [f for hs in version.holes for f in _hole_constraints(hs, placed[hs.id])]
-    screened = screen(
-        features,
-        opened.base,
-        placements,
-        version.holes,
-        version.offsets,
-        version.material,
-        placed,
-        measure_walls(extraction, finder.exit_along, version.offsets),
-        opened.surface.volume_mm3,
-    )
+    with clock("screen"):
+        constraints = [f for p in placements for f in _constraints(p, placed[p.id])]
+        constraints += [f for hs in version.holes for f in _hole_constraints(hs, placed[hs.id])]
+        screened = screen(
+            features,
+            opened.base,
+            placements,
+            version.holes,
+            version.offsets,
+            version.material,
+            placed,
+            measure_walls(extraction, finder.exit_along, version.offsets),
+            opened.surface.volume_mm3,
+        )
     # What screening holds a design to that the checks do not: the rest the checks say again.
     constraints += [
-        Finding(f["check"], f["outcome"], f["reason"], f["rule"], True, section="check")
+        Finding(
+            f["check"],
+            f["outcome"],
+            f["reason"],
+            f["rule"],
+            True,
+            section="check",
+            seconds=screened.seconds.get(f["check"], 0.0),
+        )
         for f in screened.findings
         if f["check"] in SCREENED_ONLY
     ]
@@ -178,19 +219,19 @@ def make(
     field = opened.base
     changed: list[np.ndarray] = []
     shift = None
-    # The faces the design moves: its own, and floors thickened for ribs too thick for them.
-    offsets = [*version.offsets, *raised_floors(features, placed)]
-    if offsets:
-        kept_closed = _interface_faces(features) - moved_faces(features, offsets)
-        moved = move_faces(
-            opened.base,
-            tess,
-            features,
-            offsets,
-            kept_closed,
-            INTERFACE_CLEARANCE_MM,
-            opened.patches,
-        )
+    # The faces the design moves - its variants' own; a floor is never moved for its ribs.
+    if version.offsets:
+        with clock("move faces"):
+            kept_closed = _interface_faces(features) - moved_faces(features, version.offsets)
+            moved = move_faces(
+                opened.base,
+                tess,
+                features,
+                version.offsets,
+                kept_closed,
+                INTERFACE_CLEARANCE_MM,
+                opened.patches,
+            )
         field, shift = moved.field, moved.shift
         changed.append(moved.changed)
     composition = Composition(field=field, changed=np.empty(0, dtype=np.int64))
@@ -198,26 +239,50 @@ def make(
     if placements and not ribs:
         reasons = "; ".join(_why_none(placed[p.id]) for p in placements)
         findings.append(
-            Finding("ribs placed", "reject", f"no rib could be placed: {reasons}", "", False)
+            Finding(
+                "ribs placed",
+                "reject",
+                f"no rib could be placed: {reasons}",
+                "",
+                False,
+                seconds=screened.seconds.get("ribs placed", 0.0),
+            )
         )
     window = None
     if solids:
-        window = _window(opened, placements, placed, solids, radius)
-        composition = compose(field, window, solids, radii, shift=shift)
+        with clock("window"):
+            window = _window(opened, placements, placed, solids, radius)
+        with clock("compose"):
+            composition = compose(field, window, solids, radii, shift=shift)
         changed.append(composition.changed)
     if holes:
-        cutting = cut(composition.field, holes)
+        with clock("cut holes"):
+            cutting = cut(composition.field, holes)
         composition.field = cutting.field
         changed.append(cutting.changed)
     every = np.unique(np.concatenate(changed)) if changed else np.empty(0, dtype=np.int64)
-    surface = opened.surface
-    if every.size:
-        surface = recontour(opened.surface, composition.field, every, face_ids_from=tess)
-    if solids and window is not None and rules is not None:
-        owners = dict(zip(solids, owner_of, strict=True))
-        findings += check(field, window, composition, solids, surface, rules, owners, shift)
-    else:
-        findings.append(_surface_check(surface))
+    composition.changed = every
+    drawn: Surface | None = None
+    if surface:
+        drawn = opened.surface
+        if every.size:
+            with clock("recontour"):
+                drawn = recontour(opened.surface, composition.field, every, face_ids_from=tess)
+    with clock("checks"):
+        if solids and window is not None and rules is not None:
+            owners = dict(zip(solids, owner_of, strict=True))
+            findings += check(field, window, composition, solids, drawn, rules, owners)
+        elif drawn is not None:
+            findings += timed(_surface_check, drawn)
+        if holes:
+            findings += timed(holes_through, field, composition.field, holes)
+    with clock("weigh"):
+        taken = cut_faces(opened.base, composition.field, every, tess)
+        if drawn is not None:
+            volume, weighed = drawn.volume_mm3, "surface"
+        else:
+            added = volume_change(opened.base, composition.field, every)
+            volume, weighed = opened.surface.volume_mm3 + added, "field"
 
     chosen = knowledge.material(
         version.material.material if version.material else knowledge.default_material()[0]
@@ -229,7 +294,7 @@ def make(
         digest=_digest(opened, version, levers),
         base=opened.base,
         composition=composition,
-        surface=surface,
+        surface=drawn,
         findings=_worst([findings]),
         stats={
             "ribs": len(ribs),
@@ -237,18 +302,54 @@ def make(
             "holes": len(holes),
             "fidelity": opened.fidelity,
             "spacing_mm": opened.base.grid.spacing_mm,
-            "volume_cm3": surface.volume_mm3 / 1e3,
+            "volume_cm3": volume / 1e3,
             "base_volume_cm3": opened.surface.volume_mm3 / 1e3,
-            "added_cm3": (surface.volume_mm3 - opened.surface.volume_mm3) / 1e3,
+            "added_cm3": (volume - opened.surface.volume_mm3) / 1e3,
+            "weighed_from": weighed,
             "material": (chosen or {}).get("id"),
-            "mass_kg": round(surface.volume_mm3 * density * 1e-9, 1),
+            "mass_kg": round(volume * density * 1e-9, 1),
             "seconds": round(time.perf_counter() - started, 1),
+            "steps": clock.said(),
+            "distance": backend(),
             "left_out": len(mended.left_out),
+            "cut_faces": taken,
         },
         ribs=ribs,
         part_surface=opened.surface,
     )
     return Made(design, placed, version.version, levers, opened.fidelity)
+
+
+def cut_faces(base: Field, field: Field, changed: np.ndarray, tess) -> list[int]:
+    """The part's faces a design takes metal away from - holes cut through them, faces thinned:
+    the faces nearest the cells that were metal and are not. Where the viewer shows the design's
+    own surface instead of the part's."""
+    changed = np.asarray(changed, dtype=np.int64)
+    if not changed.size:
+        return []
+    removed = changed[base.inside.ravel()[changed] & ~field.inside.ravel()[changed]]
+    if not removed.size:
+        return []
+    from .surface import _lookup
+
+    tree, owner = _lookup(tess.vertices, tess.triangles, tess.face_id, base.grid.spacing_mm)
+    _, nearest = tree.query(base.grid.centres(removed), k=1, workers=-1)
+    return sorted({int(face) for face in owner[nearest]})
+
+
+def volume_change(base: Field, field: Field, changed: np.ndarray) -> float:
+    """How much metal a design adds, less what it takes away, in cubic millimetres - read off the
+    field where it changed: each cell counted as full as its distance says, a cell on the surface
+    half full, one a half cell inside wholly."""
+    changed = np.asarray(changed, dtype=np.int64)
+    if not changed.size:
+        return 0.0
+    spacing = base.grid.spacing_mm
+
+    def full(values: np.ndarray) -> np.ndarray:
+        return np.clip(0.5 - values.astype(np.float64) / spacing, 0.0, 1.0)
+
+    return float((full(field.at(changed)) - full(base.at(changed))).sum() * spacing**3)
 
 
 # What screening finds that the checks of a built design do not look at.
@@ -267,10 +368,10 @@ def _interface_faces(features) -> set[int]:
     }
 
 
-def _surface_check(surface: Surface) -> Finding:
+def _surface_check(surface: Surface) -> list[Finding]:
     from .checks import _surface
 
-    return _surface(surface)
+    return [_surface(surface)]
 
 
 def _hole_constraints(holes: HoleSet, drilled: Drilled) -> list[Finding]:
@@ -402,6 +503,9 @@ def _window(opened: Opened, placements, placed, ribs, radius: float):
         f"{radius:.6f}",
         ",".join(f"{face}:{clearance:g}" for face, clearance in sorted(clearance_of.items())),
         ";".join(",".join(f"{v:.0f}" for v in (*a, *b)) for a, b in sorted(map(_listed, around))),
+        # Where the distance was computed: the GPU's and the CPU's agree to thousandths of a
+        # millimetre, not to the bit, and a design is built from one or the other throughout.
+        backend(),
         code=CODE_COMPOSE,
     )
     window, _ = cache.memoise(
@@ -469,12 +573,14 @@ def _constraints(placement: Placement, placed: Placed) -> list[Finding]:
     if spans:
         tallest = max(s["height_mm"] for s in spans)
         limits = sorted({s["limited_by"] for s in spans})
+        tall = placement.height.thicknesses
         out.append(
             Finding(
                 f"height ({label})",
                 "pass",
                 f"tallest {tallest:.1f} mm above the host, each rib held to " + ", ".join(limits),
-                "no taller than the supports it spans"
+                (f"{tall:g} thicknesses tall, " if tall else "")
+                + "no taller than what each end meets"
                 + (
                     f" or {', '.join(placement.height.not_above)}"
                     if placement.height.not_above

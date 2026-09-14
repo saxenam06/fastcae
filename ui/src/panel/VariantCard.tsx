@@ -523,7 +523,7 @@ function AddRow(props: {
 
 /** The settings that decide a design, shown first; the rest fold away under More settings. */
 const KEY: Record<string, string[]> = {
-  ribs: ["generator", "thickness_mm", "spacing_mm", "count", "height_fraction"],
+  ribs: ["generator", "thickness_mm", "spacing_mm", "count", "height_thicknesses", "height_fraction"],
   holes: ["pattern", "diameter_mm", "pitch_mm"],
   thicken: ["offset_mm"],
 };
@@ -1343,7 +1343,13 @@ const HINTS: Record<string, string> = {
     "How many: the most lines each way for parallel ribs and grids, the most spokes, the number of free lines - round the middle of the floor",
   spacing_mm:
     "How far apart: between lines of parallel ribs and grids, between spokes where they end, between the places free lines may cross",
+  height_thicknesses:
+    "How tall, in the rib's own thickness - and each end never taller than what it meets there; a web no taller than the lower of the two things it joins",
 };
+
+/** The step a range starts from where five in its unit would say nothing: a height in thicknesses
+ * goes by halves. */
+const FIRST_STEP: Record<string, string> = { height_thicknesses: "0.5" };
 
 /** A number by hand: a range and its step - five unless you say - or one value, a height in
  * percent, the one or the other chosen at its head. What it shows is kept on Enter, on done, or
@@ -1367,7 +1373,9 @@ function SettingEditor(props: {
   const fixed = domain.low !== null && domain.low === domain.high;
   const [low, setLow] = useState(shown(domain.low));
   const [high, setHigh] = useState(shown(domain.high));
-  const [step, setStep] = useState(domain.step === null || fixed ? "5" : shown(domain.step));
+  const [step, setStep] = useState(
+    domain.step === null || fixed ? (FIRST_STEP[setting.name] ?? "5") : shown(domain.step),
+  );
   const [one, setOne] = useState(shown(domain.suggested ?? domain.low));
   // A range, or one value - as it is now, until the engineer picks the other.
   const [mode, setMode] = useState<"range" | "one">(fixed ? "one" : "range");

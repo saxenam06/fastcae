@@ -81,7 +81,12 @@ a person confirms. A project without it behaves as if nobody had decided anythin
 What campaigns make is kept outside the project, in `_archived_designs/<project>/<code>-<name>/`
 beside `assets/`: the card, a copy of every variant as it was launched, every design kept with its
 recipe and seed, a summary, and each design built so far. It is output, not a decision, and not
-tracked by git.
+tracked by git. Any process can build a design of it from that folder alone -
+`fastcae.generate.build.build_design(folder, index)` - with no surface drawn unless asked.
+
+A design's exact distances go to the GPU when NVIDIA Warp is installed (`uv sync --extra gpu`) and a
+CUDA device is present, and to the CPU otherwise, with the same answer to a few thousandths of a
+millimetre; `FASTCAE_DISTANCE=cpu` or `gpu` chooses.
 
 A folder whose name starts with `_` or `.` is set aside rather than a project.
 
@@ -133,10 +138,14 @@ src/fastcae/
     repair.py     a placed design mended by CP-SAT: the fewest ribs, pads or holes left out so no
                   rule between pieces breaks
     holes.py      a hole as a capped cylinder, and holes cut into a design's field
+    distance.py   the part's exact distance from a window's cells: on the GPU with NVIDIA Warp -
+                  its long triangles split first - or on the CPU, the same answer
+    _warp.py      the GPU's nearest-point queries, imported only when Warp is there
     thicken.py    faces moved along their normal, exactly, in a window round them
     screen.py     a placed design screened in milliseconds, and weighed in its material
     intent.py     designs made from their pieces - faces moved, ribs and pads, holes - with the
-                  two-part verdict
+                  two-part verdict, every step and check timed, a surface only when asked for
+    build.py      a campaign's design built by any process from the campaign's folder alone
     reading.py    reading the part for the agent: what a feature stands on, what rises round a
                   floor, the axes and what is on each, how thick the metal is
     slots.py      ribs on a floor read off the part: every slot filled round what was given

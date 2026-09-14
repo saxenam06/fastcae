@@ -81,11 +81,14 @@ name is a size nothing is ever cached for.
 ## Back to a surface
 
 **Simulation never needs one.** An immersed solve puts cells on the same fixed grid and asks each
-how full it is, which is a field question.
+how full it is, and a mesher reads the field itself; both are field questions. Nor does checking:
+every check but one reads the field, the fillet made included, and a design is weighed from it.
 
-Three things do need a surface: **checking** (volume, area, closure, the fillet actually made),
-**handing over** (export, or a body-fitted mesh for a reference solver), and **selecting** (picking
-a face runs against triangles carrying CAD face ids).
+Three things do need a surface: **seeing** a design (the viewer draws the surfaces it changes),
+**selecting** (picking a face runs against triangles carrying CAD face ids), and **handing one
+over** (an export). So a design built for a dataset is not drawn: its surface is contoured only when
+someone opens it, and the one check that reads a surface - closed, every edge in two triangles -
+comes with it; downstream, the mesh is held to being valid instead.
 
 **Dual contouring**, not marching cubes. Marching cubes cannot represent an edge inside a cell, so
 every machined corner comes back rounded to the voxel. Dual contouring places each vertex where the
@@ -120,6 +123,13 @@ edges rounded at the edge-round radius. Where a placement ends it on a support, 
 millimetres into the support so the junction is a fillet, not an edge. A rib on a circle is the same
 section swept round an arc.
 
+**How tall** is its variant's height in thicknesses of the rib - two to five unless the engineer
+says - and no taller at either end than what that end meets: the highest the face or feature it
+runs into rises there, within the rib's width and as deep as the end may be buried, never the metal
+found behind it. A boss stood against a tall wall is met as tall as the boss. A web - a rib with
+nothing under it - is no taller than the lower of the two things it joins, whichever way its top
+runs.
+
 ## The root fillet
 
 A **round blend** between each rib and the part:
@@ -146,8 +156,25 @@ radius wanted.
   fillet - R13.7 for R10 on a test plate, against R9.55 exact.
 
 The part's distance is needed out to the largest `k` plus a margin, well past the band. It is
-extended there **once per region and kept**, by the same exact scan-conversion the field uses, along
-with which cells are protected and which are open to ribs. A design then pays only for its own ribs.
+extended there **once per region and kept**, exactly, along with which cells are protected and which
+are open to ribs. A design then pays only for its own ribs. Where a rib changes nothing the cell
+keeps the field's own value, so what a design did not change is never counted as changed.
+
+**The part's distance, on the GPU.** Each cell's exact distance to the part's triangles is the
+slowest step of a build on the CPU - point against triangle, about 70,000 cells a second. With
+NVIDIA Warp installed and a CUDA device present, the triangles go into a bounding-volume hierarchy
+and each cell is one nearest-point query: a window of the housing in a fraction of a second, where
+the CPU takes tens of seconds to minutes. Without them, the CPU's scan - the one the field is built
+with - answers the same question. `FASTCAE_DISTANCE=cpu` or `gpu` chooses.
+
+**Long triangles are split first.** OCC tessellates big faces with slivers, triangles hundreds of
+millimetres long and a millimetre high; in single precision the nearest point on one comes out wrong
+by up to half a millimetre, always at the surface. Every triangle with an edge over 16 mm is halved
+across it until none is - the same surface in better-shaped pieces, once for the part - and both
+paths answer over exactly the same triangles. On windows of the housing's surface, 1.6 million cells
+within reach, the two differ by at most 0.0003 mm; a design built from either has every cell on the
+same side and every stored distance within 0.004 mm, and the tests hold them to that. A window kept
+on disk says which computed it.
 
 ## Protected areas
 
@@ -170,7 +197,11 @@ block's blend: a point belongs to the faces moved by how much nearer it is to th
 face, so a move never reaches through a wall to its far side. Moving further than the stored band
 would drag a clamped number, so the part's distance is computed again, exactly, in a window round
 the faces moved - out as far as they move, their blend and the band - and the move is made there.
-Blocks that move faces near each other move them together: each window sees every block's weight.
+Both distances a cell's weight is read from - to the faces moved, and to every other face - are the
+exact distance to their triangles, asked of every cell of the window, on the GPU when there is one:
+moving 262 faces of the housing takes seconds. What one block reads off the part is kept for the
+next design that moves the same faces as far. Blocks that move faces near each other move them
+together: each window sees every block's weight.
 
 **Interfaces stay as they are.** A cell within the clearance of a face kept closed - a bore, a
 hole - and nearer that face than any face moved keeps its base value. The closed face stays exactly
@@ -181,7 +212,7 @@ refused.
 Ribs standing on or ending at a moved face are filleted to the surface where it now is: their
 blend reads the part's distance with the move taken off.
 
-## Pads, and floors thickened
+## Pads, and floors as they are
 
 A rib is no thicker than the foundry's rule of thumb allows of the wall it meets - 0.8 of it,
 assumed, a rule the engineer can take out. Where a rib ends on a wall, the wall is measured square
@@ -189,12 +220,12 @@ through it from where the rib meets it, with whatever the design moves its two f
 thin gets a **pad**: a plate along the wall, half in it, standing out as far as the rule needs,
 as tall as the rib there and a good deal wider - never more than doubling the wall, a lump that
 size being a hot spot. A pad is composed like a rib and filleted like one; the checks measure it as
-wall, not as rib.
+wall, not as rib. Without pads, the rib on a thin wall is left out.
 
-A **floor** too thin for the ribs standing on it - measured under each rib - is thickened for them
-in that design: its faces moved, as a wall is, by what the thickest rib needs - never to more than
-twice what it was - and every block placed after stands on it as thickened. Without pads, the rib
-on a thin wall is left out, and a design whose ribs are too thick for their floor is screened out.
+A **floor is never thickened** for its ribs. The floor under each rib is measured under it, as the
+design leaves it - thicker where a variant of the design moves its face out - and a rib too thick for
+it is left out: drawn as left out, and said with what repair leaves out, the rule it broke beside it
+- *rib on floor*.
 
 ## Holes
 
@@ -213,28 +244,40 @@ would leave less than a ligament between them makes none, and says so.
 
 ## The order a design is built in
 
-1. **Faces moved**, exactly, as above - the variants' own, and floors thickened for ribs.
+1. **Faces moved**, exactly, as above - the variants' own; never a floor for its ribs.
 2. **Ribs and pads**, composed together: each filleted to the part where it now is with its own
    variant's root fillet, and to each other where they cross with the smaller of theirs.
 3. **Holes** cut.
-4. **One recontour** of every cell any of these changed, spliced into the baseline's surface.
+4. **Its surface**, when it is asked for: one recontour of every cell any of these changed, spliced
+   into the baseline's surface. A design built for a dataset skips it.
 
 Before they are composed, the design is **mended** as it was when it was screened - the same
 pieces left out - so the design built is the design screened. Then the checks, measured on the
 part as moved - what the ribs stand on and end on - and what
-screening found that the checks do not look at. The design's mass is its closed volume times its
-material's density, from the catalogue.
+screening found that the checks do not look at. The design's mass is its volume times its
+material's density, from the catalogue: its closed surface's volume where it is drawn, else the
+part's volume and what the field says the design added and took away, each changed cell counted as
+full as its distance says. **Every step is timed** - opening the part, placing, repair, screening,
+faces moved, the window, composing, holes, the recontour, the checks, weighing - and every check.
+
+**A design of a campaign is built by any process from the campaign's folder alone.**
+`fastcae.generate.build.build_design(folder, index)` reads `study.json` and `designs.jsonl` from
+`_archived_designs/<project>/<run>/`, finds the project beside the archive - or is told which - and
+refuses a part whose digest is not the campaign's. It builds the design exactly as Build field does,
+the same grid and the same field cell for cell, without its surface unless asked, and returns the
+design's field, its verdict - every check with its outcome and how long it took - and the build's
+step times. A `Workshop` keeps the part open between the designs one worker builds.
 
 ## Screening
 
-Placing a design takes a fraction of a second; building one takes a minute or more. So every design
-a campaign places is **screened** on what placing it already knows, and only one that passes is
-kept:
+Placing a design takes a fraction of a second; building one takes seconds to minutes. So every
+design a campaign places is **screened** on what placing it already knows, and only one that passes
+is kept:
 
 | screened for | rule |
 |---|---|
 | every variant made something | ribs where a variant adds ribs, holes where it adds holes |
-| rib on floor | a rib no thicker than 0.8 of the floor it stands on, as the design leaves the floor |
+| rib on floor | a rib no thicker than 0.8 of the floor it stands on, as the design leaves the floor; one thicker is left out as it is placed |
 | holes clear of ribs | a ligament of metal between each hole and the footprint of every rib it keeps clear of; a hole through any other rib is a warning |
 | root gap | the clear gap between rib footprints standing in the open, past the junctions at their ends, at least the root gap - twice the thinner, or what the variant says - within a variant and between; and no wedge where two meet: no finger of sand narrower than the root gap for longer than it is wide, nor a lump that long where the fillets rounding their corner run them into one - wherever their bodies touch in the open, whether their lines cross there or in metal |
 | wall kept | no wall thinned below the least its variant allows - or its material, when that is more |
@@ -271,9 +314,10 @@ CP-SAT**: each conflict a pair of pieces of which one must go, each crossing a p
 three arms may meet (a rib passing through gives two, one ending there one), and the fewest pieces
 left out. A rib takes its pads with it; where two choices leave out as many, holes go before ribs.
 One worker and a fixed seed, so the same design is mended the same way every time. The design says
-what was left out, piece by piece, with the rule each broke, and their lines are drawn as left out.
-What leaving pieces out cannot mend - a variant that made nothing, a rib too thick for its floor, a
-wall thinned too far - the screening that follows rejects, and such a design is drawn again.
+what was left out, piece by piece, with the rule each broke - the ribs placing left out for being
+too thick for their floor among them - and their lines are drawn as left out. What leaving pieces
+out cannot mend - a variant that made nothing, a wall thinned too far - the screening that follows
+rejects, and such a design is drawn again.
 
 ## Campaigns
 
@@ -342,14 +386,16 @@ holding one variant, or a page at a time.
 
 **Building a design's field** makes it from the copy of the variants its campaign kept - only those
 the design holds - at preview or in full, checks it, and keeps it beside the campaign in
-`built/<index>-<fidelity>`: the verdict, the
-surfaces it changes - new metal and metal taken away alike - in the format the part reaches the
-browser in, and its new metal as the field's own cells. F stays done; nothing is built twice.
+`built/<index>-<fidelity>`: the verdict - with each check's time, each step's, and the part's faces
+the design cuts - the surfaces it changes - new metal and metal taken away alike, and the design's
+own surface on every face it cuts - in the format the part reaches the browser in, and its new
+metal as the field's own cells. F stays done; nothing is built twice.
 
 ## Checks
 
-Every design comes out pass, warn or reject, with the reason, the place, the rule used and where the
-rule came from. Every check is shown to reject a part built to fail it before it is trusted.
+Every design comes out pass, warn or reject, with the reason, the place, the rule used, where the
+rule came from, and how long the check took. Every check is shown to reject a part built to fail it
+before it is trusted.
 
 | check | rule | outcome |
 |---|---|---|
@@ -359,19 +405,29 @@ rule came from. Every check is shown to reject a part built to fail it before it
 | rib thickness | inside the thickness its block allows, and at least 4 voxels; pads are not ribs | reject |
 | rib against wall | thickness ≤ the rib-to-wall ratio × the wall under the root, a pad counted as wall | warn |
 | root gap | clear gap between rib footprints, past their junctions and away from crossings, ≥ the ratio × thickness - each variant's own - and no wedge of sand where two meet | reject |
-| root fillet | the radius achieved, read off the surface, ≥ the fillet floor | reject; warn if > 20% off its block's own |
+| root fillet | the radius achieved, read off the field, ≥ the fillet floor | reject; warn if > 20% off its block's own |
 | rib ends | each rib's end meets the metal ahead of it, or stops at least the root gap short - no finger of sand between | reject |
 | blend bridging | fillet filling a gap to a surface the rib does not touch | warn |
 | blend clipped | a fillet cut short by a protected area | warn |
 | thick spots | a junction section more than the ratio × the wall beside it | warn |
-| surface | closed and oriented, every edge in exactly two triangles | reject |
+| holes through | every hole open along its axis from over its plate's face to past its far side, where the part's metal under it ends | reject |
+| surface | closed and oriented, every edge in exactly two triangles - where a surface is drawn | reject |
 
-**The achieved fillet is read off the surface.** On a fillet the two distances satisfy
-`(k − a)² + (k − b)² = k²`, so every contoured vertex on one says the radius it was built to:
-`k = a + b + √(2ab)`, `R = k / (1 − n_a · n_b)`, `a` measured to the part's surface where the design
-leaves it - a face it moved, where it moved it to. The median per rib, against the radius its block
-asked for, and the rib furthest from its own is what is reported - grid error and all; a pad's edge
-against its wall is no rib's root.
+**The achieved fillet is read off the field.** On a fillet the two distances satisfy
+`(k − a)² + (k − b)² = k²`, so every point of the design's surface on one says the radius it was
+built to: `k = a + b + √(2ab)`, `R = k / (1 − n_a · n_b)`, `a` measured to the part's surface where
+the design leaves it - a face it moved, where it moved it to. The points are where the field changes
+sign between two neighbouring cells near a rib's root, found between their values; each is read
+against the rib nearest it. The median per rib, against the radius its block asked for, and the rib
+furthest from its own is what is reported - grid error and all; a pad's edge against its wall is no
+rib's root.
+
+**The checks are quick.** On a design of the housing's campaign - nine ribs and nine pads - all of
+them take 0.8 s, the junction sections 0.6 of it. The sections are measured in a box round each
+rib's junctions - boxes that overlap made one - never one round every rib at once, each depth the
+distance to the nearest cell of air, which always borders the metal; bridging asks a tree how far
+each cell of fillet is from where a rib runs into the part; every loose piece of rib is found at
+once.
 
 **Mould release waits for the pull.** Variants hold no pull direction, and a check that rejects any
 metal along the pull from a rib's tip, however far, and does not know that cores form the pockets
@@ -413,13 +469,20 @@ field round it, read between its cell's eight samples: nothing where no sample c
 or more wholly the design's - and the viewer blends the part's colour into the design's by it, a
 hair nearer the camera than the part, so the join reads as metal joined.
 
+**A hole looks like a hole.** Metal a design takes away - a hole through a plate, a face thinned -
+would still be drawn by the part's own faces over it. So the faces it cuts - those nearest the cells
+that were metal and are not - are named with the design, the viewer hides them, and the design's own
+surface on them is drawn in their place, a triangle beyond their edge besides so no crack opens
+where they meet the faces beside them.
+
 Surfaces travel **indexed and welded by normal**, normals as three signed bytes. Cells travel as one
 integer per visible face - only boundary cells, only the faces that show - which is forty times
 smaller than the contour for the same picture, so cells are the default view.
 
 ## What simulation receives
 
-For each design: a closed, oriented surface with every triangle tagged by the baseline CAD face
-nearest it, so loads and supports can be placed; the field on the design grid, for a solve that
-immerses the part rather than meshing it; its material; and its campaign's copy of its variants,
-its values, its recipe and hash, and its verdict. How the part is then meshed or immersed is Simulate's decision.
+For each design: the field on the design grid - what a mesher meshes, and what a solve that
+immerses the part reads; where its surface is drawn, a closed, oriented surface with every triangle
+tagged by the baseline CAD face nearest it; its material; and its campaign's copy of its variants,
+its values, its recipe and hash, and its verdict with every check's and step's time. How the part
+is then meshed or immersed is Simulate's decision.

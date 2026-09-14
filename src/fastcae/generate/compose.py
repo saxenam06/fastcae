@@ -8,8 +8,8 @@ what lets the design be contoured by splicing its windows into the base's contou
 
 **The part's distance, exactly, past the band.** The base field stores distance only a few voxels
 out; a fillet of radius R needs it out to 2R. Inside a window it is computed again from the
-tessellation by the same exact point-to-triangle scan the base was built with, so where a rib
-changes nothing, the value is bit-for-bit the base's.
+tessellation, exactly - on the GPU when there is one, by the scan the base was built with otherwise
+(:mod:`.distance`) - so where a rib changes nothing, the value is the base's.
 
 **Ribs are trimmed to where they may be.** A formation's lines run past a zone's walls on purpose;
 the window says which cells are the zone's own air, and a rib exists only there and a voxel into the
@@ -34,13 +34,21 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..geometry.brep import Tessellation
+from .distance import part_distance
 from .field import CODE as FIELD_CODE
-from .field import Field, Grid, _unsigned_distance
+from .field import Field, Grid
 from .formations import Region
 from .ribs import round_union
 
 # What a stored window depends on besides its inputs.
-CODE_COMPOSE = (*FIELD_CODE, "generate/compose.py", "generate/formations.py", "generate/ribs.py")
+CODE_COMPOSE = (
+    *FIELD_CODE,
+    "generate/compose.py",
+    "generate/distance.py",
+    "generate/_warp.py",
+    "generate/formations.py",
+    "generate/ribs.py",
+)
 
 
 @dataclass
@@ -167,7 +175,7 @@ def window_between(
         for clearance in sorted({c for c in clearance_of.values() if c > 0.0}):
             faces = {f for f, c in clearance_of.items() if c == clearance}
             # Strictly inside: a cell out of reach comes back clamped to exactly the clearance.
-            near = _part_distance(tess, window, clearance, faces=faces)
+            near = part_distance(tess, window, clearance, faces=faces)
             protected |= near < clearance
     if allowed is None:
         allowed = np.ones(window.n_cells, dtype=bool)
@@ -181,7 +189,7 @@ def window_between(
         margin_mm=margin_mm,
         region=region,
     )
-    unsigned = _part_distance(tess, window, margin_mm, around=around)
+    unsigned = part_distance(tess, window, margin_mm, around=around)
     solid = base.inside.ravel()[out.samples_of(np.arange(window.n_cells))]
     out.part = np.where(solid, -unsigned, unsigned).astype(np.float32)
     return out
@@ -260,16 +268,22 @@ def compose(
 
     value = round_union(a, window.normal_at(touched), b, ribs_normal, radius_at)
     solid = value < 0.0
+    samples = window.samples_of(touched)
+    # Where no rib changes anything - the union is the part's own side - the part is as the field
+    # holds it, bit for bit: however its distance was computed here, a cell no rib reaches is not
+    # a cell the design changed.
+    same = value == a
+    if same.any():
+        value[same] = base.at(samples[same])
+        solid[same] = base.inside.ravel()[samples[same]]
     held = window.protected[touched]
     clipped = np.empty(0, dtype=np.int64)
     if held.any():
-        samples = window.samples_of(touched[held])
-        was_solid = base.inside.ravel()[samples]
+        was_solid = base.inside.ravel()[samples[held]]
         clipped = touched[held][solid[held] & ~was_solid]
-        value[held] = base.at(samples)
+        value[held] = base.at(samples[held])
         solid[held] = was_solid
 
-    samples = window.samples_of(touched)
     edge = _on_grid_edge(samples, base.grid.shape)
     off_grid = np.empty(0, dtype=np.int64)
     if edge.any():
@@ -359,46 +373,6 @@ def _arc_distance(region: Region, points: np.ndarray) -> np.ndarray:
         across = np.abs(x * u[1] - y * u[0])
         distance = np.minimum(distance, np.where(along >= 0.0, across, np.hypot(x, y)))
     return np.where(inside, -distance, distance)
-
-
-def _part_distance(
-    tess: Tessellation,
-    window: Grid,
-    reach: float,
-    faces: set[int] | None = None,
-    around: list[tuple[np.ndarray, np.ndarray]] | None = None,
-) -> np.ndarray:
-    """Unsigned distance from each window sample to the part (or some of its faces), exactly, out
-    to ``reach`` and clamped there - or, given the boxes ``around``, exactly within ``reach`` of
-    them and clamped beyond: only the facets that near can matter there."""
-    lo = np.asarray(window.origin) - reach
-    hi = np.asarray(window.origin) + (np.asarray(window.shape) - 1) * window.spacing_mm + reach
-    corners = tess.vertices[tess.triangles]
-    top, bottom = corners.max(axis=1), corners.min(axis=1)
-    keep = np.all(top >= lo, axis=1) & np.all(bottom <= hi, axis=1)
-    if faces is not None:
-        keep &= np.isin(tess.face_id, list(faces))
-    if around:
-        # A cell within reach of a box has its nearest facets within twice the reach of it.
-        near = np.zeros(len(keep), dtype=bool)
-        for box_lo, box_hi in around:
-            near |= np.all(top >= np.asarray(box_lo) - 2.0 * reach, axis=1) & np.all(
-                bottom <= np.asarray(box_hi) + 2.0 * reach, axis=1
-            )
-        keep &= near
-    if not keep.any():
-        return np.full(window.n_cells, reach)
-    local = Tessellation(
-        vertices=tess.vertices,
-        triangles=tess.triangles[keep],
-        face_id=tess.face_id[keep],
-        face_ids=tess.face_ids,
-        deflection_mm=tess.deflection_mm,
-        angle_deg=tess.angle_deg,
-        faces_without_triangles=[],
-    )
-    distance = _unsigned_distance(local, window, reach).ravel().astype(np.float64)
-    return np.minimum(distance, reach)
 
 
 def _unit_gradient(values: np.ndarray, spacing: float) -> np.ndarray:

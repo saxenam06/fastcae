@@ -32,6 +32,9 @@ interface StageProps {
   showSurface?: boolean;
   showOverlay?: boolean;
   showVoxels?: boolean;
+  /** The part's faces left out of the picture: those a design cuts, whose own surface the overlay
+   * draws instead, so a hole looks like one. */
+  hidden?: Set<number>;
   faceCount: number;
   bbox: number[];
   selected: Set<number>;
@@ -44,6 +47,7 @@ interface StageProps {
 }
 
 const OCHRE: [number, number, number] = [0.541, 0.416, 0.122];
+const NONE: Set<number> = new Set();
 
 export function Stage(props: StageProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -68,6 +72,7 @@ export function Stage(props: StageProps) {
     renderer.setOverlay(props.overlay ?? null);
     renderer.setVoxels(props.voxels ?? null);
     renderer.setLines(props.lines ?? null);
+    renderer.setHidden(props.hidden ?? NONE);
     renderer.frame(props.bbox);
     rendererRef.current = renderer;
     dirtyRef.current = true;
@@ -117,6 +122,13 @@ export function Stage(props: StageProps) {
     renderer.setLines(props.lines ?? null);
     dirtyRef.current = true;
   }, [props.lines]);
+
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    renderer.setHidden(props.hidden ?? NONE);
+    dirtyRef.current = true;
+  }, [props.hidden]);
 
   // Cheap to change and cheap to apply, so these ride along with the face state rather than
   // rebuilding anything.

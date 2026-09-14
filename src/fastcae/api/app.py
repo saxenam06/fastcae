@@ -1410,8 +1410,9 @@ def _encode_mesh(
 
 def _changed_blob(design) -> bytes:
     """The surfaces a design changes, drawn down to the part, each vertex saying how far it stands
-    off it - what the viewer draws over the part it already has."""
-    changed, standing = design.changed_surface()
+    off it - what the viewer draws over the part it already has - and the design's own surface on
+    every face it cuts, which the viewer hides so a hole shows as one."""
+    changed, standing = design.changed_surface(design.stats.get("cut_faces") or ())
     return _encode_mesh(
         changed, normals=corner_normals(changed.vertices, changed.triangles), standing=standing
     )

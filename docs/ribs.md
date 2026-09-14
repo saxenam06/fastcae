@@ -54,7 +54,7 @@ Variant:    k7f3a · Ribs on face:1201
 Adds:       ribs
 Where:      on face:1201 · ending on the walls round it · clear of the holes through it
 Varies:     pattern square grid or free lines · thickness 15–25 mm by 5 · spacing 60–200 mm by 5
-            · height 50–100% of what each end meets, by 5% · root fillet 5 mm
+            · height 2–5 thicknesses, by halves · root fillet 5 mm
 Holds:      5 mm clear of the holes on face:1201 (assumed) · no taller than what each end meets
             · R ≥ 3 (drawing p.1) · room for the sand between ribs, 2 thicknesses (assumed)
             · no X crossings
@@ -191,9 +191,10 @@ Cheapest first:
    geometry - every variant in the design making something, ribs against the floor under them,
    room for the sand between ribs and at their wedges, holes a ligament clear of ribs, walls thinned
    no further than they may be.
-2. **Building**, minutes a design: the part and its changes as a distance field - mended as it was
-   screened - a closed surface, and the checks on geometry: fillets achieved, thick spots, nothing
-   floating, protected areas unchanged.
+2. **Building**, seconds a design: the part and its changes as a distance field - mended as it was
+   screened - and the checks on geometry, each read off the field and timed: fillets achieved,
+   thick spots, nothing floating, protected areas unchanged, holes through. Its surface is drawn when
+   someone opens it, and checked closed then.
 3. **Simulation**: the decks solved.
 
 A **preview** builds a design on a coarser grid, nothing else relaxed, and is always labelled one; a
@@ -203,8 +204,9 @@ Every design comes with a **verdict** in two parts, and every rule and check app
 it can be audited. **Your rules**, each enforced while the design is built and verified on the
 result: *"keep out - pass, nearest hole edge 7.2 mm."* **Engineering checks**, which the platform
 holds every rib to whether or not anyone asked: the fillet achieved, thickness against the wall,
-thick spots at junctions, gaps between ribs, nothing floating, protected areas unchanged, the
-surface closed - and mould release, once the pull is known. Thresholds come from the variant; any
+thick spots at junctions, gaps between ribs, nothing floating, protected areas unchanged, holes
+open through their plate, the surface closed where one is drawn - and mould release, once the pull
+is known. Each says how long it took. Thresholds come from the variant; any
 the engineer did not set is marked assumed. A check is code, shown to fail on a part built to make
 it fail before it is trusted, and added between sessions - never by a model at runtime. A model that
 could write its own checks could write one that passes everything.
@@ -402,7 +404,7 @@ on clicking anywhere else once anything in it was touched - Escape leaves it as 
 from a value to itself being that value. What the engineer set is marked, with
 **reset** to hand it back to the part; where the part's suggestion comes from is in the setting's
 tooltip. Every range the part suggests steps by five in its own unit, its ends rounded inward onto
-fives; a height is a percentage, by five. The card counts the distinct designs the variant allows:
+fives; a height is said in thicknesses of the rib, by halves. The card counts the distinct designs the variant allows:
 for each pattern, the values of every setting that makes a difference to it, multiplied; free lines
 have no end.
 
@@ -481,33 +483,34 @@ and checked, M, S and R its mesh, setup and results - and a dot for each variant
 reads by variant - code, name, what it made and the values it took - with the variants it leaves
 out, what repair left out, and its recipe and seed. Its paths are drawn on the part at once; **Build
 field** builds it from the copy of the variants its campaign kept, checks it and keeps it, so it is
-built once. Its field is the surfaces it changes over the part, run down to where they meet it, and
-its new metal as cells.
+built once. Its field is the surfaces it changes over the part, run down to where they meet it -
+the faces it cuts shown as its own surface, so a hole looks like a hole - and its new metal as
+cells; its verdict says how long each check took.
 
 ## What is read off the part for ribs on a floor
 
 For a variant standing on a floor, everything left open is read off the part, round what the
 engineer gave - or a default that says it is one. Every range read off the part steps by five in
-its own unit - a height by five percent - its ends rounded inward onto fives, unless that would
-leave nothing. A new variant of ribs then starts simple, from a **starting point kept as data**
-beside the rules of thumb, which the engineer changes on the card: ribs 20 mm thick, 100 mm apart,
-as tall as what they meet, two to ten of them - two suggested - and a root fillet, edge round and
-draft each of three choices, the smallest, the middle and the largest the part offers, the middle
-one first:
+its own unit - a height in thicknesses by halves - its ends rounded inward onto fives, unless that
+would leave nothing. A new variant of ribs then starts simple, from a **starting point kept as
+data** beside the rules of thumb, which the engineer changes on the card: ribs 20 mm thick, 100 mm
+apart, two to five times as tall as they are thick - three suggested - and never taller than what
+they meet, two to ten of them - two suggested - and a root fillet, edge round and draft each of
+three choices, the smallest, the middle and the largest the part offers, the middle one first:
 
 | what | read off the part as |
 |---|---|
 | what they end on | what stands up round the floor, past any fillet or chamfer at its foot, on the side ribs stand - each wall, boss or bore once |
 | keep clear of | every hole through the floor, 5 mm clear of the rib's footprint, listed and suggested; the engineer's own distance replaces it |
 | pattern | every pattern the floor allows - parallel, square grid, triangle grid, spokes - and free lines; suggesting spokes about the largest boss or bore the floor goes round more than halfway, else a square grid |
-| what spokes turn about | the bosses and bores standing round the floor, largest first |
+| what spokes turn about | the bosses and bores standing round the floor, largest first - only round things with an axis; a face of a ring turns about the ring's axis, and a face with nothing round about it is refused |
 | orientation | set out from the longest wall round the floor: a grid along it, parallel ribs square to it; spokes fan across the floor, or go all the way round; free lines at any angle |
 | how many, how far apart | two to ten lines each way, or spokes, and 100 mm apart to start - both, for every pattern; read off the part as 4 to 16, and 5 to 16 thicknesses apart |
-| how tall | each end as tall as what it meets, the top sloping between; all of it to start, half to all of it read off |
+| how tall | 2 to 5 thicknesses of the rib, three to start, each end no taller than what it meets - the face or feature it runs into, never the metal behind it - the top sloping between |
 | thickness | 20 mm to start; read off the part as 0.6 to 1.0 of the plate they stand on, measured through it |
 | thickness against the wall | no thicker than 0.8 of the wall they meet, assumed - a rule the engineer may take out |
 | room between ribs | the root gap: two thicknesses of sand between footprints, and at the wedges where ribs meet, assumed |
-| pads | on: a wall too thin for a rib is thickened round its end, and a floor too thin for its ribs under them, rather than the rib left out |
+| pads | on: a wall too thin for a rib is thickened round its end rather than the rib left out. A floor is never thickened: a rib too thick for the floor under it is left out, saying the rule it broke |
 | root fillet, edge round | from the smallest radius the part allows up to half the thickness - three of those choices to start, the middle first |
 | draft | half a degree to three - three choices to start, the middle first |
 | section | flat, unless the engineer asks for a T; a T's flange 2 to 4 times the web wide |
@@ -526,7 +529,7 @@ they run to - and the rest is read off what they join:
 | pattern | spokes about the round thing among them - a boss before a bore - or straight webs; both stay open |
 | orientation | spokes fanned across the others than what they turn about; straight webs square to the largest flat one, laid across where two of them face each other |
 | how many, how far apart | two to ten and 100 mm apart to start, as for ribs on a floor; read off the part as 2 to 12 webs, or 5 to 16 thicknesses apart |
-| how tall | level with the lower end, or sloping; all of it to start, half to all of it read off; never into what stands over them |
+| how tall | 2 to 5 thicknesses, level by default; never taller than where both sides stand - the lower of the two things a web joins - nor into what stands over it |
 | thickness | 20 mm to start; read off the part as 0.6 to 1.0 of the thinnest of what they join, measured through it |
 | root fillet, edge round, draft | as for ribs on a floor |
 
@@ -561,8 +564,8 @@ A design's variants are built in one order - what changes the shape (faces moved
 to it (ribs, webs and their pads), then what cuts it (holes) - and rules run across variants: holes
 keep a ligament clear of every variant's ribs, unless the holes' variant says how far itself; a rib
 meets a wall as the design moves it, and a thin wall is padded, or thickened by another variant of
-the design; a floor is thickened for ribs too thick for it; a wall is never thinned below what its
-material allows. A face the part keeps closed - a bore - cannot be moved; faces round it can. A
+the design; a floor is never thickened for its ribs - a rib too thick for it is left out, unless
+another variant of the design thickens it; a wall is never thinned below what its material allows. A face the part keeps closed - a bore - cannot be moved; faces round it can. A
 customer's own part, ribs and all, is a baseline to vary like any other - never a reference to
 match.
 
@@ -598,8 +601,11 @@ Everything a variant and its patterns start from is read off the part by code, i
   more than half of one; asked for spokes, it takes the largest, and lists the rest.
 - **Which wall straight ribs are set out from** is the longest flat face standing round the host,
   measured along it.
-- **How tall a rib can stand at an end** is measured on the metal its end is buried in, at every
-  depth it could be buried to, so a wall with draft is met as tall as it stands.
+- **How tall a rib can stand at an end** is how tall what it meets stands there: the highest the
+  face or feature the end runs into rises, within the rib's width and as deep as the end may be
+  buried - never the metal found behind it, so a boss against a tall wall is met as tall as the
+  boss. The end is buried as deep as it must be to stay inside that metal all the way up, so a wall
+  with draft is met as tall as it stands. A web stands only where both of what it joins do.
 - **The plate's thickness** is measured by a ray through it, from the largest facet of the host.
 - **What lies across the open space from an entity** is found by rays from points spread over its
   faces, straight out of its metal: the first things they meet, each with the share of the entity

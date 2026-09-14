@@ -46,3 +46,10 @@ def rib_start() -> dict[str, Any]:
     """Where a new variant of ribs starts, with its source: how thick, how far apart, how tall,
     how many, and how many choices of each radius and draft."""
     return dict(_catalogue()["rib_start"])
+
+
+def rib_height() -> dict[str, Any]:
+    """How tall ribs are when nothing says, in thicknesses of the rib - ``low``, ``high``, ``step``
+    and ``suggested`` - with its source: each end never taller than what it meets."""
+    start = rib_start()
+    return {**start["height_thicknesses"], "source": str(start["source"])}

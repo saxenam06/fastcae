@@ -26,8 +26,8 @@ and the ones that differ most side by side.
 ## What is agreed
 
 1. **A variant is one change in one place**: ribs on, webs between, faces thickened or thinned,
-   holes in. It carries what always comes with it - ribs bring their pads and the floor thickened
-   under them. Its identity is a short random code and a name that says what and where
+   holes in. It carries what always comes with it - ribs bring their pads; a floor is never
+   thickened under them. Its identity is a short random code and a name that says what and where
    (`k7f3a · Ribs on face:1201`). The part's alloy is not a variant: a part is cast in one material.
 2. **A variant holds everything that decides its designs**: where (what it stands on, ends on, keeps
    clear of - faces, or another variant's ribs or holes; for webs, the two sides they run between,
@@ -99,10 +99,10 @@ Designs: P for every design ─► F built on demand ─► M, S, R (to come)
 
 | stage | rules |
 |---|---|
-| **placing** a variant's ribs and holes | on what they stand on · clear of the faces and variants named, from the rib's footprint · clear of every hole, bore and controlled feature of the part in three dimensions, ends buried in what they meet included · no taller than named features or a height · ends on what they run between · pads where a wall is too thin, floors thickened where a floor is · stubs left out |
+| **placing** a variant's ribs and holes | on what they stand on · clear of the faces and variants named, from the rib's footprint · clear of every hole, bore and controlled feature of the part in three dimensions, ends buried in what they meet included · so many thicknesses tall and no taller than what each end meets, named features or a height · ends on what they run between · pads where a wall is too thin · a rib too thick for its floor left out · stubs left out |
 | **repair** (CP-SAT) | root gap between footprints, within a variant and between variants · no narrow wedge of sand where two ribs meet · a ligament of metal between holes and ribs · no X crossings, where a variant says so |
 | **screening** | every variant in the design made something · a rib no thicker than its floor allows · the root gap · holes clear of ribs · no wall thinned below its least |
-| **built** (field checks) | protected cells unchanged · inside the grid · nothing floating · rib thickness · root gap · root fillet achieved · rib ends · blend bridging and clipping · thick spots · rib against wall · the surface closed |
+| **built** (field checks, each timed) | protected cells unchanged · inside the grid · nothing floating · rib thickness · root gap · root fillet achieved, read off the field · rib ends · blend bridging and clipping · thick spots · rib against wall · holes through · the surface closed, where one is drawn |
 | **physics** (to come) | bearing-seat tilt · stiffness · stress · mass · natural frequencies |
 
 Mould release is not checked while the pull direction is out of the variants; it comes back with

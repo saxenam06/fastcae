@@ -390,6 +390,8 @@ export function App() {
   const designField = onDesigns && designs.tab === "field";
   const designPaths = onDesigns && designs.tab === "paths";
   const overlay = designField ? designs.overlay : null;
+  // The faces a design cuts give way to its own surface - only once that surface is there to show.
+  const hidden = overlay ? designs.cutFaces : EMPTY;
   const lines = onVariantCard ? cardLines : designPaths ? designs.lines : null;
   const voxels = designField && designs.showCells ? designs.cells : null;
   const partShown = designField ? showPart : true;
@@ -576,6 +578,7 @@ export function App() {
                     showOverlay
                     showVoxels={voxels !== null}
                     overlay={overlay}
+                    hidden={hidden}
                     overlayAlpha={1.0}
                     overlayTint={DESIGN_TINT}
                     overlayPick={overlay ? "design" : "none"}

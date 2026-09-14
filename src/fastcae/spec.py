@@ -95,12 +95,15 @@ class Layout(BaseModel):
 
 
 class Height(BaseModel):
-    """How tall ribs may stand above the host. Each end never taller than what it meets there;
-    ``top`` says whether the top slopes between the two ends or is held level at the lower."""
+    """How tall ribs may stand above the host: ``thicknesses`` of their own thickness, and never
+    taller than what each end meets there; ``top`` says whether the top slopes between the two ends
+    or is held level at the lower."""
 
     max_mm: float | None = Field(default=None, gt=0.0)
     not_above: list[str] = Field(default_factory=list)
+    thicknesses: float | None = Field(default=None, gt=0.0)
     fraction: float = Field(default=1.0, gt=0.0, le=1.0)
+    """A share of what each end meets, for a variant that says its height that way."""
     top: Literal["slope", "level"] = "slope"
     cites: list[str] = Field(default_factory=list)
 

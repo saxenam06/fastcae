@@ -11,8 +11,10 @@ choices leave out as many, holes go before ribs. One worker and a fixed seed, so
 always mended the same way. What a design has left out is said, piece by piece, with the rule it
 broke - and its lines are drawn as left out, not as ribs.
 
-What leaving pieces out cannot mend - a variant that made nothing, a rib too thick for its floor, a
-wall thinned too far - is left to the screening that follows, and such a design is drawn again.
+What a design has left out besides - a rib too thick for the floor under it, left out as it was
+placed - is said with the rest, the rule it broke beside it. What leaving pieces out cannot mend - a
+variant that made nothing, a wall thinned too far - is left to the screening that follows, and such
+a design is drawn again.
 """
 
 from __future__ import annotations
@@ -45,6 +47,8 @@ class Repair:
 
     placed: dict[str, Placed | Drilled]
     left_out: list[dict[str, Any]] = field(default_factory=list)
+    repaired: int = 0
+    """How many of the pieces left out repair left out - the rest placing did."""
 
 
 def repair(
@@ -54,7 +58,26 @@ def repair(
     placed: dict[str, Placed | Drilled],
 ) -> Repair:
     """The design ``placed`` with the fewest pieces left out so no rule between them breaks - as
-    it is, when none does."""
+    it is, when none does - and every piece left out, those placing left out first."""
+    placed_out = [
+        {"block": p.id, **piece}
+        for p in placements
+        if isinstance(placed.get(p.id), Placed)
+        for piece in placed[p.id].left_out
+    ]
+    mended = _repaired(base, placements, holes, placed)
+    mended.repaired = len(mended.left_out)
+    mended.left_out = [*placed_out, *mended.left_out]
+    return mended
+
+
+def _repaired(
+    base: Field,
+    placements: list[Placement],
+    holes: list[HoleSet],
+    placed: dict[str, Placed | Drilled],
+) -> Repair:
+    """What CP-SAT leaves out, and the design without it."""
     ribs: list[tuple[str, int]] = []
     shapes = []
     radii: dict = {}

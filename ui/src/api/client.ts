@@ -482,6 +482,8 @@ export interface VerdictRow {
   rule: string;
   assumed?: boolean;
   cites?: string[];
+  /** How long the check took, in seconds - two findings of one check share its time. */
+  seconds?: number;
 }
 
 /** A design's verdict: the engineer's constraints first, then the checks - and, for a design made
@@ -499,6 +501,11 @@ export interface Verdict {
   mass_kg?: number | null;
   material?: string | null;
   seconds: number;
+  /** How long each step of the build took, in seconds, by name. */
+  steps?: Record<string, number>;
+  /** The part's faces the design cuts - holes through them, faces thinned: the Field view hides
+   * them and draws the design's own surface there. */
+  cut_faces?: number[];
   constraints: VerdictRow[];
   checks: VerdictRow[];
   open?: string[];
