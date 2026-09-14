@@ -381,7 +381,15 @@ product.
 - **Optimisation** - repair weighted by each piece's worth; pymoo on the surrogate with CP-SAT as its
   repair, then BoTorch/Ax with real solves (see [research/optimization.md](research/optimization.md)).
 - **Rib thickness from the floor** - with no floor thickening, 20 mm ribs on a 15 mm floor are left
-  out; starting ribs at 0.6-0.8 of the floor they stand on would keep them.
+  out; starting ribs at 0.6-0.8 of the floor they stand on would keep them. The design grid adds a
+  floor of its own: four 3 mm cells across a rib, 12 mm - so on this housing's 15 mm floors only 12
+  mm ribs pass both, and the campaigns made with 20 mm ribs now reject 37 of 40 designs. A finer
+  grid where ribs are thin, or thickness as a share of the floor, would widen the window.
+- **What a record keeps** - a design's Zarr store is about 28 MB with the volume (TET10 connectivity,
+  displacement and von Mises at every node) beside agenticCAE's surface arrays; about 110 GB at
+  4,000 designs. The surface alone and the field would be about a third of that.
+- **The Code_Aster fallback** ran past its 15 minutes on one design of the same size the baseline
+  deck solves in 2 min 35 s; why is not yet known. It is called only when cuDSS fails twice.
 
 ## Later
 

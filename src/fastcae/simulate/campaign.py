@@ -190,7 +190,7 @@ def _room(tracker: Tracker, index: int) -> float:
         if not said:
             tracker.set(index, stage="waiting")
             tracker.job.event(
-                f"design {index}: waiting - the runner holds {machine.committed_gb():.1f} GB "
+                f"design #{index + 1}: waiting - the runner holds {machine.committed_gb():.1f} GB "
                 f"of the {limit:.1f} GB it may use",
                 design=index,
             )
@@ -249,7 +249,7 @@ def _solve_aster(shared: Shared, carried: carry.Carried, index: int) -> signals.
     work = shared.work / f"{index}-aster"
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
-    aster.write_mail(carried.mesh, work / "design.mail", title=f"design {index}")
+    aster.write_mail(carried.mesh, work / "design.mail", title=f"design {index + 1}")
     (work / "convert.comm").write_text(
         "DEBUT(LANG='EN')\nMESH = LIRE_MAILLAGE(FORMAT='ASTER', UNITE=20)\n"
         "IMPR_RESU(FORMAT='MED', UNITE=21, RESU=_F(MAILLAGE=MESH))\nFIN()\n",
@@ -336,7 +336,7 @@ def solve_one(shared: Shared, tracker: Tracker, index: int) -> dict:
                 f"{c['check']}: {c.get('reason', '')}" for c in said if c["outcome"] == "reject"
             ]
             raise SetAside("its own rules reject it - " + "; ".join(failed)[:400])
-        job.event(f"design {index}: built in {record['stages']['build']:.0f} s", design=index)
+        job.event(f"design #{index + 1}: built in {record['stages']['build']:.0f} s", design=index)
 
         t = _timed(tracker, index, "mesh", started)
         try:
@@ -344,7 +344,8 @@ def solve_one(shared: Shared, tracker: Tracker, index: int) -> dict:
             route.append("CGAL")
         except (tetmesh.MeshFailed, RuntimeError) as error:
             job.event(
-                f"design {index}: mesh failed ({error}); again from another start", design=index
+                f"design #{index + 1}: mesh failed ({error}); again from another start",
+                design=index,
             )
             mesh, meshed = _mesh(shared, built, index, seed=int(ROUTE["seed"]) + 1)
             route.append("CGAL, second start")
@@ -360,7 +361,7 @@ def solve_one(shared: Shared, tracker: Tracker, index: int) -> dict:
             **{k: v for k, v in meshed.items() if k in ("seconds", "seed", "sizes")},
         }
         job.event(
-            f"design {index}: meshed in {record['stages']['mesh']:.0f} s, "
+            f"design #{index + 1}: meshed in {record['stages']['mesh']:.0f} s, "
             f"{record['mesh']['unknowns']:,} unknowns",
             design=index,
         )
@@ -395,7 +396,7 @@ def solve_one(shared: Shared, tracker: Tracker, index: int) -> dict:
             route.append("cuDSS, second try" if failures else "cuDSS")
         else:
             job.event(
-                f"design {index}: cuDSS failed twice ({failures[-1]}); Code_Aster instead",
+                f"design #{index + 1}: cuDSS failed twice ({failures[-1]}); Code_Aster instead",
                 design=index,
             )
             answer = _solve_aster(shared, carried, index)
@@ -445,7 +446,7 @@ def solve_one(shared: Shared, tracker: Tracker, index: int) -> dict:
         if record["outcome"] == "solved"
         else f"set aside: {record['reason']}"
     )
-    job.event(f"design {index}: {said}", design=index, outcome=record["outcome"])
+    job.event(f"design #{index + 1}: {said}", design=index, outcome=record["outcome"])
     return record
 
 

@@ -145,7 +145,7 @@ function DesignRow({ state }: { state: DesignState }) {
   const now = state.stage && !state.outcome ? state.stage : null;
   return (
     <div className="design-state" data-outcome={state.outcome ?? "going"}>
-      <span className="mono">#{state.index}</span>
+      <span className="mono">#{state.index + 1}</span>
       <span className="stage-chips">
         {STAGES.map(([key, letter, says]) => {
           const seconds = state.stages?.[key];

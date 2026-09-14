@@ -361,15 +361,15 @@ tight integration on the housing.
 
 ## Next
 
-**Now** - the next phase in [build-plan.md](build-plan.md), in its order. The compiled mesher with
-feature sizes and the gate against the production housing's CAD are done in the bench; two calls wait
-on the engineer - counting the gate passed, and the solver for a design too big for the card. Designs
-are built for runs: on the GPU, each check timed, no surface drawn, from a campaign's folder by any
-process. Then the rest of the route in the product - meshed from the field, labelled from the part's
-CAD faces, weighed from the mesh and held to it being valid, solved by cuDSS with agenticCAE's
-supports, run by a runner that keeps designs in progress on the GPU and the cores at once; the
-40-design check; then the data in rounds, the field model, and the agents that supervise it. Mould
-release with the pull and cores, and the engineer's review loop, after.
+**Now** - the next phase in [build-plan.md](build-plan.md), in its order. The route runs in the
+product: the baseline's own deck reproduced, and a campaign's designs built, meshed, set up, solved
+and recorded by the runner unattended ([research/campaign-runs.md](research/campaign-runs.md)). Next:
+runs one, two and three at a time as a timeline, then the 40-design check with Code_Aster re-solving
+a sample. Calls that wait on the engineer: counting the gate passed; how a variant's rib thickness
+follows the floor it stands on (on this housing only 12 mm ribs pass both the floor rule and the
+grid's four cells); what a record keeps (about 28 MB a design with the volume); and the solver for a
+design too big for the card. Then the data in rounds, the field model, and the agents that
+supervise it. Mould release with the pull and cores, and the engineer's review loop, after.
 
 Alongside, on Extract:
 
