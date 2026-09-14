@@ -122,9 +122,13 @@ time on this machine; their solves alone, 15 hours. The next speed work is the b
 not the solver.
 
 **The mesher.** fTetWild took 103 minutes on the surface decimated to 400,000 triangles with a
-0.95 mm envelope, and 31 minutes on 200,000 with a 1.9 mm envelope and lighter optimisation. gmsh,
-asked to split the 200,000-triangle surface into patches and re-parametrise them before its parallel
-mesher, had not finished that first step after 30 minutes (`mesh_gmsh.py`).
+0.95 mm envelope, and 31 minutes on 200,000 with a 1.9 mm envelope and lighter optimisation. A
+coarser input does not rescue it: decimated as far as it would go, to 102,100 triangles, it still
+took 26 minutes, and the decimation had spoiled the part - its boundary up to 23 mm from the design
+in places, the bolt holes down to a third of their triangles. gmsh, asked to split the
+200,000-triangle surface into patches and re-parametrise them before its parallel mesher, had not
+finished that first step after 30 minutes (`mesh_gmsh.py`). A faster mesher has to start from
+somewhere else - the distance field itself, or a cleanly remeshed surface.
 
 **The build's slowest step** is the exact distance from the design's grid cells to the part's
 surface, point against triangle on the CPU - about 70,000 cells a second. The same query against a
