@@ -147,6 +147,28 @@ def write_store(path: Path, mesh: FEMesh, answer: Answer, groups: list[str], att
     return qa
 
 
+def read_store(path: Path) -> tuple[FEMesh, dict[str, np.ndarray]]:
+    """A design's store read back: its mesh - TET10 and the groups the deck acts on - and its
+    answer at every node, ``disp`` (N, 3) and ``vm`` (N,), the first load case."""
+    import zarr
+
+    root = zarr.open_group(str(path), mode="r")
+    nodes = np.asarray(root["volume_coords"][...], dtype=np.float64)
+    groups = root["groups"]
+    mesh = FEMesh(
+        nodes=nodes,
+        cells={"TETRA10": np.asarray(root["tets"][...], dtype=np.int64)},
+        node_groups={name: np.asarray(groups[name][...], dtype=np.int64) for name in groups},
+        cell_groups={},
+        name=path.stem,
+    )
+    answer = {
+        "disp": np.asarray(root["volume_disp"][...][:, 0, :], dtype=np.float64),
+        "vm": np.asarray(root["volume_vm"][...][:, 0], dtype=np.float64),
+    }
+    return mesh, answer
+
+
 def write_record(path: Path, record: dict) -> None:
     partial = path.with_suffix(".partial")
     partial.write_text(json.dumps(record, indent=1, default=_plain), encoding="utf-8")

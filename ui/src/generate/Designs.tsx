@@ -34,6 +34,7 @@ import {
   stageSaid,
   toLines,
 } from "../panel/shared";
+import { DesignFe } from "./DesignFe";
 import { Plans, blockColours } from "./Plans";
 
 export type DesignTab = "paths" | "field" | "mesh" | "setup" | "results" | "plans";
@@ -514,19 +515,25 @@ export function DesignStage(props: { designs: Designs; showPart: boolean; onPart
     );
   }
   if (tab === "mesh" || tab === "setup" || tab === "results") {
+    const letter = { mesh: "M", setup: "S", results: "R" }[tab] as StageKey;
+    if (detail && detail.stages[letter] === "pass") {
+      return <DesignFe run={designs.run} index={detail.index} tab={tab} />;
+    }
     const what = {
-      mesh: "Meshing is next: a design's field, built and checked, meshed for the solver - the mesh kept beside the run like the field is.",
-      setup: "Solver setup follows the mesh: the loads and supports the study names, and the deck written for the solver.",
-      results: "Results follow the solve: stresses, displacements and frequencies read back - the data Learn trains on.",
+      mesh: "Its mesh: CGAL from its field, held to the solver deck mesh's sizes and two elements through every rib.",
+      setup: "Its setup: the deck's supports, couplings and loads, carried to its mesh by the CAD faces they lie on.",
+      results: "Its results: displacement and stress everywhere, and the deck's signals - solved by cuDSS.",
     }[tab];
     return (
       <div className="stage-page">
         <div className="later">
-          <h2>{DESIGN_TABS.find((t) => t.id === tab)?.label} - not built yet</h2>
+          <h2>{DESIGN_TABS.find((t) => t.id === tab)?.label} - not solved yet</h2>
           <p>{what}</p>
-          {detail && detail.stages.F === "none" ? (
-            <p className="dim">This design's field is not built yet either: Build field on the right.</p>
-          ) : null}
+          <p className="dim">
+            {detail?.solved?.outcome === "set aside"
+              ? `The runner set it aside: ${detail.solved.reason}`
+              : "Solve a campaign's designs on Campaign; the runner meshes, sets up and solves each."}
+          </p>
         </div>
       </div>
     );

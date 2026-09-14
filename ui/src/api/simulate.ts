@@ -263,4 +263,12 @@ export const sim = {
       in_flight: inFlight,
     }),
   solving: (run: string) => getJson<Solving>(`/api/runs/${encodeURIComponent(run)}/solving`),
+  designSkin: (run: string, index: number) =>
+    fetchSkin(`/api/runs/${encodeURIComponent(run)}/designs/${index}/fe/mesh`),
+  designGlyphs: (run: string, index: number) =>
+    getJson<GlyphData>(`/api/runs/${encodeURIComponent(run)}/designs/${index}/fe/glyphs`),
+  designField: (run: string, index: number, name: string, vectors = false) =>
+    fetchValues(
+      `/api/runs/${encodeURIComponent(run)}/designs/${index}/fe/field?name=${encodeURIComponent(name)}&vectors=${vectors}`,
+    ),
 };

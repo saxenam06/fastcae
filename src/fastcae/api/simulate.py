@@ -15,7 +15,7 @@ from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from .. import runner
-from ..simulate import baseline, campaign, fem, signals
+from ..simulate import baseline, campaign, fem, records, signals
 from ..simulate import jobs as simulate_jobs
 from ..simulate.fem import FEMesh
 from ..simulate.setup import FORCES, MOMENTS
@@ -532,6 +532,79 @@ def get_solving(run: str, since: int = 0) -> dict:
         "events": events[-200:],
         "since": since + len(events),
     }
+
+
+# --- one solved design, from its record --------------------------------------------------------
+
+_STORES: dict[tuple, tuple] = {}
+
+
+def _store(run: str, index: int):  # type: ignore[no-untyped-def]
+    """A solved design's mesh and answer, from its Zarr store - the last few read kept."""
+    project, result, deck = _deck()
+    path = campaign.solved_folder(project, run) / f"{int(index)}.zarr"
+    if not path.is_dir():
+        raise HTTPException(404, f"design {int(index) + 1} of {run} has not been solved")
+    key = (str(path), path.stat().st_mtime_ns)
+    if key not in _STORES:
+        while len(_STORES) >= 3:
+            _STORES.pop(next(iter(_STORES)))
+        _STORES[key] = records.read_store(path)
+    mesh, answer = _STORES[key]
+    return result, deck, mesh, answer
+
+
+@router.get("/api/runs/{run}/designs/{index}/fe/mesh")
+def get_design_fe_mesh(run: str, index: int) -> Response:
+    """A solved design's mesh outside, each triangle with the deck's group it lies in."""
+    _, deck, mesh, _ = _store(run, index)
+    return Response(
+        skin_blob(mesh, _patch_names(deck.setup)), media_type="application/octet-stream"
+    )
+
+
+@router.get("/api/runs/{run}/designs/{index}/fe/glyphs")
+def get_design_fe_glyphs(run: str, index: int) -> dict:
+    """The deck's supports, couplings and loads on a solved design, where it put them."""
+    import copy
+
+    result, deck, mesh, _ = _store(run, index)
+    references = (result.anchoring or {}).get("references") or {}
+    names = list(references)
+    first = len(mesh.nodes)
+    placed = FEMesh(
+        nodes=np.vstack([mesh.nodes, np.array([references[n] for n in names]).reshape(-1, 3)]),
+        cells={**mesh.cells, "POI1": np.arange(first, first + len(names))[:, None]},
+        node_groups={
+            **mesh.node_groups,
+            **{n: np.array([first + i]) for i, n in enumerate(names)},
+        },
+        cell_groups={},
+        name=mesh.name,
+    )
+    setup = copy.deepcopy(deck.setup)
+    setup.resolve({g for g, m in placed.node_groups.items() if len(m) == 1})
+    return glyphs(placed, setup)
+
+
+@router.get("/api/runs/{run}/designs/{index}/fe/field")
+def get_design_fe_field(run: str, index: int, name: str, vectors: bool = False) -> Response:
+    """One field of a solved design's answer at every node of its outside."""
+    _, _, mesh, answer = _store(run, index)
+    nodes = _skin_nodes(mesh)
+    disp = answer["disp"]
+    if name == "displacement":
+        values = np.linalg.norm(disp[nodes], axis=1)
+    elif name in ("DX", "DY", "DZ"):
+        values = disp[nodes, ("DX", "DY", "DZ").index(name)]
+    elif name == "von Mises":
+        values = answer["vm"][nodes]
+    else:
+        raise HTTPException(404, f"no field {name!r}")
+    return Response(
+        values_blob(values, disp[nodes] if vectors else None),
+        media_type="application/octet-stream",
+    )
 
 
 # --- jobs ----------------------------------------------------------------------------------------
