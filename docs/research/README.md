@@ -19,7 +19,7 @@ and dates; runtimes marked *(est.)* are estimates, not published benchmarks.
 | [data-factories.md](data-factories.md) | How the companies building physics AI make their data, from their job ads - geometry, meshing, solving, running at scale, how much data, agents - and the meshing tools checked for fastcae's route |
 | [optimization.md](optimization.md) | Surrogate-based optimisation as vendors and open source practise it, and the stack recommended here |
 | [agenticcae.md](agenticcae.md) | The earlier agenticCAE project on the same housing: its load case, supports, mesh, solver, measured times, cloud runs and agent - what fastcae reuses and what it adapts |
-| [reference-docs.md](reference-docs.md) | What the strategy documents in `docs/` decide and leave open, and what the study of shortening the build and mesh proposes, what checked out and what did not |
+| [reference-docs.md](reference-docs.md) | What four outside documents in [../inputs/](../inputs/README.md) decide and leave open, and what the study of shortening the build and mesh proposes, what checked out and what did not |
 
 ## Where fastcae stands, in short
 
