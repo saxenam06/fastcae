@@ -115,44 +115,6 @@ def fill(
     return filled
 
 
-def start(free: dict[str, dict], kind: str, given: dict[str, Any]) -> None:
-    """Where a variant starts on the card: every choice as likely as the next; and, for ribs, as
-    the knowledge says - how thick, how far apart, how tall, how many - for every setting nobody
-    gave, over what the part read, with a root fillet, edge round and draft each of a few choices -
-    the smallest, the middle and the largest the part offers - the middle one suggested."""
-    # Drawn at random, every choice as likely as the next - no pattern weighted over another.
-    for domain in free.values():
-        domain.pop("weights", None)
-    if kind != "ribs":
-        return
-    start = knowledge.rib_start()
-    basis = str(start["source"])
-    for name in ("thickness_mm", "spacing_mm"):
-        if name in free and name not in given and name in start:
-            value = float(start[name])
-            free[name] = {**free[name], "low": value, "high": value, "suggested": value}
-            free[name].update(source="default", basis=basis)
-    for name in ("count", "height_thicknesses"):
-        if name in free and name not in given and name in start:
-            ranged = start[name]
-            free[name] = {
-                **free[name],
-                **{k: ranged[k] for k in ("low", "high", "step", "suggested")},
-                "source": "default",
-                "basis": basis,
-            }
-    most = int(start.get("choices") or 3)
-    for name in ("root_fillet_mm", "edge_round_mm", "draft_deg"):
-        domain = free.get(name)
-        if domain is None or name in given or not domain.get("options"):
-            continue
-        options = sorted(domain["options"])
-        if len(options) > most:
-            options = [options[round(k * (len(options) - 1) / (most - 1))] for k in range(most)]
-        free[name] = {**domain, "options": options, "suggested": options[len(options) // 2]}
-        free[name].pop("weights", None)
-
-
 # How far apart what a range takes is, when the part suggests it: five in its own unit - a height
 # in thicknesses by halves, and one said as a share of what its ends meet by five percent.
 STEP = 5.0

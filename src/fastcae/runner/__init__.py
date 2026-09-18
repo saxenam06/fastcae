@@ -1,6 +1,6 @@
 """The runner: a process of its own, outside the development server, that works through jobs -
-solving the baseline again, meshing and solving it by the variant route, building, meshing and
-solving every design of a campaign - while the interface watches.
+solving the baseline again, building, meshing and solving every design of a campaign - while the
+interface watches.
 
 **Outside the server** because a server that reloads when its code changes would kill whatever it
 was doing, and a campaign takes hours. The server only writes a job down and reads how it is going.

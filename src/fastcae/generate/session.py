@@ -55,7 +55,7 @@ from ..spec import (
     Words,
     gather_words,
 )
-from .blocks import WEBS_JOIN, fill, start
+from .blocks import fill
 from .intent import IntentError, Made, Opened, make
 from .placement import Drilled, Placed, _Faces, axis_of, host_of, place_all
 from .repair import repair
@@ -129,10 +129,6 @@ class Session:
     its designs - the last few looked at."""
     changed: set[str] = field(default_factory=set)
     """What changed since the interface last asked - ``draft``, ``study``, ``design``."""
-    variant: str | None = None
-    """The variant being authored on Design a variant - its id, new or kept in the library - whose
-    one block the draft is; or None, and the draft is the study's next version, as the agent
-    writes it."""
 
     def __post_init__(self) -> None:
         load(self)
@@ -141,36 +137,19 @@ class Session:
 # --- the draft, read and written -----------------------------------------------------------------
 
 
-def _name(session: Session) -> str:
-    """What the draft is written as: the variant being authored, or the study."""
-    return session.variant or STUDY_NAME
-
-
-def _folder(session: Session) -> str:
-    return variants.FOLDER if session.variant else studies.STUDY_DIR
-
-
 def _saved(session: Session) -> studies.StudyVersion | None:
-    """What the draft is read back from: the variant as kept, or the study as accepted."""
-    if session.variant:
-        kept_variant = variants.load(session.project, session.variant)
-        return kept_variant.current if kept_variant is not None else None
+    """What the draft is read back from: the study as accepted."""
     study = studies.active(session.project)
     return study.current if study is not None else None
 
 
 def _build(session: Session, entries: dict[str, Any]) -> studies.StudyVersion:
-    """The version the draft would write, checked - a variant's rules may name the ribs and holes
-    of any other in the library."""
-    known = variants.kinds(session.project, but=session.variant) if session.variant else None
-    return studies.build(
-        session.project, _name(session), folder=_folder(session), known_blocks=known, **entries
-    )
+    """The version the draft would write, checked."""
+    return studies.build(session.project, STUDY_NAME, **entries)
 
 
 def load(session: Session) -> None:
-    """Read the draft back from the study's current version - or the variant's, when one is being
-    authored - forgetting what was not accepted."""
+    """Read the draft back from the study's current version, forgetting what was not accepted."""
     session.draft, session.heard, session.attention = _nothing(), [], []
     version = _saved(session)
     if version is not None:
@@ -362,13 +341,6 @@ def hand(session: Session, action: dict[str, Any], selected: list[int] | None = 
         what = str(action.get("add") or "")
         if what not in BY_HAND:
             return {"refused": f"a block adds {', '.join(BY_HAND)} - not {what!r}"}
-        if session.variant and what == "material":
-            return {"refused": "a part is cast in one material, which no variant changes"}
-        if session.variant and ids:
-            return {
-                "refused": "a variant is one change in one place: create this one, then start "
-                "another for the next"
-            }
         if what != "material" and not refs:
             return {"refused": "select the faces on the part first, or name them"}
         floor = _no_floor(session, refs) if what == "ribs" else None
@@ -383,7 +355,7 @@ def hand(session: Session, action: dict[str, Any], selected: list[int] | None = 
         number = 1
         while f"b{number}" in ids:
             number += 1
-        new = session.variant or f"b{number}"
+        new = f"b{number}"
         said = {
             "ribs": f"add {new}, ribs standing on {_and(refs)}",
             "webs": f"add {new}, webs between {_and(refs)} with nothing under them",
@@ -582,9 +554,6 @@ def _entries(session: Session) -> tuple[dict[str, Any], dict[str, dict]]:
             floor,
         )
         free = filled["free"]
-        if session.variant and free is not None:
-            # A variant authored on the card starts simple, where nothing was set by hand.
-            start(free, block.get("add", "ribs"), block["settings"])
         for name, setting in block["settings"].items():
             free[name] = {"unit": _unit(name), **_domain(setting, free.get(name, {}))}
         # Every choice the part offers for what the engineer narrowed, so the card can offer them
@@ -608,8 +577,6 @@ def _entries(session: Session) -> tuple[dict[str, Any], dict[str, dict]]:
                 },
                 floor,
             )
-            if session.variant and offered.get("free") is not None:
-                start(offered["free"], block.get("add", "ribs"), {})
             choices = {
                 n: list(offered["free"][n]["options"])
                 for n in narrowed
@@ -648,14 +615,6 @@ def _entries(session: Session) -> tuple[dict[str, Any], dict[str, dict]]:
             **{k: filled[k] for k in ("needed", "problems", "cannot", "note")},
             "choices": choices,
         }
-        webs = block.get("add", "ribs") == "ribs" and not block["support"]
-        if session.variant and webs and not other:
-            # Webs on the card run from one side to another, never within the faces of one: what
-            # they join is both sides - the other still to add, which is all they need said.
-            reports[block["id"]]["needed"] = [
-                *(n for n in reports[block["id"]]["needed"] if n != WEBS_JOIN),
-                "what the webs run to - select those faces and add them as the other side",
-            ]
     suggested += _holes_clear_of_ribs(draft, blocks)
     entries = {
         "quotes": list(session.heard),
@@ -669,12 +628,10 @@ def _entries(session: Session) -> tuple[dict[str, Any], dict[str, dict]]:
             *suggested,
             *closed_interfaces(session.extraction),
         ],
-        # A variant is one change and every rule it holds - no pull while mould release waits for
-        # one, nothing preferred, no target: how many designs is the campaign's to say.
-        "prefer": [] if session.variant else list(draft["prefer"]),
-        "objectives": [] if session.variant else list(draft["objectives"]),
-        "pull": None if session.variant else (draft["pull"] or pull),
-        "target": None if session.variant else draft["target"],
+        "prefer": list(draft["prefer"]),
+        "objectives": list(draft["objectives"]),
+        "pull": draft["pull"] or pull,
+        "target": draft["target"],
         "measured": measured,
     }
     return entries, reports
@@ -999,55 +956,12 @@ def _read(session: Session, version: studies.StudyVersion, reports: dict[str, di
         "cannot": None,
         "refused": False,
         **now,
-        "open": [line for line in studies.open_items(version) if not _about_pull(line, session)],
+        "open": studies.open_items(version),
         "assumed": studies.assumed(version),
         "attention": list(session.attention),
         "names": names(features, real),
         "runs": runs(session),
-        "variant": _variant_said(session, version),
-        "offered": _offered(),
     }
-
-
-def _about_pull(line: str, session: Session) -> bool:
-    """Whether an open item asks for the pull - which a variant does not hold."""
-    return bool(session.variant) and line.startswith("the pull direction")
-
-
-def _variant_said(session: Session, version: studies.StudyVersion) -> dict | None:
-    """The variant being authored: its code, its name - as kept, or suggested from what it adds
-    and where - whether it is kept yet, and how many combinations it allows."""
-    if not session.variant:
-        return None
-    kept = variants.load(session.project, session.variant)
-    block = version.blocks[0] if version.blocks else None
-    label = kept.label if kept is not None and kept.label else None
-    return {
-        "id": session.variant,
-        "label": label or (variants.suggested_label(block) if block is not None else ""),
-        "kept": kept is not None,
-        "kind": variants.kind_of(block) if block is not None else None,
-        "combinations": studies.combinations(block) if block is not None else 0,
-        "others": [
-            {"id": v["id"], "label": v["label"], "kind": v["kind"]}
-            for v in (variants.listed(o) for o in variants.library(session.project))
-            if v["id"] != session.variant
-        ],
-    }
-
-
-def _offered() -> list[dict[str, Any]]:
-    """The rules a variant may hold, as the card offers them: each kind, what it reads as, and
-    what it needs."""
-    return [
-        {
-            "kind": kind,
-            "says": studies.KINDS[kind].says,
-            "needs": list(studies.KINDS[kind].needs),
-            "names": studies.KINDS[kind].names,
-        }
-        for kind in studies.OFFERED
-    ]
 
 
 def _refused(session: Session, why: str) -> dict:
@@ -1066,13 +980,7 @@ def _refused(session: Session, why: str) -> dict:
         "assumed": [],
         "attention": list(session.attention),
         "names": {},
-        "variant": _variant_said(session, _nothing_version()) if session.variant else None,
-        "offered": _offered(),
     }
-
-
-def _nothing_version() -> studies.StudyVersion:
-    return studies.StudyVersion(version=0, created="", words=[], blocks=[])
 
 
 def _shown(version: studies.StudyVersion, reports: dict[str, dict]) -> dict:
@@ -1468,149 +1376,12 @@ def paths(session: Session, draft: bool = True, values: dict | None = None) -> d
     }
 
 
-# --- variants, authored on the card ---------------------------------------------------------------
-
-# How many points of a variant Show paths tries, at most, to find one that passes.
-SAMPLE_TRIES = 48
-
-
-def new_variant(session: Session) -> dict:
-    """A new variant to author: an id no variant has had, and nothing in it yet."""
-    session.variant = variants.new_id(session.project)
-    session.draft, session.heard, session.attention = _nothing(), [], []
-    session.changed.add("draft")
-    return view(session)
-
-
-def open_variant(session: Session, vid: str) -> dict:
-    """A variant of the library to change: the draft read back from it as kept."""
-    if variants.load(session.project, vid) is None:
-        return {"refused": f"there is no variant {vid}"}
-    session.variant = vid
-    load(session)
-    return view(session)
-
-
-def discard_variant(session: Session) -> dict:
-    """Forget what was not saved: the variant as kept - or, never kept, nothing in it."""
-    load(session)
-    return view(session)
-
-
-def save_variant(session: Session, label: str | None = None) -> dict:
-    """The variant being authored, kept in the library once one of its points passes - created, or
-    saved as changed, called ``label``. ``{"variant": id, "version": n, "label": ...}``, or
-    ``{"cannot": why}``: nothing is kept that no design could be made of."""
-    if not session.variant:
-        return {"cannot": "no variant is being authored"}
-    if not session.draft["blocks"]:
-        return {"cannot": "add ribs, webs, a thickening or holes first: select faces on the part"}
-    card = view(session)
-    if card.get("refused"):
-        return {"cannot": card["cannot"]}
-    kept = variants.load(session.project, session.variant)
-    name = (
-        (label or "").strip()
-        or (kept.label if kept is not None else "")
-        or card["variant"]["label"]
-    )
-    if kept is not None and not card["differs"]:
-        variants.rename(session.project, session.variant, name)
-        session.changed.add("variants")
-        return {"variant": session.variant, "version": kept.current.version, "label": name}
-    sample = variant_sample(session)
-    if "cannot" in sample:
-        return {"cannot": sample["cannot"]}
-    try:
-        entries, _ = _entries(session)
-        written = studies.write(
-            session.project,
-            session.variant,
-            folder=variants.FOLDER,
-            make_active=False,
-            label=name,
-            known_blocks=variants.kinds(session.project, but=session.variant),
-            **entries,
-            note="; ".join(card["changes"])[:400],
-        )
-    except (studies.StudyError, ValueError) as error:
-        return {"cannot": str(error)}
-    load(session)
-    session.changed.add("variants")
-    return {"variant": session.variant, "version": written.version, "label": name}
-
-
-def variant_sample(session: Session, another: bool = False, seed: int | None = None) -> dict:
-    """The variant being authored at a point that passes: its suggested point first - or, for
-    another sample, points drawn at random from what it allows - each placed alone, repaired and
-    screened, until one passes. Its lines, what repair left out, what it made; or why none of the
-    points tried passes, the commonest reasons first."""
-    try:
-        entries, _ = _entries(session)
-        version = _build(session, entries)
-    except (studies.StudyError, ValueError) as error:
-        return {"cannot": str(error)}
-    if not version.blocks:
-        return {"cannot": "add ribs, webs, a thickening or holes first: select faces on the part"}
-    block = version.blocks[0]
-    first = _pieces(version)
-    if not first.any():
-        return {"cannot": "; ".join(first.cannot) or "nothing it asks for can be placed yet"}
-    draw = random.Random(seed)
-    points: list[dict[str, Any]] = [] if another else [{}]
-    while len(points) < SAMPLE_TRIES:
-        points.append(random_point(block, draw))
-    walls = measure_walls(session.extraction, _measure(session).exit_along, first.offsets)
-    why: Counter[str] = Counter()
-    for number, values in enumerate(points, start=1):
-        outcome = _tried(session, version, {block.id: values}, first.radius(), walls)
-        if isinstance(outcome, str):
-            return {"cannot": outcome}
-        pieces, mended, screened = outcome
-        if screened.outcome == "reject":
-            why.update(f["check"] for f in screened.rejected())
-            continue
-        rows = _rows(pieces, mended.placed)
-        return {
-            "lines": [line for result in mended.placed.values() for line in result.tried],
-            **_counted(mended.placed),
-            # A variant is one block: what it made, without its code.
-            "summary": "; ".join(row["says"] for row in rows.values()),
-            "blocks": rows,
-            "values": values,
-            "about": _about(version, {block.id: values}).get(block.id, ""),
-            "left_out": mended.left_out,
-            "left_out_said": left_out_said(mended.left_out),
-            "findings": [f for f in screened.findings if f["outcome"] != "pass"],
-            "tried": number,
-            "drawn": _drawn(block, another, seed, number),
-            "waiting": first.cannot,
-        }
-    reasons = ", ".join(f"{check} {n}" for check, n in why.most_common(3))
-    return {
-        "cannot": f"none of the {len(points)} points tried passes ({reasons}) - change where it "
-        "stands or what it may take"
-    }
-
-
-def _drawn(block: studies.Block, another: bool, seed: int | None, number: int) -> str:
-    """How a sample of a variant was drawn, in a sentence: its suggested point, or a point drawn at
-    random - every choice and every step of a range as likely as the next - and on which try of how
-    many it passed."""
-    if not any(not domain.fixed for domain in block.free.values()):
-        return "Nothing in it varies: every sample is its one design."
-    if not another and number == 1:
-        return "At its suggested point: every setting where it starts."
-    random_ = "every choice, and every step of a range, as likely as the next"
-    tries = f"passed on try {number} of up to {SAMPLE_TRIES}"
-    if not another:
-        return f"Its suggested point did not pass, so drawn at random: {random_}; {tries}."
-    return f"Drawn at random (seed {seed}): {random_}; {tries}."
+# --- variants of the library, read only -----------------------------------------------------------
 
 
 def variant_shown(session: Session, vid: str) -> dict | None:
     """A variant of the library as a campaign shows it, read only: what it adds and where, what it
-    may vary, every rule it holds - never the one being authored, which stays as it is."""
+    may vary, every rule it holds."""
     kept = variants.load(session.project, vid)
     if kept is None:
         return None
@@ -1635,8 +1406,7 @@ def variant_shown(session: Session, vid: str) -> dict | None:
 
 def random_point(block: studies.Block, draw: random.Random) -> dict[str, Any]:
     """A point of a block drawn at random: each setting that is not fixed at a value it may take,
-    each value as likely as the next - choices by their weights, where a study weighs them; a
-    variant weighs none."""
+    each value as likely as the next - choices by their weights, where the block weighs them."""
     return {
         name: studies._at(domain, draw.random())
         for name, domain in sorted(block.free.items())

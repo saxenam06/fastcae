@@ -11,9 +11,4 @@ from ..simulate import jobs as simulate_jobs
 HANDLERS: dict[str, Callable] = {
     "campaign.solve": campaign.solve_campaign,
     "baseline.cudss": simulate_jobs.solve_deck,
-    "route.field": simulate_jobs.route_field,
-    "route.mesh": simulate_jobs.route_mesh,
-    "route.setup": simulate_jobs.route_setup,
-    "route.solve": simulate_jobs.route_solve,
-    "route.all": simulate_jobs.route_all,
 }

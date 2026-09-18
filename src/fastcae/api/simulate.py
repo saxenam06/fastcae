@@ -1,4 +1,4 @@
-"""HTTP surface of Simulate: the baseline's deck and answers, the variant route, the runner's jobs.
+"""HTTP surface of Simulate: the baseline's deck and answers, the runner's jobs.
 
 Routes unpack, call the engine, pack. Meshes travel as binary: the outside of the mesh - its
 boundary triangles and the nodes on them - with each triangle's group, and fields as one value per
@@ -15,8 +15,7 @@ from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from .. import runner
-from ..simulate import baseline, campaign, fem, records, signals
-from ..simulate import jobs as simulate_jobs
+from ..simulate import baseline, campaign, records, signals
 from ..simulate.fem import FEMesh
 from ..simulate.setup import FORCES, MOMENTS
 
@@ -141,11 +140,12 @@ def get_deck() -> dict:
     out = {"present": True, **baseline.summary(deck)}
     out["anchoring"] = result.anchoring
     out["patches"] = _patch_names(deck.setup)
-    out["answers"] = _answers(project, result, deck)
+    out["answers"] = _answers(project, deck)
     return out
 
 
-def _answers(project, result, deck) -> list[dict]:  # type: ignore[no-untyped-def]
+def _answers(project, deck) -> list[dict]:  # type: ignore[no-untyped-def]
+    """The deck's own answer, as it came back from its run, and fastcae's reproduction of it."""
     rows = [
         {
             "id": "aster",
@@ -163,17 +163,6 @@ def _answers(project, result, deck) -> list[dict]:  # type: ignore[no-untyped-de
             "provenance": "generated",
             "available": stored is not None,
             "meta": stored[1] if stored else None,
-        }
-    )
-    key = simulate_jobs.route_key(project, deck, result.cad_digest)
-    route = baseline.load_answer(project, "route", key)
-    rows.append(
-        {
-            "id": "route",
-            "label": "cuDSS · field route",
-            "provenance": "generated",
-            "available": route is not None,
-            "meta": route[1] if route else None,
         }
     )
     return rows
@@ -276,7 +265,7 @@ def glyphs(mesh: FEMesh, setup) -> dict:  # type: ignore[no-untyped-def]
 
 
 def _answer(run: str):  # type: ignore[no-untyped-def]
-    project, result, deck = _deck()
+    project, _, deck = _deck()
     if run == "aster":
         answer = deck.answer()
         if answer is None:
@@ -287,13 +276,6 @@ def _answer(run: str):  # type: ignore[no-untyped-def]
         if stored is None:
             raise HTTPException(404, "not solved by cuDSS yet")
         return deck.mesh, stored[0], deck
-    if run == "route":
-        key = simulate_jobs.route_key(project, deck, result.cad_digest)
-        stored = baseline.load_answer(project, "route", key)
-        carried = simulate_jobs.route_paths(project, key)["carried"]
-        if stored is None or not carried.exists():
-            raise HTTPException(404, "the variant route has not been solved yet")
-        return fem.load(carried), stored[0], deck
     raise HTTPException(404, f"no answer {run!r}")
 
 
@@ -325,16 +307,15 @@ def get_difference(name: str, a: str = "aster", b: str = "cudss") -> Response:
 @router.get("/api/deck/signals")
 def get_signals() -> dict:
     """Every signal of every answer there is, side by side."""
-    project, result, deck = _deck()
+    _, _, deck = _deck()
     runs: dict[str, list[signals.Signal]] = {}
     labels = {}
-    for run in ("aster", "cudss", "route"):
+    for run in ("aster", "cudss"):
         try:
             mesh, answer, _ = _answer(run)
         except HTTPException:
             continue
-        setup = deck.setup if run != "route" else simulate_jobs._carried_setup(deck, mesh)
-        runs[run] = signals.signals(mesh, setup, answer)
+        runs[run] = signals.signals(mesh, deck.setup, answer)
         labels[run] = answer.source
     rows: dict[tuple[str, str], dict] = {}
     for run, found in runs.items():
@@ -362,20 +343,13 @@ def get_signals() -> dict:
 @router.get("/api/deck/certificate")
 def get_certificate(other: str = "cudss") -> dict:
     """How a reproduction compares with the engineer's own answer, quantity by quantity."""
-    project, result, deck = _deck()
+    project, _, deck = _deck()
     ref_mesh, reference, _ = _answer("aster")
     mesh, answer, _ = _answer(other)
-    setup = deck.setup if other != "route" else simulate_jobs._carried_setup(deck, mesh)
     rows = signals.certificate(
-        (ref_mesh, deck.setup, reference), (mesh, setup, answer), same_mesh=other != "route"
+        (ref_mesh, deck.setup, reference), (mesh, deck.setup, answer), same_mesh=True
     )
-    stored = baseline.load_answer(
-        project,
-        other,
-        deck.digest
-        if other == "cudss"
-        else simulate_jobs.route_key(project, deck, result.cad_digest),
-    )
+    stored = baseline.load_answer(project, other, deck.digest)
     solver = {
         "reference": _aster_version(deck),
         "other": "cuDSS 0.8 (nvmath-python 1.0), linear static, TETRA10",
@@ -409,58 +383,6 @@ def post_solve() -> dict:
     """Solve the deck's own mesh and setup with cuDSS, on the runner."""
     project, _, _ = _deck()
     return {"job": runner.submit("baseline.cudss", project.name).id}
-
-
-# --- the variant route on the baseline -----------------------------------------------------------
-
-
-@router.get("/api/deck/route")
-def get_route() -> dict:
-    project, result, deck = _deck()
-    key = simulate_jobs.route_key(project, deck, result.cad_digest)
-    paths = simulate_jobs.route_paths(project, key)
-    meta = simulate_jobs.route_meta(project, key)
-    return {
-        "key": key,
-        "settings": simulate_jobs.ROUTE,
-        "steps": {step: meta.get(step) for step in ("field", "mesh", "setup", "solve")},
-        "has_mesh": paths["mesh"].exists(),
-        "has_setup": paths["carried"].exists(),
-        "jobs": runner.jobs(project=project.name, kind="route", limit=10),
-    }
-
-
-@router.post("/api/deck/route/{step}")
-def post_route(step: str) -> dict:
-    if step not in ("field", "mesh", "setup", "solve", "all"):
-        raise HTTPException(404, f"no step {step!r}")
-    project, _, _ = _deck()
-    return {"job": runner.submit(f"route.{step}", project.name).id}
-
-
-@router.get("/api/deck/route/mesh")
-def get_route_mesh() -> Response:
-    """The field route's mesh: carried setup's groups when it has them."""
-    project, result, deck = _deck()
-    key = simulate_jobs.route_key(project, deck, result.cad_digest)
-    paths = simulate_jobs.route_paths(project, key)
-    path = paths["carried"] if paths["carried"].exists() else paths["mesh"]
-    if not path.exists():
-        raise HTTPException(404, "the field has not been meshed yet")
-    return Response(
-        skin_blob(fem.load(path), _patch_names(deck.setup)), media_type="application/octet-stream"
-    )
-
-
-@router.get("/api/deck/route/glyphs")
-def get_route_glyphs() -> dict:
-    project, result, deck = _deck()
-    key = simulate_jobs.route_key(project, deck, result.cad_digest)
-    carried = simulate_jobs.route_paths(project, key)["carried"]
-    if not carried.exists():
-        raise HTTPException(404, "the setup has not been carried yet")
-    mesh = fem.load(carried)
-    return glyphs(mesh, simulate_jobs._carried_setup(deck, mesh))
 
 
 # --- a campaign's designs, solved ----------------------------------------------------------------

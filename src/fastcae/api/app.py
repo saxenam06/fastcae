@@ -56,21 +56,16 @@ from ..generate.session import (
     design_from_spec,
     design_from_study,
     design_paths,
-    discard_variant,
     drop_rule,
     go,
     hand,
     keep_built,
     kept_of,
-    new_variant,
-    open_variant,
     paths,
     run_design,
     run_designs,
     runs,
-    save_variant,
     undo,
-    variant_sample,
     variant_shown,
     varied,
     verdict,
@@ -1428,10 +1423,8 @@ class SpecDesignRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
-    selection: list[int] = Field(default_factory=list)
-    """The faces selected on the part when the engineer wrote."""
-    role: Literal["auto", "host", "supports", "keep_out"] = "auto"
-    """What the engineer said the selection is for; ``auto`` leaves it to the agent."""
+    focus: list[str] = Field(default_factory=list)
+    """The entities in focus on the engineer's screen when they wrote."""
 
 
 def _intent() -> Session:
@@ -1673,7 +1666,7 @@ def post_study_go(request: StudyGo) -> StreamingResponse:
     )
 
 
-# --- variants: authored on Design a variant, kept in the library ---------------------------------
+# --- variants: the project's library, read only ---------------------------------------------------
 
 
 def _library(context: Session) -> list[dict]:
@@ -1690,9 +1683,8 @@ def _library(context: Session) -> list[dict]:
 @app.get("/api/variants")
 def get_variants() -> dict:
     """The project's variants - code, name, kind, where, how many combinations each allows, which
-    campaigns used it - and the one being authored."""
-    context = _intent()
-    return {"variants": _library(context), "authoring": context.variant}
+    campaigns used it."""
+    return {"variants": _library(_intent())}
 
 
 @app.get("/api/variants/{vid}")
@@ -1702,103 +1694,6 @@ def get_variant(vid: str) -> dict:
     if shown is None:
         raise HTTPException(404, f"there is no variant {vid}")
     return shown
-
-
-@app.post("/api/variants/new")
-def post_variant_new() -> dict:
-    """A new variant to author, with nothing in it yet."""
-    return {"draft": new_variant(_intent())}
-
-
-@app.post("/api/variants/{vid}/open")
-def post_variant_open(vid: str) -> dict:
-    """A variant of the library, read back to change."""
-    card = open_variant(_intent(), vid)
-    if isinstance(card.get("refused"), str):
-        raise HTTPException(404, card["refused"])
-    return {"draft": card}
-
-
-@app.get("/api/variant/draft")
-def get_variant_draft() -> dict:
-    """The variant being authored - a new one when none is."""
-    context = _intent()
-    if context.variant is None:
-        return {"draft": new_variant(context)}
-    return {"draft": view(context)}
-
-
-@app.post("/api/variant/hand")
-def post_variant_hand(request: StudyHand) -> dict:
-    """The variant being authored, changed by hand on the card."""
-    context = _intent()
-    if context.variant is None:
-        new_variant(context)
-    action = request.model_dump(exclude={"selected"}, exclude_none=True)
-    card = hand(context, action, request.selected)
-    if isinstance(card.get("refused"), str):
-        raise HTTPException(409, card["refused"])
-    return {"draft": card}
-
-
-class VariantSample(BaseModel):
-    another: bool = False
-    """A point drawn at random from what the variant allows, rather than its suggested one."""
-    seed: int | None = None
-
-
-@app.post("/api/variant/sample")
-def post_variant_sample(request: VariantSample) -> dict:
-    """The variant being authored at a point that passes - placed alone, repaired and screened -
-    as lines on the part; or why none of the points tried does."""
-    reply = variant_sample(_intent(), request.another, request.seed)
-    if "cannot" in reply:
-        raise HTTPException(409, reply["cannot"])
-    return reply
-
-
-class VariantSave(BaseModel):
-    label: str | None = None
-
-
-@app.post("/api/variant/save")
-def post_variant_save(request: VariantSave) -> dict:
-    """The variant being authored, kept in the library - created, or its changes saved - once one
-    of its points passes."""
-    context = _intent()
-    reply = save_variant(context, request.label)
-    if "cannot" in reply:
-        raise HTTPException(409, reply["cannot"])
-    return {**reply, "draft": view(context), "variants": _library(context)}
-
-
-@app.post("/api/variant/discard")
-def post_variant_discard() -> dict:
-    """Forget what was not saved: the variant as kept, or nothing in it."""
-    return {"draft": discard_variant(_intent())}
-
-
-@app.post("/api/variants/{vid}/duplicate")
-def post_variant_duplicate(vid: str) -> dict:
-    context = _intent()
-    try:
-        copy = variants_lib.duplicate(context.project, vid)
-    except ValueError as error:
-        raise HTTPException(404, str(error)) from error
-    return {"id": copy, "variants": _library(context)}
-
-
-@app.delete("/api/variants/{vid}")
-def delete_variant(vid: str) -> dict:
-    """A variant taken out of the library - its file moved aside; campaigns keep their copies."""
-    context = _intent()
-    try:
-        variants_lib.delete(context.project, vid)
-    except ValueError as error:
-        raise HTTPException(404, str(error)) from error
-    if context.variant == vid:
-        new_variant(context)
-    return {"variants": _library(context)}
 
 
 # --- campaigns, and the designs of each run ------------------------------------------------------
@@ -1993,9 +1888,7 @@ def post_agent_chat(request: ChatRequest) -> StreamingResponse:
         raise HTTPException(503, f"the agent could not start: {error}") from error
 
     def events():
-        for event in agent.turn(request.message, request.selection, request.role):
-            if event["type"] == "changed" and "design" in event["what"]:
-                _hold_design(agent.context)
+        for event in agent.turn(request.message, request.focus):
             yield f"data: {json.dumps(event)}\n\n"
 
     return StreamingResponse(
@@ -2005,7 +1898,17 @@ def post_agent_chat(request: ChatRequest) -> StreamingResponse:
     )
 
 
-# Simulate: the baseline's deck and answers, the variant route, the runner's jobs.
+# Simulate: the baseline's deck and answers, the runner's jobs.
 from . import simulate as simulate_routes  # noqa: E402 - after the state it reads
 
 app.include_router(simulate_routes.router)
+
+# The design space: derived from the CAD and the deck, step by step, and what each step produced.
+from . import designspace as designspace_routes  # noqa: E402 - after the state it reads
+
+app.include_router(designspace_routes.router)
+
+# The pipeline: its steps, the typed entities they produced, and the engineer's answers.
+from . import pipeline as pipeline_routes  # noqa: E402 - after the state it reads
+
+app.include_router(pipeline_routes.router)
