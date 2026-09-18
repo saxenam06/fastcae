@@ -1,7 +1,8 @@
 # Simulate
 
 **Being built.** How fastcae takes the engineer's own solver deck and answer for the baseline,
-reproduces that answer before anything is built on it, and carries the same setup to every design.
+reproduces that answer before anything is built on it, and carries the same setup to every design -
+each design its own CAD, meshed face by face with the recipe the baseline's mesh is made with.
 [status.md](status.md) says how much of it runs; the measurements behind it are in
 [research/field-meshing-gate.md](research/field-meshing-gate.md), [research/solver-choice.md](research/solver-choice.md)
 and [research/design-to-solution.md](research/design-to-solution.md).
@@ -18,7 +19,14 @@ go in the project folder beside the CAD; Extract reads them.
 The deck says what the analysis is: the mesh and its named groups, the material, what is held, the
 couplings, the loads, what is read off the answer. Nothing about the part's physics is assumed - a
 bore is called what the deck calls it, a signal what the deck asks for. A project without a deck is
-still a project: its CAD opens, and the tabs that need the deck say it is not provided.
+still a project: its CAD opens, the design space is derived from the geometry and the drawing
+alone, and the views that need the deck say it is not provided.
+
+On Input, **Mesh & setup** shows the deck: *Setup* draws the mesh with every support, coupling and
+load where the deck puts it, under the deck's own names; *Answer* draws the engineer's answer as
+contours, with the signals the deck asks for. What the deck holds - groups, supports, couplings,
+loads, material, signals, fields - is listed by the pipeline's Read stage as typed entities
+([pipeline.md](pipeline.md)).
 
 ## Reading a deck
 
@@ -61,7 +69,8 @@ Everything on screen says where it came from:
 ## Reproduce
 
 Before a design is trusted to fastcae, fastcae answers the deck's own question and sets its answer
-beside the engineer's:
+beside the engineer's. It runs on the runner and through the deck's routes; the interface sets it
+aside for now - Input shows the engineer's answer alone - until it returns as a step of the pipeline.
 
 - **The same mesh, solved by cuDSS.** The deck's mesh and setup, assembled as quadratic tetrahedra
   on the GPU and factorised by cuDSS - part of its factor in host memory when the card is short.
@@ -69,7 +78,6 @@ beside the engineer's:
   reference; a distributing coupling's load is spread over its nodes so force and moment balance,
   and its reference's motion read as their weighted best fit. Stress is taken at every node of every
   element and averaged round each node, von Mises likewise - as Code_Aster's `SIEQ_NOEU` is.
-- **The route every design takes** (Variant Setup → Route), walked on the baseline itself.
 
 **The reproduction certificate** compares quantity by quantity, never with one score: the applied
 load, the reactions and what is left unbalanced, the work of the loads, the largest displacement, the
@@ -79,35 +87,30 @@ quantity is held to a millionth; on a mesh of its own, to what meshing the same 
 measured to move. The certificate names both solvers and their versions.
 
 On the GRC housing's baseline deck (1.12 M unknowns) cuDSS agrees with Code_Aster to about 10⁻¹¹ in
-23 s against Code_Aster's 2 min 35 s, and the route, on its own mesh, holds every mark - each seat's
-tilt within 0.5 %: [research/baseline-deck.md](research/baseline-deck.md).
+23 s against Code_Aster's 2 min 35 s: [research/baseline-deck.md](research/baseline-deck.md). The
+baseline's deck mesh is now made face by face (`bench/solvers/face_mesh.py`), the recipe every design
+will be meshed with; cuDSS's agreement is to be shown again on it before designs are solved.
 
 Views: the answers as banded contours (48 bands, agenticCAE's colours, over the true range - a
 legend that stops short of the real maximum disagrees with the number beside it), side by side with
 one camera, or as their difference; on the deformed shape; element edges on or off.
 
-## The variant route
+## What a design takes
 
-What happens to every design, shown on the baseline:
-
-1. **Field** - the part as a distance field on the grid its designs are built on (3 mm).
-2. **Mesh** - CGAL meshes the field in WSL, compiled: held to the deck mesh's own element sizes,
-   read off it point by point; the edges of every face a distributing coupling acts on followed as
-   lines, vertices 8 mm apart; TET10 with straight mid-side nodes.
-3. **Setup** - the deck's groups carried by the CAD faces they lie on: a boundary triangle joins a
-   group when its middle is nearest one of the group's faces and every corner lies within 2 mm of
-   them; reference points where the deck put them; supports, couplings, loads and signals unchanged.
-4. **Solve** - cuDSS.
-
-What a design inherits and what fastcae makes is listed item by item: geometry built for each
-design and its mesh made by fastcae; the material, supports, couplings, loads, analysis and signals
-the deck's.
+Every design is its own CAD: the baseline's STEP with the design's rib solids fused into it - never
+a field, a shell or cells. It is meshed face by face, TET10, by the recipe the baseline's deck mesh
+is made with, so its bores stay round and its edges crisp; the deck's setup is carried by the CAD
+faces its groups lie on - supports, couplings, loads and signals unchanged - and it is solved by
+cuDSS. A design whose fuse fails is set aside with its reason and another drawn in its place; there
+is no mesh-only fallback. What a design inherits and what fastcae makes is listed item by item:
+geometry built for each design and its mesh made by fastcae; the material, supports, couplings,
+loads, analysis and signals the deck's.
 
 ## The runner
 
 Everything that takes longer than a click runs outside the development server, in a process of its
-own (`python -m fastcae.runner`), so a server reload does not stop it: solving the deck again, the
-route's steps, and campaigns. Jobs are folders under `_archived_designs/_runner/jobs/` - what to do,
+own (`python -m fastcae.runner`), so a server reload does not stop it: solving the deck again, and
+campaigns. Jobs are folders under `_archived_designs/_runner/jobs/` - what to do,
 how far it has got, what happened - and survive the runner stopping. One GPU job at a time; meshing
 runs in WSL beside it. Code_Aster and the mesher are stopped on Linux's side if they run past a
 quarter of an hour: every run of a part this size has finished in minutes.

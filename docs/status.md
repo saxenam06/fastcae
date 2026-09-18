@@ -6,98 +6,71 @@
 
 ## Where it stands
 
-**Extract** and **Model** run end to end on any part. **Simulate** takes the engineer's solver deck
-and answer for the baseline, reproduces the answer, and walks the route every design will take on
-the baseline itself ([simulate.md](simulate.md)). **Generate** runs end to end as the product flow in
-[build-plan.md](build-plan.md): the engineer authors **variants** by hand on Variant Setup - each
-one change in one place, with what it may vary and every rule it holds - composes a **campaign** of
-the variants they choose, counts it, screens a hundred designs, and launches it; the runner then
-builds, meshes, sets up, solves and records the campaign's designs two or three at a time, and every
-design is followed through its stages on Explore. Models (Learn and Optimize) is visible and not
-built.
+**Extract** and **Model** run end to end on any part. Opening a project runs **one pipeline**: the
+Read stage - the extraction steps over the CAD, the drawing and the solver deck - and the
+**design-space** stage, which derives from them where metal may be added, what must stay clear and
+why, and what waits on the engineer's answer ([design-space.md](design-space.md)). Every step's
+inputs and outputs are typed entities; Input shows the pipeline on the left, the entity in focus on
+its canvas and on a card on the right, and the agent reads the same entities
+([pipeline.md](pipeline.md)).
 
-Every step of the build plan runs, the clean start included: the housing starts empty. The agent
-is paused: its bar is hidden while variants and campaigns are built by hand.
+**Generate** runs campaigns over the variants the project keeps - read, no longer authored in the
+interface: composed, counted, screened, launched; the runner builds, meshes, sets up, solves and
+records their designs two or three at a time; every design is followed through its stages on
+Designs. **Simulate** reads the engineer's deck and shows its setup and answer; cuDSS reproduces the
+answer on the runner, set aside in the interface for now ([simulate.md](simulate.md)). Learn and
+Optimize are visible and not built.
+
+The next phase ([build-plan.md](build-plan.md)): patterns found in the derived design space and
+regularised into families, every design made as its own CAD - rib solids fused into the baseline's
+STEP - meshed face by face as the baseline's deck mesh is, and solved by cuDSS.
 
 What runs:
 
-- **Six tabs** - Input (Drawing, CAD, Mesh & setup, Solve), Reproduce, Variant Setup (Variants,
-  Route), Campaign, Explore, Models. Each tab lays out a rail of its subject's detail, the subject in
-  the middle, and a pane on the right that folds to a strip at the edge.
+- **Four tabs** - Input (Drawing, CAD with *Part* and *Design space*, Mesh & setup with *Setup* and
+  *Answer*), Generate (Campaign, Designs), Learn, Optimize. On Input the rail is the pipeline and the
+  right pane the card of what is in focus; on Generate the rail lists campaigns or designs.
+- **The pipeline**, two stages in one rail: each step with its status - to run, running, done, read
+  back, skipped, failed - its time and a line on what it found; opened, what it read, as chips that go
+  to the step that made them, and what it made, as groups that open to their entities. A run streams
+  each step as it starts and finishes; the design space is read back in about a second while nothing
+  it depends on changes, and derived again - about 80 s on the housing - when something does.
+- **Typed entities** of 29 kinds, from faces, features, callouts, deck groups, supports, couplings and
+  loads to interfaces, keep-outs, the inside, bands, regions, questions and mirror planes: each with
+  its origin - imported, derived, inferred, confirmed, generated - its evidence and where that was
+  found, and its links read both ways.
+- **Focus**: a step, a group, an entity, a link on the card, a face clicked on the part or what the
+  agent shows is brought into focus on its canvas - the callout on the drawing, the faces on the part
+  (looked at when picked from the rail), the layers of the design space, the deck group on the
+  deck's mesh.
+- **The design space on the CAD**: every layer a step made - the part in cells; allowed and waiting;
+  what sits in a bore, beyond the bores, what mates on a plane, what fits over a boss, fastener and
+  tool, the buffer, what waits round faces in doubt; the inside and what lies behind narrow
+  openings; the candidate layer and pockets; where metal helps as a heat scale - each switched on
+  and off in its key; the part painted by wall thickness, height straight out, interface or sealing
+  walls. While a run derives, each step's volumes appear as it finishes.
+- **Questions and answers**: every interface in doubt, the inside, the inner walls, the grid - each
+  with its options and what holds meanwhile. An answer is kept in `project.json`, applied when the
+  space is derived again, and taken back at a click; a face answered *free* stays in view, released.
+- **The agent**, above every tab: what the engineer says goes to it with what is in focus; it reads
+  the pipeline and its entities and the part, shows what it talks about, records an answer only when
+  the engineer's words give it, and derives the space again to apply it - the rail following the run.
 - **The solver deck, read.** A Code_Aster deck in the project folder - `.export`, `.comm`, MED mesh,
   and the run's results, tables and log - is read on Extract: the mesh with its groups, the setup,
-  the answer; its groups tied to the CAD faces they lie on. Mesh & setup draws the mesh with the
-  supports, couplings and loads as agenticCAE drew them, named on hover; Solve shows the answer as
-  contours. Everything says whether it was imported, derived or generated.
-- **Reproduce.** The deck's mesh and setup solved again by cuDSS on the runner - on the housing's
-  baseline deck, to about 10⁻¹¹ of Code_Aster in 23 s against its 2 min 35 s - shown one at a time,
-  side by side with one camera, or as the difference; a certificate holds each quantity to its own
-  tolerance.
-- **The route on the baseline** (Variant Setup → Route): the baseline's field, meshed by CGAL held to
-  the deck mesh's sizes, the deck's setup carried by CAD face, solved - about 100 s, and within the
-  gate's marks of the engineer's answer on its own mesh.
+  the answer; its groups tied to the CAD faces they lie on. *Setup* draws the mesh with the supports,
+  couplings and loads as agenticCAE drew them, named on hover; *Answer* shows the answer as contours
+  with the deck's signals. Everything says whether it was imported, derived or generated.
+- **Reproduce**, on the runner and the deck's routes: the deck's mesh and setup solved again by cuDSS -
+  on the housing's baseline deck, to about 10⁻¹¹ of Code_Aster in 23 s against its 2 min 35 s - with
+  a certificate holding each quantity to its own tolerance. Not in the interface for now.
 - **A campaign's designs solved** (Campaign, a launched campaign chosen): the runner takes the designs
   that differ most through build, mesh, setup, solve and record; the page shows how many are solved
   and set aside, how many an hour, each design's stages and times, and what happened. A design
-  solved leaves a Zarr store, a JSON record and a row of the run's Parquet table; Explore's M, S and
-  R fill from them.
-- **Design a variant**, on Variant Setup's right. A tab for each variant kept - its code and name -
-  and one for a new one. A new variant starts from the faces selected on the part and what to add
-  there: **ribs on** them, **webs between** them, the faces **thickened** or thinned, **holes in** a
-  plate; the card names the faces it will use. Ribs stand on flat faces in one plane: a selection
-  that is not one is refused at once, naming what is curved and saying what to select. One change
-  a variant: a second is refused, and so is the part's material, which no variant changes. The
-  card shows a little and opens the rest on demand: where, in one sentence - its entities behind
-  *change where* - then its shape and its rules. Every list of faces - stands on, ends on, keeps
-  clear of, what spokes turn about - has an × on each face and *+ add* for the faces selected.
-  Webs have two sides, **from** and **to**: every web runs from one to the other, never within one
-  side; until the other side is added the variant says it needs it, and a face is on one side only.
-  Webs from something round - a bearing - stand along its axis, and each web hangs from the height
-  of its own two ends, so walls that step up and down are joined all round. A sample of faces moved
-  says how many move and how far, with *show them*.
-  A new variant of ribs starts from a starting point kept as data: 20 mm thick, 100 mm apart, two
-  to five times as tall as they are thick - three suggested - two to ten of them, two suggested;
-  root fillet, edge round and draft each of three choices, the middle first.
-- **What a variant may vary** - its shape: the settings that decide its designs first (for ribs the
-  patterns, thickness, spacing, count, height), the rest under *More settings*; what spokes turn
-  about and how they spread only while spokes are allowed, with *show*. Every setting applies to
-  every pattern it is shown for - how many and how far apart included: lines each way for
-  parallel ribs and grids, round the middle of the floor; spokes; free lines. Every setting is
-  fixed, a range with a step, or some choices - each suggested by the part and changed where it
-  shows: choices as chips switched on and off at a click, every choice the part offers shown;
-  numbers in place, as a range or one value, kept on Enter, on done or on clicking elsewhere once
-  touched, marked until then, a range from a value to itself that value; what the engineer set
-  marked, with *reset*. Every range the part suggests steps by five in its
-  own unit, its ends rounded inward onto fives; a height is said in thicknesses of the rib, by
-  halves, among the settings shown first; thinning stops at five millimetres and never below the
-  least wall. Spokes turn only about round things with an axis - a face of a ring about the ring's
-  axis; one with nothing round about it is refused, saying why.
-  The patterns ribs may take are choices among parallel, square grid, triangle grid, spokes and
-  **free** - independent lines, each at an angle of the range and a place across the floor, drawn
-  from a layout seed nobody sets - so "only square" is one choice and anything another. The card
-  counts the distinct designs the variant allows: for each pattern, the values of every setting
-  that makes a difference to it, multiplied; free layouts have no end.
-- **What a variant must hold**: every rule it holds is its own. The rules offered are the kinds the
-  pipeline checks - keep clear of faces or of another variant's ribs or holes, no taller than, at
-  most so tall, every rib ends on what it runs between, no rib thicker than a share of the wall it
-  meets, no radius under, room for the sand between ribs (the root gap), no X crossings. The part
-  suggests some for each variant, marked assumed and kept or taken out by hand. The part's
-  interfaces are held for every variant: every rib and pad keeps 5 mm clear of every hole and bore
-  of the part, and what the drawing controls, in three dimensions - its ends buried in what it meets
-  included - or is not placed, drawn as reaching what the part keeps closed, naming it; what the
-  ribs run between is theirs to meet.
-- **Show paths and Another sample**: the variant alone at its suggested point, or at points drawn at
-  random from what it allows - every choice, and every step of a range, as likely as the next -
-  placed, repaired, screened, until one passes - drawn on the part with what repair left out drawn
-  as left out; ribs and pads drawn as wide as they are, everything not made faint; the card says how
-  the sample was drawn and on which try it passed, how many ribs and pads were made, the colours
-  folded under it, and the values it took that make a difference to its pattern. Every sample keeps
-  to what the variant allows. **Create variant**, at the bottom,
-  keeps it in `<project>/variants/<id>.json` under its name once a point passes, and refuses one
-  none of whose points does, saying why. A variant kept is changed and saved, discarded back,
-  duplicated or deleted - moved aside, never lost.
+  solved leaves a Zarr store, a JSON record and a row of the run's Parquet table; the Designs view's
+  M, S and R fill from them.
 - **Campaign**, a card in three steps:
-  - **Compose**: its name, and the variants it takes, each with how many designs it allows.
+  - **Compose**: its name, and the variants it takes from those the project keeps, each with how
+    many designs it allows.
   - **Check**, at a glance - a few words an item, its rule on hover: what each variant varies and
     the rules it holds, as pills; what holds always - holes keep their ligament from every
     variant's ribs, ribs of two variants keep the root gap, the part's interfaces stay clear,
@@ -109,7 +82,7 @@ What runs:
     the most different of two to five times as many; how many designs the variants allow; **Screen
     100** - a hundred drawn, placed, repaired and screened, nothing kept, how many pass and how long
     the launch will take; **Launch**. Its progress - each variant pooled alone, designs kept, tried,
-    repaired and why the rest were not kept - and the campaign opened on Explore when done.
+    repaired and why the rest were not kept - and the campaign opened on Designs when done.
 - **How a campaign draws designs**: each variant alone first - points of what it allows placed,
   repaired and screened, those that pass its pool; then each design a set of the variants, as many
   designs with one as with two or all, and a pool point of each by the method; placed together,
@@ -135,7 +108,7 @@ What runs:
   hash, its own seed, what repair left out, how it screened and its paths; a summary of what was
   tried, kept and dropped and why, how each lever spread, how many distinct rib layouts, how far
   designs sit from their nearest neighbour; and each design built so far.
-- **Explore**: a campaign's designs, each with its stages as letters - P its paths
+- **Designs**: a campaign's designs, each with its stages as letters - P its paths
   placed and screened, F its field built and checked, M meshed, S the solver set up, R results -
   coloured by how each came out, and dots for the variants it holds; the 20, 30 or 50 that differ
   most, those built, or all of them 200 at a time; only those holding one variant, when asked. A
@@ -178,17 +151,36 @@ What runs:
   note, cited.
 
 Not yet: tapers and gussets; bulges, boss transitions, existing ribs varied; staggered crossings; a
-review loop turning objections into rules; the agent writing variants and campaigns. The zone and
-formation code from before is still in the tree, unused by the interface; the study functions the
-agent writes through are kept for it.
+review loop turning objections into rules. The study functions and the zone and formation code from
+before are still in the tree, unused by the interface.
 
 ## On the housing
 
-**The project starts empty**: the housing's CAD, its drawing and what was read of them; no variant,
-no campaign, no conversation. What was made before - the ten-block study, its campaigns, the agent's
-conversation - is kept in `_archived_designs/_retired/2026-09-13/`, where nothing lists it.
+**Walked in a browser** on the housing's own project, the servers running as they do for the engineer:
+the pipeline streams both stages; the design space fills in step by step on the CAD; a step, a group,
+an entity, a link on the card, a face clicked on the part each come into focus on their canvas - the
+callout on the drawing, faces on the part looked at from where they can be seen, volumes and paints
+in the design-space view, the deck group on its mesh; the Answer view shows the engineer's contours
+and the deck's 78 signals; Designs shows a launched campaign's designs. Asked in words why the Ø541
+bore is frozen, the agent read the pipeline and the entities and answered with the deck group and
+the drawing's control that freeze it, and showed the bore and what is kept clear round it - 14-25 s.
+No errors in the browser.
 
-**The flow, walked in a browser** on a scratch copy of the housing, as an engineer would:
+**The design space, derived** from the rib-free housing, its Code_Aster deck and its drawing at
+4 mm (41.8 M cells), in 79 s the first time: 62 interfaces frozen - 6 loaded by the deck, 25 held,
+29 planes held bolts clamp, 2 toleranced on the drawing - and 34 asked about; 250 L kept clear and
+525 L waiting near the part; the inside closed, 523 L; 18 of 20 bores carrying on past an end; 47
+sealing faces; 110 L allowed and 60 L waiting outside; a median 35 mm of height straight out from
+the free wall; 37 questions. No mirror plane matches more than 24 % of the surface.
+
+**Against the production housing's ribs**: all nine (6.6 L) are inner webs joining the main seat's
+ring to the barrel and the rear wall, so outside-only covers none. With the inner walls allowed,
+three wall thicknesses deep, 60 % of their volume lies in allowed space and 75 % in allowed or
+waiting space; five deep, 78 % and 99 % at 457 L. Where metal helps, from one solve of the part on
+the grid, puts the production ribs 2.5 times more often than chance in its top quarter.
+
+**The flow of the variant library**, walked in a browser before authoring left the interface, on a
+scratch copy of the housing:
 
 | step | what | came to |
 |---|---|---|
@@ -199,18 +191,35 @@ conversation - is kept in `_archived_designs/_retired/2026-09-13/`, where nothin
 | launch | alone: the ribs 32 of 90 points pass, the boss 12 of 12, the holes 32 of 36 | 20 kept of 20 tried, 3 repaired, 2 s |
 | design | #1, the grid ribs, the boss 5 mm thicker and three Ø35 holes, built at preview | warn - blend bridging and clipping - 15 checks pass; 91 s |
 
-A campaign of 4,000 designs of ten blocks, before the product flow, placed and screened each in
-about 60 ms once each block was known; 20 designs of three variants took 2 s above.
-
 ## Open
 
+- **The whole gearbox in context.** What turns inside - gears, carrier, shafts - is in neither the
+  housing's CAD nor its deck, so the inside is kept clear only of each bore's bearing and a shaft
+  through it. Designing the inside needs the assembly; the GRC's is in `cae-data` as SolidWorks files,
+  to be exported to STEP.
+- **Memory.** The derivation peaks at about 7 GB; with a browser and editors open on 16 GB it paged
+  out and took 8.5 minutes, where it takes 79 s with memory free. The first run on a project also
+  builds the part's grid, 2-4 minutes.
+- **The inside counted twice.** The inside's question counts the free air enclosed (421 L), the
+  inside itself that air with the lids that close it (523 L).
+- **Kept-clear volumes are whole-part totals**, one a kind: what sits in a bore is every bore
+  together, so nothing can say what is kept clear round one bore.
+- **Inner walls.** Every production rib is an inner web; outside only, the default, covers none. Whether
+  inner walls are allowed by default, and how deep - three wall thicknesses or five, or webs from wall
+  to wall - waits on the engineer.
+- **34 questions about faces** on the housing, one a face; grouping them - a flange's faces together,
+  a pattern's planes together - waits on the engineer.
+- **cuDSS on the face-by-face baseline mesh**: the baseline's deck mesh is now made face by face, the
+  recipe designs will use; cuDSS's agreement with Code_Aster is to be shown again on it before
+  designs are solved.
+- **Placing memo and the grid**: a campaign that placed its designs on one grid and builds them on
+  another can build a different field for the same design - placement's memo is not keyed on the
+  grid. The tests hold the root fillet fixed so every design shares one grid; the product is not
+  fixed yet.
 - **Mould release waits for the pull.** Variants hold no pull direction, and a check that rejected
   any metal along the pull from a rib tip - however far, and not knowing that cores form the pockets
   inside a casting - rejected every design built on the housing. It comes back with the pull and
   with cores.
-- **Where a variant fits is found by trying.** Nothing says, before a variant is added, which floors
-  or plates take ribs of a given thickness, or holes of a given size: Show paths tries up to 48
-  points, and a variant none of whose points passes is refused.
 - **Ribs stand only on flat faces.** A curved wall - the housing's outer skirt, a round boss -
   takes webs between, not ribs on, until ribs can follow a curved face.
 - **A rib that would reach a hole is left out, not ended short.** Its end, buried in what it
@@ -221,11 +230,9 @@ about 60 ms once each block was known; 20 designs of three variants took 2 s abo
   pass nothing, and the engineer narrows them.
 - **A campaign runs on one core.** Placing and screening a design is milliseconds - tens of
   milliseconds with repair on many pieces - and building a design's field minutes, so campaigns are
-  placed and screened, and designs built one at a time on Explore.
+  placed and screened, and designs built one at a time on Designs.
 - **Mass is an estimate** for screening - ribs as plates, fillets and draft aside - beside the base
   part's exact volume; a built design is weighed exactly.
-- **The agent is paused.** Its tools write the study draft; it comes back writing variants and
-  campaigns, and the objections a review turns into rules.
 - **Holes cut most paths.** On the ceiling, nearly half the pieces a grid is cut into stop at a
   hole's keep-out, and a piece that ends there is not a rib: round holes a grid comes apart instead
   of closing on its own crossings.
@@ -233,14 +240,6 @@ about 60 ms once each block was known; 20 designs of three variants took 2 s abo
   are dropped, reported as ending on something not named, with what.
 - **Bosses and bores are not yet required to go round.** Holes are; convex cylinders are still all
   bosses, and 216 on the housing are mostly rounded wall corners and edge rounds.
-- **The mesh, solver setup and results stages are not built** in the product; a design's M, S and R
-  stay empty, and nothing ranks designs but their geometry and mass. The route is measured in the
-  bench ([research/design-to-solution.md](research/design-to-solution.md),
-  [research/field-meshing-gate.md](research/field-meshing-gate.md)): meshed from the field by a
-  compiled CGAL mesher in 8-14 s with the seats' edges as lines, solved by cuDSS; against the
-  production housing's CAD, the field's answers are within the noise of meshing itself. The build
-  that feeds it - the grid's distance on the GPU, no surface drawn - is in the product; the meshing,
-  solving, "the mesh valid" in place of "the surface closed", and the runner are not.
 - **agenticCAE's meshing route changes the housing's geometry**: on the production housing gmsh leaves
   out six CAD faces, MeshFix lids their holes flat (up to 242 mm across) and the repair cuts up to
   24 mm into metal under a bearing seat - 20-53 % off on two seats' tilts. Its 490 designs were meshed
@@ -261,11 +260,10 @@ about 60 ms once each block was known; 20 designs of three variants took 2 s abo
   can build any design of a launched campaign from its folder (`build_design`); the runner that keeps
   designs in progress that way is not built.
 
-Size: 53 Python files, ~25,800 lines; 21 TypeScript files, ~8,300 lines; 8 skills. Tests are kept
-locally as working checks and are not tracked.
+Tests are kept locally as working checks and are not tracked.
 
 One project in `assets/`: **GRC Gearbox Housing** - the rib-free housing (`housing_baseline.brep`),
-its 4-page drawing, and `project.json`.
+its 4-page drawing, its Code_Aster deck and answer, and `project.json`.
 
 ## What the pipeline produces today
 
@@ -344,7 +342,7 @@ tight integration on the housing.
 | contour of the whole part, once | 20 s: 1.70 M vertices, 3.40 M triangles, closed, no faults |
 | field at 3 mm, the preview grid for R6 ribs, once | about 2 minutes; kept on disk after |
 | a variant read off the part | under a second |
-| Show paths of a variant, once the part is open | about 1 s |
+| a variant's paths at its suggested point, once the part is open | about 1 s |
 | Screen 100 of three variants | about 4 s |
 | a campaign of 20 designs of three variants, pools included | 2 s |
 | a campaign of 4,000 designs of ten blocks, together | about 60 ms a design once each block is known |
@@ -361,15 +359,12 @@ tight integration on the housing.
 
 ## Next
 
-**Now** - the next phase in [build-plan.md](build-plan.md), in its order. The route runs in the
-product: the baseline's own deck reproduced, and a campaign's designs built, meshed, set up, solved
-and recorded by the runner unattended ([research/campaign-runs.md](research/campaign-runs.md)). Next:
-runs one, two and three at a time as a timeline, then the 40-design check with Code_Aster re-solving
-a sample. Calls that wait on the engineer: counting the gate passed; how a variant's rib thickness
-follows the floor it stands on (on this housing only 12 mm ribs pass both the floor rule and the
-grid's four cells); what a record keeps (about 28 MB a design with the volume); and the solver for a
-design too big for the card. Then the data in rounds, the field model, and the agents that
-supervise it. Mould release with the pull and cores, and the engineer's review loop, after.
+**Now** - the next phase in [build-plan.md](build-plan.md), in its order: cuDSS shown again on the
+face-by-face baseline mesh; one design's rib solids fused into the baseline's STEP, meshed face by
+face and solved, as the test of the route; then patterns found in the design space - a height map on
+the free wall, its ridges straightened and regularised by CP-SAT into families - and designs drawn
+inside a family. Calls that wait on the engineer: the inner walls and how deep; grouping the face
+questions; what a record keeps (about 28 MB a design with the volume).
 
 Alongside, on Extract:
 
@@ -386,10 +381,13 @@ Alongside, on Extract:
 | decision | choice |
 |---|---|
 | Project | a folder under `assets/`; its name is the folder's name. Folders starting `_` or `.` are set aside |
-| What a project holds | the engineer's CAD - no ribs - drawings, and the variants authored for it. No reference part, ever |
-| `project.json` | decisions only: the baseline, approvals. Proposed by the system, confirmed by a person; no facts |
+| What a project holds | the engineer's CAD - no ribs - drawings, solver deck and answer, and the variants kept for it. No reference part, ever |
+| `project.json` | decisions only: the baseline, approvals, answers to the pipeline's questions. Proposed by the system, confirmed by a person; no facts |
+| The pipeline | one pipeline, two stages - Read, then the design space - every step's inputs and outputs typed entities with an origin, evidence and links read both ways; the same entities for the rail, the canvases, the card and the agent |
+| The design space | derived from the CAD, the deck and the drawing by rules that hold for any part: interfaces frozen on the deck's loads and supports, the drawing's tolerances, the planes held bolts clamp, or the engineer's word; asked about on shape alone; outside only by default; sealing walls take no through-holes; kept and read back while nothing it depends on changes |
+| Answers | decisions, in `project.json`; applied when the space is derived again; a released interface stays in view |
 | Who it is for | CAE teams (variants and decks for a study), surrogate-data teams, design engineers (ribs suggested and modelled), foundries (reinforcement that casts) |
-| A variant | one change in one place - ribs on, webs between, faces thickened, holes in - with what it may vary and every rule it holds, in named entities bound by fingerprint; a short random code and a name that says what and where; kept in `variants/`, edited freely, versions never shown |
+| A variant | one change in one place - ribs on, webs between, faces thickened, holes in - with what it may vary and every rule it holds, in named entities bound by fingerprint; a short random code and a name that says what and where; kept in `variants/` and read by campaigns, no longer authored in the interface |
 | What a variant may vary | every setting fixed, a range with a step, or choices; ranges the part suggests step by five, ends on fives, a height by five percent; patterns are choices, free lines among them; the count of distinct designs shown |
 | What a variant must hold | every rule is the variant's own; only kinds the pipeline checks are offered; the part's interfaces held for every variant |
 | A campaign | a card: name, variants, screening checks held, method (spread evenly, random, every combination), how many, seed, keep the most different of more. Each design a random set of the variants - sizes spread evenly - each at a pool point; never narrows a variant; every launch a campaign of its own |
@@ -399,7 +397,7 @@ Alongside, on Extract:
 | Reproducing | a campaign keeps its card, the part's digest, the code's commit, a copy of its variants, its seed and method; each design its recipe, the recipe's hash and its own seed |
 | What is unstated | explored within ranges read from the part and the drawing, and listed as assumed |
 | A rib | a web between two or more anchors, a floor optional; section, plane and pull direction from the variant |
-| The interface | six tabs in the order the work happens - Input, Reproduce, Variant Setup, Campaign, Explore, Models - every one shown built or not; Design a variant on Variant Setup; everything marked imported, derived or generated; the agent's bar hidden while it is paused |
+| The interface | four tabs in the order the work happens - Input, Generate, Learn, Optimize - every one shown built or not; on Input the pipeline as the rail, the canvases showing what is in focus, the card on the right; everything marked imported, derived, inferred, confirmed or generated; the agent's bar above every tab |
 | Kinds of change | ribs and webs; faces moved along their normal - walls, plates, bosses; holes through a plate on a lattice. The part is cast in one material, which no variant changes. Built in one order - faces moved, then ribs and pads, then holes |
 | Design knowledge | data with its sources, in `knowledge/materials.json`: rib to wall 0.8, root gap 2 thicknesses, a hole's ligament one plate thickness, a least wall 8 mm, six casting materials with density, stiffness, strength and least wall from their standards; where a new variant of ribs starts - 20 mm thick, 100 mm apart, 2 to 5 thicknesses tall, two to ten, three choices of each radius and draft |
 | Pads | on unless the engineer says otherwise: a wall too thin for a rib is padded round its end, never past twice itself; off, the rib is left out |
@@ -409,9 +407,10 @@ Alongside, on Extract:
 | Building a design | from its campaign's folder by any process (`build_design`); no surface unless asked; every check and step timed; the root fillet read off the field |
 | A design's stages | P paths, F field, M mesh, S setup, R results, each shown with how it came out; every design's paths kept with its campaign, drawn at once; a built field kept beside its campaign |
 | Rib ends | a rib ends on what it meets, buried in it, or stops at least the root gap short of any metal ahead - never a finger of sand between |
-| The model | paused; when it returns it writes variants and campaigns from words - never geometry, never a call per design, never scripted to an example |
+| The model | tools over the pipeline's entities and the part: reads, shows, records an answer only from the engineer's quoted words, derives again - never geometry, never a design, never scripted to an example |
 | Learning | within a project; within a client only if it opts in; never across clients |
-| Simulation | agenticCAE's load case, material and supports - kinematic couplings at the bolts, distributed couplings at the bearing bores, loads at their centre nodes; TET10 meshed from the design's field by the compiled CGAL mesher, the seats' edges as lines, labels checked corner by corner against the CAD faces; solved by cuDSS on the GPU, Code_Aster re-solving a sample; PETSc not used; results kept apart, never folded into one number |
+| Simulation | agenticCAE's load case, material and supports - kinematic couplings at the bolts, distributed couplings at the bearing bores, loads at their centre nodes; every design its own CAD, meshed face by face as TET10 by the recipe the baseline's deck mesh is made with, the deck's setup carried by CAD face; solved by cuDSS on the GPU, Code_Aster re-solving a sample; a failed fuse set aside, never meshed another way; PETSc not used; results kept apart, never folded into one number |
+| Training data | never from cells, shells or a field: only designs made as CAD and meshed from their faces |
 | Agent stack | kept in `agent/`: LangChain agent loop on LangGraph, OpenRouter (DeepSeek by default), LangSmith; conversation and checkpoints in SQLite with the project; credentials from the environment |
 | Constraints and checks | checks are code, tested against failing parts, thresholds from the variant, basis shown. A model may add rules, never checks |
 | Fidelity | preview on a coarser grid with nothing else relaxed; accept only at full |

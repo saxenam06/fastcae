@@ -1,9 +1,11 @@
 # Generate
 
 **Being built.** The stage that produces design variants: how a design is represented, built,
-turned back into a surface and checked. How the engineer's intent decides *what* is built -
-variants, placements, Design a variant, the layout vocabulary - is in [ribs.md](ribs.md).
-[status.md](status.md) says how much of it runs.
+turned back into a surface and checked, as the code does it today for the variants a project keeps.
+Where designs may grow is derived from the engineer's files ([design-space.md](design-space.md));
+how designs will be made as their own CAD from it is in [build-plan.md](build-plan.md). How variants
+were authored by hand is kept in [archive/ribs.md](archive/ribs.md). [status.md](status.md) says how
+much of it runs.
 
 ---
 

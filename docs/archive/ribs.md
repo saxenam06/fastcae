@@ -2,8 +2,8 @@
 
 **Being built.** How an engineer gets thousands of near-production designs of their own part - ribs,
 webs, faces moved, holes - that follow every rule they set, with solver decks, and how what they
-object to narrows the next campaign. This file is the design as agreed; [build-plan.md](build-plan.md)
-is the order it is built in, and [status.md](status.md) says how much of it runs.
+object to narrows the next campaign. This file is the design as agreed; [build-plan.md](../build-plan.md)
+is the order it is built in, and [status.md](../status.md) says how much of it runs.
 
 ---
 
@@ -631,7 +631,7 @@ back out. Selections are highlighted in a colour no design uses.
 
 ## Build order
 
-[build-plan.md](build-plan.md) has the steps and what shows each done: the variant library; what a
+[build-plan.md](../build-plan.md) has the steps and what shows each done: the variant library; what a
 variant may vary; footprints, wedges, crossings and repair; a variant's samples; campaigns; designs
 by variant; the interface; a clean start. After them: the engineer's review loop, quality-diversity
 search, mould release with the pull, wall fields, meshing and physics, the part's regions, and

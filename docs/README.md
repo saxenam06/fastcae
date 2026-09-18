@@ -10,10 +10,11 @@ folder's index. Start with [status.md](status.md) for what runs today.
 | [status.md](status.md) | What runs now, tab by tab, and what is next. Start here |
 | [build-plan.md](build-plan.md) | The plan as agreed: what is built, in what order, how each step is judged |
 | [architecture.md](architecture.md) | The system as it is: a general platform, the stages in the order they run, how a new part loads without an edit |
+| [pipeline.md](pipeline.md) | One pipeline from the files to the design space: its steps, the typed entities they make, the rail, focus, the card, the agent, the routes |
+| [design-space.md](design-space.md) | Where metal may be added, derived from the CAD and the deck: the twelve steps, evidence, questions and answers, measured on the housing |
 | [extract.md](extract.md) | The ten extraction steps: CAD, geometry health, the face atlas, features, drawing, solver deck, and tying the deck's groups to CAD faces |
-| [simulate.md](simulate.md) | How the engineer's own deck and answer are reproduced before anything is built, and carried to every design |
+| [simulate.md](simulate.md) | How the engineer's own deck and answer are read and reproduced, and carried to every design |
 | [generate.md](generate.md) | What a design is, how it is built, turned into a surface and checked |
-| [ribs.md](ribs.md) | The design space from the engineer's words: variants, placements, rules, campaigns |
 | [tasks.md](tasks.md) | Not built. How the system asks a person for work |
 | [verification.md](verification.md) | Not built. How extraction's claims get checked by a person |
 
@@ -35,7 +36,10 @@ folder's index. Start with [status.md](status.md) for what runs today.
 | Why cuDSS, and every solver tried | [research/solver-choice.md](research/solver-choice.md), [research/design-to-solution.md](research/design-to-solution.md) |
 | The baseline's own deck | [research/baseline-deck.md](research/baseline-deck.md) |
 | Campaigns solved unattended | [research/campaign-runs.md](research/campaign-runs.md) |
-| How variants are defined and sampled | [ribs.md](ribs.md), [generate.md](generate.md) |
+| Where metal may go, and why | [design-space.md](design-space.md) |
+| The design space measured on the housing | [research/design-space-on-the-housing.md](research/design-space-on-the-housing.md) |
+| The typed entities an agent reads | [pipeline.md](pipeline.md) |
+| How campaigns draw designs from variants | [generate.md](generate.md); how variants were authored, [archive/ribs.md](archive/ribs.md) |
 | Competitors and positioning | [research/market.md](research/market.md), [research/geometry-generation.md](research/geometry-generation.md) |
 | Surrogates and datasets | [research/surrogates.md](research/surrogates.md), [research/data-factories.md](research/data-factories.md) |
 | Topology optimisation methods (MMC, GET, TreeTOp, SIMP) | [inputs/research/](inputs/README.md#research---reports-on-methods) |
