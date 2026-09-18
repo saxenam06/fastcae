@@ -736,8 +736,8 @@ export function CampaignRuns(props: {
             disabled={run.state !== "done"}
             title={run.state === "done" ? "Its designs, solved" : "It did not finish"}
           >
-            <span className="run-name">
-              <b>{run.name}</b> <span className="mono dim">{run.id}</span>
+            <span className="run-name" title={run.name}>
+              <span className="mono dim">{run.id}</span> <b>{run.name}</b>
             </span>
             <span className="run-detail">
               {run.state === "done"
@@ -745,8 +745,8 @@ export function CampaignRuns(props: {
                 : "unfinished"}
               {run.built ? ` · ${run.built} built` : ""}
             </span>
-            <span className="run-detail dim">
-              {run.variants.map((v) => v.label).join(" + ")} · {run.card.method}
+            <span className="run-detail dim" title={run.variants.map((v) => v.label).join("\n")}>
+              {run.variants.length} variant{run.variants.length === 1 ? "" : "s"} · {run.card.method}
             </span>
           </button>
         ))}

@@ -603,9 +603,16 @@ button:disabled {
   gap: 12px;
 }
 
+.run-health-names {
+  min-width: 0;
+}
+
 .run-health-title {
   font-size: 16px;
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .run-health-controls {

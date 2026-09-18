@@ -83,6 +83,20 @@ class Card(BaseModel):
     differ most."""
 
 
+# What a campaign's name calls each kind of variant, when it has no name of its own.
+KIND_WORDS = {"thicken": "faces moved"}
+
+
+def default_name(found: list[studies.Study]) -> str:
+    """A campaign's name when the card gives none: what its variants add, counted - a few words
+    a list can show, never every variant's label strung together."""
+    counts = Counter(variants.kind_of(v.current.blocks[0]) for v in found)
+    return " · ".join(
+        f"{KIND_WORDS.get(kind, kind)} ×{n}" if n > 1 else KIND_WORDS.get(kind, kind)
+        for kind, n in counts.items()
+    )
+
+
 # --- composing ------------------------------------------------------------------------------------
 
 
@@ -445,7 +459,7 @@ def go(session: sessions.Session, card: Card) -> Iterator[dict[str, Any]]:
     project = session.project
     extraction = session.extraction
     cid = _new_id(project)
-    name = card.name.strip() or " + ".join(v.label for v in found)
+    name = card.name.strip() or default_name(found)
     folder = sessions.archive_root(project) / f"{cid}-{_slug(name)}"
     folder.mkdir(parents=True, exist_ok=True)
     kept_as = {

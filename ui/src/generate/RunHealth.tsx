@@ -64,9 +64,10 @@ export function RunHealth(props: { run: string; name?: string; onOpen: (run: str
   return (
     <div className="run-health">
       <header className="run-health-head">
-        <div>
-          <div className="run-health-title">{props.name ?? run}</div>
-          <div className="dim mono">{run}</div>
+        <div className="run-health-names">
+          <div className="run-health-title" title={props.name ?? run}>
+            <span className="mono dim">{run.split("-")[0]}</span> {props.name ?? run}
+          </div>
         </div>
         <button onClick={() => props.onOpen(run)}>Open its designs →</button>
       </header>

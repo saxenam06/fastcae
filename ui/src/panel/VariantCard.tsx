@@ -324,12 +324,19 @@ export function VariantCard(props: VariantCardProps) {
           </div>
         ) : null}
         {kept && usedBy.length ? (
-          <div className="dim variant-used">
-            Used by{" "}
-            {usedBy
-              .map((use) => `${use.name}${use.changed_since ? " (changed since)" : ""}`)
-              .join(", ")}
-            . Each campaign keeps the copy it was launched with.
+          <div className="variant-used" title="Each campaign keeps the copy of this variant it was launched with">
+            <span className="dim">in</span>
+            {usedBy.map((use) => (
+              <span
+                key={use.run}
+                className="chip"
+                data-older={use.changed_since}
+                title={`${use.name}${use.changed_since ? " - launched with an earlier version of this variant" : ""}`}
+              >
+                {use.run.split("-")[0]}
+                {use.changed_since ? " · earlier" : ""}
+              </span>
+            ))}
           </div>
         ) : null}
         {refused ? (

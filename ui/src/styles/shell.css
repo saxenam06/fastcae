@@ -2576,6 +2576,10 @@ table.materials th {
 
 .run-row .run-name {
   font-size: 12px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .run-row .run-detail {
@@ -2800,8 +2804,16 @@ table.materials th {
 }
 
 .variant-used {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
   padding: 0 12px 6px;
   font-size: 11.5px;
+}
+
+.variant-used .chip[data-older="true"] {
+  color: var(--muted);
 }
 
 .variant-count {
