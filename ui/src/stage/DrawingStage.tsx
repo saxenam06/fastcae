@@ -9,6 +9,7 @@
  * put a box around - see docs/verification.md for what changes when there is.
  */
 
+import { useEffect, useRef } from "react";
 import type { Callout, Step } from "../api/client";
 import { Metric } from "../panel/cards";
 
@@ -18,10 +19,21 @@ interface DrawingStageProps {
   steps: Step[];
   filter: string | null;
   pages: number | null;
+  /** The callout in focus: its page and its literal text. */
+  focus?: { page: number | null; text: string | null } | null;
 }
 
 export function DrawingStage(props: DrawingStageProps) {
   const drawingStep = props.steps.find((step) => step.id === "drawing.read");
+  const focused = useRef<HTMLDivElement>(null);
+  const focus = props.focus;
+  const isFocus = (c: Callout) =>
+    Boolean(focus && focus.text !== null && c.page === focus.page && c.raw === focus.text);
+
+  // The callout picked elsewhere is brought into view, not left for the engineer to find.
+  useEffect(() => {
+    focused.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [focus?.page, focus?.text]);
 
   if (drawingStep && drawingStep.status === "skipped") {
     return (
@@ -54,7 +66,12 @@ export function DrawingStage(props: DrawingStageProps) {
         </h2>
         <div className="callouts">
           {props.callouts.map((callout, index) => (
-            <div key={index} className="callout">
+            <div
+              key={index}
+              className="callout"
+              data-focus={isFocus(callout)}
+              ref={isFocus(callout) ? focused : undefined}
+            >
               <span className="kind">p{callout.page}</span>
               <span className="mono">
                 {callout.count ? `${callout.count}× ` : ""}

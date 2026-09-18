@@ -1,5 +1,5 @@
 /**
- * Simulate's calls: the baseline's deck and answers, the variant route, the runner's jobs.
+ * Simulate's calls: the baseline's deck and answers, and the runner's jobs.
  *
  * Meshes arrive as their outside only - boundary triangles and the nodes on them - with each
  * triangle's group; fields as one value per node of that outside, so a result redraws without the
@@ -48,7 +48,7 @@ export interface DeckSetup {
 }
 
 export interface DeckAnswer {
-  id: "aster" | "cudss" | "route";
+  id: "aster" | "cudss";
   label: string;
   provenance: Provenance;
   available: boolean;
@@ -115,21 +115,7 @@ export interface JobStatus {
   events?: { t: number; message: string }[];
 }
 
-export interface RouteStep {
-  seconds?: number;
-  [key: string]: unknown;
-}
-
-export interface RouteState {
-  key: string;
-  settings: Record<string, number>;
-  steps: { field: RouteStep | null; mesh: RouteStep | null; setup: RouteStep | null; solve: RouteStep | null };
-  has_mesh: boolean;
-  has_setup: boolean;
-  jobs: JobStatus[];
-}
-
-export type Run = "aster" | "cudss" | "route";
+export type Run = "aster" | "cudss";
 
 export interface CertificateRow {
   quantity: string;
@@ -249,10 +235,6 @@ export const sim = {
   signals: () => getJson<Signals>("/api/deck/signals"),
   certificate: (other: Run) => getJson<Certificate>(`/api/deck/certificate?other=${other}`),
   solve: () => postJson<{ job: string }>("/api/deck/solve"),
-  route: () => getJson<RouteState>("/api/deck/route"),
-  routeStep: (step: "field" | "mesh" | "setup" | "solve" | "all") => postJson<{ job: string }>(`/api/deck/route/${step}`),
-  routeSkin: () => fetchSkin("/api/deck/route/mesh"),
-  routeGlyphs: () => getJson<GlyphData>("/api/deck/route/glyphs"),
   job: (id: string, since = 0) => getJson<JobStatus>(`/api/jobs/${encodeURIComponent(id)}?since=${since}`),
   jobs: (kind?: string) =>
     getJson<{ runner: Record<string, unknown> | null; jobs: JobStatus[] }>(`/api/jobs${kind ? `?kind=${kind}` : ""}`),

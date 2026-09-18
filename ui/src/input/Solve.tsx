@@ -1,7 +1,7 @@
 /**
- * Input → Solve: the engineer's own answer, and fastcae's answers to the same question beside it -
- * the same mesh solved by cuDSS, and the field route every variant will take - as contours, side by
- * side or as their difference, with every signal set against the reference.
+ * The engineer's own answer, and fastcae's to the same question beside it - the same mesh solved by
+ * cuDSS - as contours, side by side or as their difference, with every signal set against the
+ * reference. The reproduction is set aside for now: Input shows the engineer's answer alone.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -51,7 +51,7 @@ export function useSolveView(): SolveView {
 
 const FIELDS: FieldName[] = ["displacement", "DX", "DY", "DZ", "von Mises"];
 const UNIT: Record<FieldName, string> = { displacement: "mm", DX: "mm", DY: "mm", DZ: "mm", "von Mises": "MPa" };
-const LABEL: Record<Run, string> = { aster: "Code_Aster", cudss: "cuDSS · same mesh", route: "cuDSS · field route" };
+const LABEL: Record<Run, string> = { aster: "Code_Aster", cudss: "cuDSS · same mesh" };
 
 /**
  * ``input`` shows the engineer's own answer alone, as their solver wrote it; ``reproduce`` sets
@@ -61,13 +61,11 @@ export function SolveRail({
   state,
   view,
   mode,
-  onRoute,
   onReproduce,
 }: {
   state: DeckState;
   view: SolveView;
   mode: "input" | "reproduce";
-  onRoute: () => void;
   onReproduce: () => void;
 }) {
   const { deck, signals, job } = state;
@@ -106,9 +104,7 @@ export function SolveRail({
                     ? `${fmtCount(a.meta.unknowns ?? 0)} unknowns · ${fmtSeconds(a.meta.times?.total_s)}${
                         a.meta.agreement ? ` · off Code_Aster by ${fmtRelative(a.meta.agreement.displacement)}` : ""
                       }`
-                    : a.id === "cudss"
-                      ? "the deck's own mesh and setup, solved on the GPU"
-                      : "the variant route on the baseline - see Variant Setup"}
+                    : "the deck's own mesh and setup, solved on the GPU"}
               </div>
               {a.id === "cudss" ? (
                 <button
@@ -118,9 +114,6 @@ export function SolveRail({
                 >
                   {a.available ? "Solve again with cuDSS" : "Solve with cuDSS"}
                 </button>
-              ) : null}
-              {a.id === "route" ? (
-                <button onClick={onRoute}>{a.available ? "Open the route" : "Run the route"}</button>
               ) : null}
             </div>
           ))}
@@ -271,7 +264,7 @@ function RunPicker({ label, value, onChange, available }: { label: string; value
     <label className="picker">
       <span className="dim">{label}</span>
       <select value={value} onChange={(e) => onChange(e.target.value as Run)}>
-        {(["aster", "cudss", "route"] as Run[]).map((r) => (
+        {(["aster", "cudss"] as Run[]).map((r) => (
           <option key={r} value={r} disabled={!available(r)}>
             {LABEL[r]}
           </option>
@@ -293,7 +286,7 @@ export function JobLine({ job }: { job: { state: string; message?: string; progr
 export function SignalTable({ rows, runs }: { rows: SignalRow[]; runs: Run[] }) {
   const [showAll, setShowAll] = useState(false);
   if (!rows.length) return null;
-  const order: Run[] = (["aster", "cudss", "route"] as Run[]).filter((r) => runs.includes(r));
+  const order: Run[] = (["aster", "cudss"] as Run[]).filter((r) => runs.includes(r));
   const others = order.filter((r) => r !== "aster");
   const worst: Record<string, number> = {};
   for (const r of others) {
@@ -312,13 +305,11 @@ export function SignalTable({ rows, runs }: { rows: SignalRow[]; runs: Run[] }) 
         Signals <span className="count">{rows.length}</span>
       </header>
       {others.map((r) => (
-        <div key={r} className="verdict" data-good={r === "cudss" ? worst[r] < 1e-6 : worst[r] < 0.05}>
+        <div key={r} className="verdict" data-good={worst[r] < 1e-6}>
           <b>{LABEL[r]}</b>{" "}
-          {r === "cudss"
-            ? worst[r] < 1e-6
-              ? `reproduces Code_Aster: every signal within ${fmtRelative(worst[r])}`
-              : `differs from Code_Aster by up to ${fmtRelative(worst[r])}`
-            : `within ${fmtRelative(worst[r])} of Code_Aster on its own mesh`}
+          {worst[r] < 1e-6
+            ? `reproduces Code_Aster: every signal within ${fmtRelative(worst[r])}`
+            : `differs from Code_Aster by up to ${fmtRelative(worst[r])}`}
         </div>
       ))}
       <div className="signal-table-wrap">
@@ -327,10 +318,10 @@ export function SignalTable({ rows, runs }: { rows: SignalRow[]; runs: Run[] }) 
             <tr>
               <th>signal</th>
               {order.map((r) => (
-                <th key={r}>{r === "aster" ? "Code_Aster" : r === "cudss" ? "cuDSS" : "route"}</th>
+                <th key={r}>{r === "aster" ? "Code_Aster" : "cuDSS"}</th>
               ))}
               {others.map((r) => (
-                <th key={`d${r}`}>Δ {r === "cudss" ? "cuDSS" : "route"}</th>
+                <th key={`d${r}`}>Δ cuDSS</th>
               ))}
             </tr>
           </thead>
@@ -378,14 +369,7 @@ export function SolveStage({ state, view }: { state: DeckState; view: SolveView 
   const { deck, skin } = state;
   const [left, setLeft] = useState<Values | null>(null);
   const [right, setRight] = useState<Values | null>(null);
-  const [routeSkin, setRouteSkin] = useState<typeof skin>(null);
   const [error, setError] = useState<string | null>(null);
-  const needsRoute = view.left === "route" || (view.layout === "split" && view.right === "route");
-
-  useEffect(() => {
-    if (!needsRoute || routeSkin) return;
-    sim.routeSkin().then(setRouteSkin).catch(() => setRouteSkin(null));
-  }, [needsRoute, routeSkin]);
 
   useEffect(() => {
     let live = true;
@@ -413,7 +397,7 @@ export function SolveStage({ state, view }: { state: DeckState; view: SolveView 
   const data: [number, number] = rangeOf(left, right, view.layout);
   const range = view.range ?? data;
   const bbox = deck.mesh?.bbox_mm ?? null;
-  const skinFor = (run: Run) => (run === "route" ? routeSkin : skin);
+  const skinFor = (_run: Run) => skin;
   const deformScale = view.deformed ? deformFactor(left, bbox) : 0;
   const caption = (run: Run) => (
     <>

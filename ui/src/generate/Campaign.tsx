@@ -295,11 +295,7 @@ export function useCampaign(active: boolean, project: string | null): Campaign {
 }
 
 /** The card, in three steps: compose, check, sample and launch. */
-export function CampaignCardView(props: {
-  campaign: Campaign;
-  onOpenCard: () => void;
-  onOpenRun: (run: string) => void;
-}) {
+export function CampaignCardView(props: { campaign: Campaign; onOpenRun: (run: string) => void }) {
   const c = props.campaign;
   const chosen = c.card.variants;
   const suggested = chosen.map((id) => c.library.find((v) => v.id === id)?.label ?? id).join(" + ");
@@ -334,11 +330,7 @@ export function CampaignCardView(props: {
           <div className="step-sub">variants</div>
           {!c.library.length ? (
             <div className="card-note">
-              No variants yet. Author them on{" "}
-              <button className="link" onClick={props.onOpenCard}>
-                CAD → Design a variant
-              </button>
-              : one change in one place, with what it may vary.
+              No variants yet: they will come from the design space derived on Input.
             </div>
           ) : null}
           {c.library.map((variant) => (
@@ -355,11 +347,6 @@ export function CampaignCardView(props: {
               <span className="dim">{designsSaid(variant.combinations)}</span>
             </label>
           ))}
-          {c.library.length ? (
-            <button className="link" onClick={props.onOpenCard}>
-              author or change a variant on CAD
-            </button>
-          ) : null}
         </section>
 
         <section className="campaign-step" data-waiting={!chosen.length}>

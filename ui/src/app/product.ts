@@ -26,80 +26,79 @@ export const PRODUCT = {
 } as const;
 
 /**
- * The tabs, in the order the work happens: what the engineer brought - the drawing, the CAD, the
- * solver deck and the answer it gave - then what fastcae will vary and how every variant will be
- * meshed and solved, the campaigns and the designs they keep, surrogates trained on them, and the
- * search.
+ * The tabs, in the order the work happens: what the engineer brought, read into typed entities by
+ * the pipeline and the design space derived from them; designs generated in that space; surrogates
+ * learnt from them; and the search.
  *
  * Every tab is shown whether or not it is built yet. A shell that hides its unbuilt stages
  * describes a tool; one that shows them describes a product, and tells anyone looking where what
  * they are doing now leads.
  */
-export type View = "input" | "reproduce" | "variants" | "campaign" | "explore" | "models";
+export type View = "input" | "generate" | "learn" | "optimize";
 
-/** Input's four: the engineer's own files, as read. */
-export type InputTab = "drawing" | "cad" | "mesh" | "solve";
-/** Variant Setup's two: what will vary, and the route every design takes. */
-export type VariantTab = "variants" | "route";
+/** Input's three: the engineer's own files, as the pipeline read them. */
+export type InputTab = "drawing" | "cad" | "mesh";
+/** The CAD as its faces, or as the design space derived round it. */
+export type CadView = "part" | "space";
+/** The deck as it sets the part up, or the answer the engineer's solver gave. */
+export type DeckView = "setup" | "answer";
+/** Generate's two: campaigns launched, and every design they kept. */
+export type GenerateTab = "campaign" | "designs";
 
 export const INPUT_TABS: { id: InputTab; label: string; summary: string }[] = [
   { id: "drawing", label: "Drawing", summary: "What the drawing states, callout by callout" },
-  { id: "cad", label: "CAD", summary: "The part as its CAD describes it: faces, axes, features" },
-  { id: "mesh", label: "Mesh & setup", summary: "The solver deck's mesh, supports, couplings and loads, as the deck names them" },
-  { id: "solve", label: "Solve", summary: "The answer the engineer's solver gave, as it wrote it" },
+  {
+    id: "cad",
+    label: "CAD",
+    summary: "The part as its CAD describes it, and the design space derived round it",
+  },
+  {
+    id: "mesh",
+    label: "Mesh & setup",
+    summary: "The solver deck's mesh, supports, couplings and loads, and the answer it gave",
+  },
 ];
 
-export const VARIANT_TABS: { id: VariantTab; label: string; summary: string }[] = [
-  { id: "variants", label: "Variants", summary: "One change in one place, designed on the CAD" },
-  { id: "route", label: "Route", summary: "How every variant is built, meshed, set up and solved - walked on the baseline" },
+export const CAD_VIEWS: { id: CadView; label: string }[] = [
+  { id: "part", label: "Part" },
+  { id: "space", label: "Design space" },
 ];
 
-/**
- * The lifecycle: the engineer's truth, reproduced before anything is built on it; what may change
- * and how each change is solved; the campaigns that make the data; the designs they keep; the models
- * trained on them.
- */
+export const DECK_VIEWS: { id: DeckView; label: string }[] = [
+  { id: "setup", label: "Setup" },
+  { id: "answer", label: "Answer" },
+];
+
+export const GENERATE_TABS: { id: GenerateTab; label: string; summary: string }[] = [
+  { id: "campaign", label: "Campaign", summary: "Campaigns launched, and how each run is going" },
+  { id: "designs", label: "Designs", summary: "Every design a campaign kept, through its stages" },
+];
+
 export const VIEWS: { id: View; label: string; summary: string; ready: boolean }[] = [
   {
     id: "input",
     label: "Input",
     summary:
-      "What the engineer brought: the drawing, the CAD, the solver deck with its mesh, supports and " +
-      "loads, and the answer it gave - read, never assumed.",
+      "What the engineer brought - the drawing, the CAD, the solver deck and its answer - read " +
+      "into typed entities, and the design space derived from them.",
     ready: true,
   },
   {
-    id: "reproduce",
-    label: "Reproduce",
-    summary:
-      "The engineer's answer set beside fastcae's to the same question - side by side, as a " +
-      "difference, and quantity by quantity - before a single design is trusted to fastcae.",
+    id: "generate",
+    label: "Generate",
+    summary: "Designs made in the design space, meshed and solved as the deck solves the part.",
     ready: true,
   },
   {
-    id: "variants",
-    label: "Variant Setup",
-    summary:
-      "What may change - variants designed on the CAD - and the route every variant takes: field, " +
-      "mesh, the deck's own setup, solve.",
-    ready: true,
+    id: "learn",
+    label: "Learn",
+    summary: "Surrogates trained on the solved designs, and how far they can be believed.",
+    ready: false,
   },
   {
-    id: "campaign",
-    label: "Campaign",
-    summary: "Campaigns composed from variants and launched: how many designs, from which seed, and how each run is going.",
-    ready: true,
-  },
-  {
-    id: "explore",
-    label: "Explore",
-    summary: "Every design a campaign kept, followed through its stages to the data it yields.",
-    ready: true,
-  },
-  {
-    id: "models",
-    label: "Models",
-    summary: "Surrogates trained on the accepted designs, how far they can be believed, and the search on them.",
+    id: "optimize",
+    label: "Optimize",
+    summary: "The search on the surrogates, confirmed by the solver.",
     ready: false,
   },
 ];

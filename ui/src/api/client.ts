@@ -423,13 +423,13 @@ export interface StudyInfo {
   assumed?: string[];
 }
 
-/** What happens during one message to the agent, as it happens. ``draft``: the agent filled the
- * card - the card shows what changed; this carries only what it asked the engineer to look at. */
+/** What happens during one message to the agent, as it happens. ``show``: entities the agent
+ * showed the engineer, to bring into focus; ``changed``: what it changed - answers, the space. */
 export type AgentEvent =
   | { type: "token"; text: string }
   | { type: "tool_start"; id?: string; name: string; args?: unknown }
   | { type: "tool_result"; id?: string; name: string; summary: string }
-  | { type: "draft"; attention: string[]; needed: string[] }
+  | { type: "show"; ids: string[] }
   | { type: "error"; message: string }
   | { type: "changed"; what: string[] }
   | { type: "done" };
@@ -439,18 +439,18 @@ export type AgentMessage =
   | { role: "engineer"; text: string }
   | { role: "agent"; text: string }
   | { role: "tool"; name: string; args: unknown }
-  | { role: "draft"; attention: string[]; needed: string[] };
+  | { role: "shown"; ids: string[] };
 
-/** One message to the agent, with the faces selected; each event is handed on as it arrives. */
+/** One message to the agent, with the entities in focus; each event is handed on as it arrives. */
 async function chat(
   message: string,
-  selection: number[],
+  focus: string[],
   onEvent: (event: AgentEvent) => void,
 ): Promise<void> {
   const response = await fetch("/api/agent/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, selection }),
+    body: JSON.stringify({ message, focus }),
   });
   if (!response.ok || !response.body) {
     const text = await response.text();
@@ -1003,13 +1003,13 @@ export interface Seed {
   angle: number;
 }
 
-async function getJson<T>(path: string): Promise<T> {
+export async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(path);
   if (!response.ok) throw new Error(`${path}: ${response.status} ${response.statusText}`);
   return response.json() as Promise<T>;
 }
 
-async function postJson<T>(path: string, body: unknown): Promise<T> {
+export async function postJson<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1039,7 +1039,7 @@ async function launch(card: CampaignCard, onEvent: (event: CampaignEvent) => voi
 }
 
 /** Events a route streams, one JSON object a ``data:`` line, each handed on as it arrives. */
-async function stream<T>(path: string, body: unknown, onEvent: (event: T) => void): Promise<void> {
+export async function stream<T>(path: string, body: unknown, onEvent: (event: T) => void): Promise<void> {
   const response = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1068,15 +1068,6 @@ async function stream<T>(path: string, body: unknown, onEvent: (event: T) => voi
   }
 }
 
-async function deleteJson<T>(path: string): Promise<T> {
-  const response = await fetch(path, { method: "DELETE" });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`${path}: ${response.status} ${text}`);
-  }
-  return response.json() as Promise<T>;
-}
-
 const variantPath = (id: string) => `/api/variants/${encodeURIComponent(id)}`;
 
 /** A run's name in a path: it is one folder's name, and may hold spaces. */
@@ -1089,22 +1080,8 @@ export const api = {
     postJson<CampaignEstimate>("/api/campaign/estimate", card),
   screenCampaign: (card: CampaignCard) => postJson<CampaignScreen>("/api/campaign/screen", card),
   launch,
-  variants: () => getJson<{ variants: VariantRow[]; authoring: string | null }>("/api/variants"),
+  variants: () => getJson<{ variants: VariantRow[] }>("/api/variants"),
   variant: (id: string) => getJson<VariantShown>(variantPath(id)),
-  variantDraft: () => getJson<{ draft: StudyDraft }>("/api/variant/draft"),
-  newVariant: () => postJson<{ draft: StudyDraft }>("/api/variants/new", {}),
-  openVariant: (id: string) => postJson<{ draft: StudyDraft }>(`${variantPath(id)}/open`, {}),
-  handVariant: (action: HandAction) =>
-    postJson<{ draft: StudyDraft }>("/api/variant/hand", action),
-  sampleVariant: (another = false, seed?: number) =>
-    postJson<VariantSample>("/api/variant/sample", { another, seed: seed ?? null }),
-  saveVariant: (label: string | null) =>
-    postJson<{ variant: string; version: number; label: string; draft: StudyDraft;
-      variants: VariantRow[] }>("/api/variant/save", { label }),  // prettier-ignore
-  discardVariant: () => postJson<{ draft: StudyDraft }>("/api/variant/discard", {}),
-  duplicateVariant: (id: string) =>
-    postJson<{ id: string; variants: VariantRow[] }>(`${variantPath(id)}/duplicate`, {}),
-  deleteVariant: (id: string) => deleteJson<{ variants: VariantRow[] }>(variantPath(id)),
   runs: () => getJson<KeptRun[]>("/api/runs"),
   runDesigns: (
     run: string,
@@ -1253,7 +1230,7 @@ export const api = {
 };
 
 /** The field's own cells: one packed integer per visible face, and the grid it indexes into. */
-async function fetchVoxels(path: string): Promise<VoxelCells> {
+export async function fetchVoxels(path: string): Promise<VoxelCells> {
   const response = await fetch(path);
   if (!response.ok) throw new Error(`${path}: ${response.status}`);
   const buffer = await response.arrayBuffer();

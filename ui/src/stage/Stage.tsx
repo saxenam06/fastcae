@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useRef } from "react";
-import type { ColourMode, LineSet, OverlayPick } from "../render/renderer";
+import type { ColourMode, LineSet, OverlayPick, VoxelLayer } from "../render/renderer";
 import { Renderer } from "../render/renderer";
 import type { Mesh, VoxelCells } from "../api/client";
 
@@ -22,6 +22,12 @@ interface StageProps {
    */
   overlay?: Mesh | null;
   voxels?: VoxelCells | null;
+  /** Layers of cells over the part, each its own colour: the design space's volumes. */
+  voxelLayers?: VoxelLayer[];
+  /** Each face its own colour, for the paint colour mode: a per-face value painted on the part. */
+  facePaint?: Map<number, [number, number, number]> | null;
+  /** A box to look at, and the side to look at it from: the camera moves there once per box. */
+  focusBox?: { box: number[]; from: number[] | null } | null;
   /** Lines over everything: where a layout would put ribs, before any design is made. */
   lines?: LineSet | null;
   overlayAlpha?: number;
@@ -30,6 +36,10 @@ interface StageProps {
   /** Whether the overlay can be picked, and as what. Not at all by default. */
   overlayPick?: OverlayPick;
   showSurface?: boolean;
+  /** How opaque the part is, one when left out. */
+  surfaceAlpha?: number;
+  /** How opaque the layers of cells are, over each layer's own; one when left out. */
+  layerOpacity?: number;
   showOverlay?: boolean;
   showVoxels?: boolean;
   /** The part's faces left out of the picture: those a design cuts, whose own surface the overlay
@@ -48,6 +58,7 @@ interface StageProps {
 
 const OCHRE: [number, number, number] = [0.541, 0.416, 0.122];
 const NONE: Set<number> = new Set();
+const NO_LAYERS: VoxelLayer[] = [];
 
 export function Stage(props: StageProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -64,6 +75,8 @@ export function Stage(props: StageProps) {
 
     const renderer = new Renderer(canvas, props.mesh, props.faceCount);
     renderer.showSurface = props.showSurface ?? true;
+    renderer.surfaceAlpha = props.surfaceAlpha ?? 1;
+    renderer.layerOpacity = props.layerOpacity ?? 1;
     renderer.showOverlay = props.showOverlay ?? true;
     renderer.showVoxels = props.showVoxels ?? true;
     renderer.overlayAlpha = props.overlayAlpha ?? 0.42;
@@ -71,6 +84,8 @@ export function Stage(props: StageProps) {
     renderer.overlayPick = props.overlayPick ?? "none";
     renderer.setOverlay(props.overlay ?? null);
     renderer.setVoxels(props.voxels ?? null);
+    renderer.setVoxelLayers(props.voxelLayers ?? NO_LAYERS);
+    renderer.setFacePaint(props.facePaint ?? null);
     renderer.setLines(props.lines ?? null);
     renderer.setHidden(props.hidden ?? NONE);
     renderer.frame(props.bbox);
@@ -119,6 +134,27 @@ export function Stage(props: StageProps) {
   useEffect(() => {
     const renderer = rendererRef.current;
     if (!renderer) return;
+    renderer.setVoxelLayers(props.voxelLayers ?? NO_LAYERS);
+    dirtyRef.current = true;
+  }, [props.voxelLayers]);
+
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    renderer.setFacePaint(props.facePaint ?? null);
+    dirtyRef.current = true;
+  }, [props.facePaint]);
+
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer || !props.focusBox) return;
+    renderer.focusBox(props.focusBox.box, props.focusBox.from);
+    dirtyRef.current = true;
+  }, [props.focusBox]);
+
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
     renderer.setLines(props.lines ?? null);
     dirtyRef.current = true;
   }, [props.lines]);
@@ -136,6 +172,8 @@ export function Stage(props: StageProps) {
     const renderer = rendererRef.current;
     if (!renderer) return;
     renderer.showSurface = props.showSurface ?? true;
+    renderer.surfaceAlpha = props.surfaceAlpha ?? 1;
+    renderer.layerOpacity = props.layerOpacity ?? 1;
     renderer.showOverlay = props.showOverlay ?? true;
     renderer.showVoxels = props.showVoxels ?? true;
     renderer.overlayAlpha = props.overlayAlpha ?? 0.42;
@@ -144,6 +182,8 @@ export function Stage(props: StageProps) {
     dirtyRef.current = true;
   }, [
     props.showSurface,
+    props.surfaceAlpha,
+    props.layerOpacity,
     props.showOverlay,
     props.showVoxels,
     props.overlayAlpha,

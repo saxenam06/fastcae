@@ -1,0 +1,950 @@
+/*
+ * The pipeline: the rail of steps, the card of whatever is in focus, and the design space's key on
+ * the CAD. The same sheet as the rest - hairlines, the one blue - with a step's state carried by
+ * its dot's fill as well as its colour.
+ */
+
+/* --- the rail -------------------------------------------------------------------------------- */
+
+.pipeline {
+  display: block;
+  padding-bottom: 24px;
+}
+
+.pipeline-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 12px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.pipeline-state {
+  margin-left: auto;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--faint);
+}
+
+.pipeline-error {
+  margin: 8px 12px;
+  padding: 6px 8px;
+  font-size: 11.5px;
+  color: var(--conflict);
+  background: var(--conflict-wash);
+  border-left: 2px solid var(--conflict);
+}
+
+.pipeline-apply {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 12px;
+  padding: 6px 8px;
+  font-size: 11.5px;
+  background: var(--running-wash);
+  border-left: 2px solid var(--running);
+}
+
+.pipeline-apply button {
+  margin-left: auto;
+}
+
+.pipeline-stage > header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 12px 12px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+}
+
+.pipeline-stage > header .count {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-weight: 400;
+  color: var(--faint);
+}
+
+/* A step: its dot, its name, how long it took. The dot is hollow until the step has run. */
+.step {
+  position: relative;
+  border-left: 2px solid transparent;
+}
+
+.step[data-focus="true"] {
+  border-left-color: var(--blue);
+  background: var(--blue-wash);
+}
+
+/* The line that joins the dots, so the steps read as one pipeline. */
+.step::before {
+  content: "";
+  position: absolute;
+  left: 16px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--hairline);
+}
+
+.step:first-of-type::before {
+  top: 14px;
+}
+
+.step:last-of-type::before {
+  bottom: calc(100% - 14px);
+}
+
+.step-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 6px 12px 3px 11px;
+  border: none;
+  border-radius: 0;
+  background: none;
+  text-align: left;
+  font-size: 12.5px;
+}
+
+.step-head:hover {
+  background: var(--ground);
+}
+
+.step .dot {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid var(--faint);
+  background: var(--sheet);
+}
+
+.step[data-status="done"] .dot {
+  border-color: var(--measured);
+  background: var(--measured);
+}
+
+/* Read back from the cache: the same green, hollow in the middle - it ran, but not just now. */
+.step[data-status="cached"] .dot {
+  border-color: var(--measured);
+  background: radial-gradient(circle, var(--sheet) 30%, var(--measured) 32%);
+}
+
+.step[data-status="running"] .dot {
+  border-color: var(--running);
+  background: var(--running);
+  animation: step-pulse 1s ease-in-out infinite alternate;
+}
+
+.step[data-status="failed"] .dot {
+  border-color: var(--conflict);
+  background: var(--conflict);
+}
+
+.step[data-status="skipped"] .dot {
+  border-style: dashed;
+}
+
+@keyframes step-pulse {
+  from {
+    box-shadow: 0 0 0 0 rgba(138, 106, 31, 0.5);
+  }
+  to {
+    box-shadow: 0 0 0 4px rgba(138, 106, 31, 0);
+  }
+}
+
+.step[data-status="pending"] .step-label {
+  color: var(--faint);
+}
+
+.step-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.step-time {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--faint);
+}
+
+.step-line {
+  padding: 0 12px 6px 31px;
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.step-body {
+  padding: 2px 12px 10px 31px;
+  font-size: 11.5px;
+}
+
+.step-detail {
+  margin: 0 0 8px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.io {
+  display: grid;
+  grid-template-columns: 26px 1fr;
+  gap: 6px;
+  align-items: start;
+  margin-top: 6px;
+}
+
+.io-tag {
+  padding-top: 3px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.io-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chip-in {
+  padding: 1px 7px;
+  font-size: 11px;
+  border-radius: 10px;
+  color: var(--muted);
+  background: var(--ground);
+}
+
+.chip-in b {
+  font-family: var(--mono);
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.chip-in[data-empty="true"] {
+  opacity: 0.55;
+}
+
+.io-groups {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.out-group[data-focus="true"] > .out-head {
+  background: var(--blue-wash);
+  color: var(--blue);
+}
+
+.out-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 4px;
+  border: none;
+  border-radius: 2px;
+  background: none;
+  text-align: left;
+  font-size: 11.5px;
+}
+
+.out-head:hover {
+  background: var(--ground);
+}
+
+.out-head .caret {
+  width: 9px;
+  font-size: 9px;
+  color: var(--faint);
+}
+
+.out-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.out-head .count {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--faint);
+}
+
+.members {
+  display: flex;
+  flex-direction: column;
+  margin: 1px 0 4px 13px;
+  border-left: 1px solid var(--hairline);
+}
+
+.entity-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 6px;
+  border: none;
+  border-radius: 0;
+  background: none;
+  text-align: left;
+  font-size: 11.5px;
+}
+
+.entity-row:hover {
+  background: var(--ground);
+}
+
+.entity-row[data-focus="true"] {
+  background: var(--blue-wash);
+  color: var(--blue);
+}
+
+.entity-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entity-status {
+  flex: none;
+  font-size: 10px;
+  color: var(--running);
+}
+
+.entity-row[data-status="conflict"] .entity-status,
+.entity-row[data-status="failed"] .entity-status {
+  color: var(--conflict);
+}
+
+/* Where an entity came from: its dot's colour and its line - solid, hollow or dashed. */
+.origin {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1.5px solid var(--muted);
+  background: var(--muted);
+}
+
+.origin[data-origin="derived"] {
+  background: var(--sheet);
+}
+
+.origin[data-origin="inferred"] {
+  border-color: var(--running);
+  border-style: dashed;
+  background: var(--sheet);
+}
+
+.origin[data-origin="confirmed"] {
+  border-color: var(--measured);
+  background: var(--measured);
+}
+
+.origin[data-origin="generated"] {
+  border-color: var(--blue);
+  background: var(--blue);
+}
+
+.more {
+  align-self: flex-start;
+  margin: 2px 6px;
+  padding: 0 6px;
+  font-size: 10.5px;
+  color: var(--blue);
+  border-color: transparent;
+  background: none;
+}
+
+.more.inline {
+  margin: 0 0 0 4px;
+  padding: 0 4px;
+}
+
+.step-warn {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--running);
+}
+
+.step-warn summary {
+  cursor: pointer;
+}
+
+/* --- the card -------------------------------------------------------------------------------- */
+
+.entity-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.entity-card-bar {
+  display: flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.entity-card-bar .icon {
+  margin-left: auto;
+  padding: 0 7px;
+  font-size: 15px;
+  line-height: 1.2;
+  border-color: transparent;
+}
+
+.entity-card-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: 24px;
+}
+
+.entity-head {
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.entity-kind {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.kind-chip {
+  padding: 1px 6px;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: var(--ground);
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+}
+
+.origin-pill,
+.status-pill {
+  padding: 0 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  border-bottom: 2px solid;
+  border-radius: 2px;
+}
+
+.origin-pill {
+  color: var(--muted);
+  background: var(--ground);
+}
+
+.origin-pill[data-origin="inferred"] {
+  color: var(--running);
+  background: var(--running-wash);
+  border-bottom-style: dashed;
+}
+
+.origin-pill[data-origin="confirmed"] {
+  color: var(--measured);
+  background: var(--measured-wash);
+}
+
+.origin-pill[data-origin="generated"] {
+  color: var(--blue);
+  background: var(--blue-wash);
+}
+
+.status-pill {
+  color: var(--running);
+  background: var(--running-wash);
+  border-bottom-style: dashed;
+}
+
+.status-pill[data-status="done"],
+.status-pill[data-status="cached"] {
+  color: var(--measured);
+  background: var(--measured-wash);
+  border-bottom-style: solid;
+}
+
+.entity-title {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.entity-title .count {
+  font-family: var(--mono);
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--faint);
+}
+
+.entity-id {
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--faint);
+  user-select: all;
+}
+
+.entity-made {
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+button.link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--blue);
+  text-decoration: underline;
+  text-decoration-color: rgba(15, 61, 145, 0.3);
+  text-underline-offset: 2px;
+}
+
+button.link:hover {
+  text-decoration-color: var(--blue);
+}
+
+.card-section {
+  border-bottom: 1px solid var(--hairline);
+}
+
+.card-section > summary {
+  padding: 8px 14px 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.card-section > summary .count {
+  font-family: var(--mono);
+  font-weight: 400;
+  color: var(--faint);
+}
+
+.card-pad {
+  padding: 8px 14px;
+}
+
+.card-error {
+  margin: 12px 14px;
+  color: var(--conflict);
+  font-size: 12px;
+}
+
+.fields-list {
+  display: grid;
+  grid-template-columns: minmax(90px, max-content) 1fr;
+  gap: 3px 12px;
+  margin: 0;
+  padding: 0 14px 10px;
+  font-size: 12px;
+}
+
+.fields-list dt {
+  color: var(--muted);
+}
+
+.fields-list dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.fields-list .unit {
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.value-map {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+}
+
+.value-map > div {
+  display: flex;
+  gap: 6px;
+}
+
+.value-map dt {
+  color: var(--faint);
+}
+
+.value-map dd {
+  margin: 0;
+}
+
+.value-list > div + div {
+  margin-top: 2px;
+}
+
+.proofs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 14px 10px;
+}
+
+.proof {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 8px;
+  font-size: 11.5px;
+  border-left: 2px solid var(--hairline);
+  background: var(--ground);
+}
+
+.proof[data-source="deck"] {
+  border-left-color: var(--blue);
+}
+
+.proof[data-source="drawing"] {
+  border-left-color: #6b3fa0;
+}
+
+.proof[data-source="rule"] {
+  border-left-color: var(--running);
+  border-left-style: dashed;
+}
+
+.proof[data-source="engineer"] {
+  border-left-color: var(--measured);
+}
+
+.proof-source {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.proof .link {
+  align-self: flex-start;
+  font-size: 10.5px;
+}
+
+.tie-group {
+  padding: 0 14px 8px;
+}
+
+.tie-role {
+  margin-bottom: 3px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.ties {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tie {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  max-width: 100%;
+  padding: 2px 7px;
+  font-size: 11.5px;
+  text-align: left;
+}
+
+.tie:hover {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+.tie > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tie-kind {
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.question {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--running-wash);
+}
+
+.question-text {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.question-detail {
+  margin: 0 0 10px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.question-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.question-meanwhile {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.io-row {
+  display: grid;
+  grid-template-columns: 48px 1fr auto;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  padding: 4px 14px;
+  border: none;
+  border-radius: 0;
+  background: none;
+  text-align: left;
+  font-size: 12px;
+}
+
+.io-row:hover:not(:disabled) {
+  background: var(--ground);
+}
+
+.io-row b {
+  text-align: right;
+  font-weight: 500;
+}
+
+.io-row .dim {
+  font-size: 11px;
+}
+
+.card-members {
+  margin: 6px 14px;
+}
+
+/* --- the canvases ---------------------------------------------------------------------------- */
+
+.stage-tabs {
+  align-items: center;
+}
+
+.stage-tabs-spacer {
+  flex: 1;
+}
+
+.stage-toggle {
+  margin-right: 10px;
+}
+
+.stage-tabs .stage-toggle button {
+  padding: 4px 11px;
+  border-bottom: none;
+  font-size: 11.5px;
+}
+
+/* The design space's key: top right on the CAD, over the part. */
+.space-legend {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 4;
+  width: 232px;
+  max-height: calc(100% - 24px);
+  overflow: auto;
+  padding: 6px 0;
+  background: rgba(255, 255, 255, 0.93);
+  border: 1px solid var(--hairline);
+  font-size: 11.5px;
+}
+
+.legend-group + .legend-group {
+  margin-top: 4px;
+  border-top: 1px solid var(--hairline);
+  padding-top: 4px;
+}
+
+.legend-title {
+  padding: 3px 10px 2px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 2px 10px;
+  border: none;
+  border-radius: 0;
+  background: none;
+  text-align: left;
+  color: var(--muted);
+}
+
+.legend-row:hover:not(:disabled) {
+  background: var(--ground);
+}
+
+.legend-row[data-on="true"] {
+  color: var(--ink);
+}
+
+.legend-row:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.legend-row .swatch {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+.legend-row[data-on="false"] .swatch {
+  background: transparent !important;
+}
+
+/* A view control: what it is, a slider, and where the slider stands. */
+.legend-slider {
+  display: grid;
+  grid-template-columns: 88px 1fr 38px;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 10px 1px 0;
+}
+
+.legend-slider .legend-row {
+  padding-right: 0;
+}
+
+.legend-slider-label {
+  padding-left: 28px;
+  color: var(--ink);
+}
+
+.legend-slider input[type="range"] {
+  width: 100%;
+  min-width: 0;
+  accent-color: var(--blue);
+}
+
+.legend-slider input[type="range"]:disabled {
+  opacity: 0.4;
+}
+
+.legend-slider .num {
+  font-size: 10.5px;
+  color: var(--muted);
+  text-align: right;
+}
+
+.legend-paints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 2px 10px 4px;
+}
+
+.legend-paints button {
+  padding: 1px 7px;
+  font-size: 11px;
+}
+
+.paint-key {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 2px 10px 4px;
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.paint-key i {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  vertical-align: -1px;
+}
+
+.paint-ramp {
+  display: inline-block;
+  width: 90px;
+  height: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.stage-body .overlay .segmented button {
+  font-size: 11.5px;
+}
+
+.signals-panel {
+  position: absolute;
+  left: 12px;
+  bottom: 44px;
+  z-index: 4;
+  width: min(560px, calc(100% - 24px));
+  max-height: 55%;
+  overflow: auto;
+  background: var(--sheet);
+  border: 1px solid var(--hairline);
+}
+
+.callout[data-focus="true"] {
+  background: var(--blue-wash);
+  box-shadow: inset 2px 0 0 var(--blue);
+}
