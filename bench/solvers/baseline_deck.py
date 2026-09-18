@@ -1,12 +1,11 @@
 """The rib-less baseline housing as its engineer would hand it over: a Code_Aster deck and the answer
 Code_Aster gave - the stand-in for the files a customer uploads beside the CAD and the drawing.
 
-Meshed exactly as the gate's CAD-surface route (field-meshing-gate.md, route A): agenticCAE's own
-procedure meshes the part first - gmsh on its faces, weld, collapse, MeshFix, gmsh tets, 20 mm most
-and 4 mm least - and its element sizes are read off that mesh point by point; the compiled CGAL mesher
-then fills the CAD's own triangulation held to those sizes, following the six loaded seats' edges
-with vertices 8 mm apart; TET10 with straight mid-side nodes; a boundary triangle a seat's or bolt
-hole's when its middle is nearest that CAD face and every corner lies within 2 mm of it.
+Meshed face by face as agenticCAE meshed its designs (face_mesh.py): gmsh on every CAD face, 20 mm
+most and 4 mm least, curved edges at least 12 elements a turn so holes stay round, the faces gmsh
+cannot parametrise meshed in their unrolled plane instead of lidded; weld, collapse, MeshFix, gmsh
+tets; TET10 with straight mid-side nodes; a boundary triangle a seat's or bolt hole's when its middle
+is nearest that CAD face and every corner lies within 2 mm of it.
 
 Set up as agenticCAE set up its designs: the nine bores and the 25 flange bolt positions found by
 geometry and named as agenticCAE named them; each bolt a kinematic coupling to a reference node held
@@ -29,6 +28,7 @@ import sys
 import time
 from pathlib import Path
 
+import face_mesh
 import numpy as np
 from common import AGENTICCAE, SCRATCH
 
@@ -43,7 +43,6 @@ BREP = PROJECT / "housing_baseline.brep"
 WORK = SCRATCH / "baseline_deck"
 STAGE = WORK / "deck"
 TOLERANCE_MM = 2.0  # a boundary triangle on a face: every corner this close to it, as the gate
-AGENTICCAE_SURFACE = r"C:\Work\agenticCAE\src\fastcae\mesh\surface.py"
 
 # agenticCAE's nine bearing bores (assets/housing_faces.json, BORE_MAIN_S1/S4, AX1_S2 and AX2_S1
 # left out as it left them out), by diameter, axis and height.
@@ -113,27 +112,6 @@ def bolts(features) -> list[dict]:
     return out
 
 
-def agenticcae_sizes(vertices: np.ndarray) -> tetmesh.SizeGrid:
-    """agenticCAE's own mesh of the part, made as it made its 490 designs, and its element sizes read
-    off it on a 6 mm grid over the part."""
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location("agenticcae_surface", AGENTICCAE_SURFACE)
-    ag = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(ag)
-    t0 = time.time()
-    verts, tris, surface = ag.cad_surface(BREP, ag.SIZE_MM)
-    verts, tris, _ = ag.repair(verts, tris)
-    nodes, tets, filled = ag.tetrahedralise(verts, tris, ag.SIZE_MM, WORK)
-    (WORK / "_surface.stl").unlink(missing_ok=True)
-    print(f"agenticCAE's mesh of the part: {filled['tets']:,} tets in {time.time() - t0:.0f} s "
-          f"({surface.get('unparametrised_faces', '?')} faces gmsh skipped)", flush=True)
-    lo = vertices.min(axis=0) - 20.0
-    hi = vertices.max(axis=0) + 20.0
-    shape = tuple(int(np.ceil((h - low) / 3.0)) + 1 for low, h in zip(lo, hi, strict=True))
-    return tetmesh.sizes_from_mesh(np.asarray(nodes), np.asarray(tets), lo, shape, 3.0)
-
-
 def patch_nodes(mesh: FEMesh, faces: list[int], vertices, triangles, face_id) -> np.ndarray:
     """The nodes of the boundary triangles lying on the faces: middle nearest them, every corner
     within the tolerance."""
@@ -168,17 +146,11 @@ def main() -> None:
 
     loads = json.loads((AGENTICCAE / "loads.json").read_text(encoding="utf-8"))
     seats = [b for b in bore_faces if b in loads]
-    sizes = agenticcae_sizes(vertices)
-    lines = []
-    for name in seats:
-        lines += tetmesh.face_edges(vertices, triangles, face_id, set(bore_faces[name]))
-    work = tetmesh.workspace(WORK)
     t0 = time.time()
-    nodes, tets, info = tetmesh.mesh_surface(
-        vertices, triangles, work, sizes=sizes, lines=lines, distance=2.0, edge=8.0, threads=4, feature_angle=0.0,
-    )
-    print(f"CGAL: {len(tets):,} tets in {time.time() - t0:.0f} s ({len(lines)} edge lines on {len(seats)} seats)",
-          flush=True)
+    nodes, tets, info = face_mesh.mesh(BREP, WORK)
+    assert not info["patched_holes"], info
+    print(f"mesh: {len(tets):,} tets in {time.time() - t0:.0f} s; {info['faces']} faces, {len(info['unrolled_faces'])} "
+          f"meshed unrolled, none lidded; below q 0.1 {info['below_q0.1_pct']} %, {info['volume_cm3']} cm3", flush=True)
     body = tetmesh.finish(nodes, tets)
 
     node_groups: dict[str, np.ndarray] = {}
