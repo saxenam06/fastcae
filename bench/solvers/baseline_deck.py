@@ -1,11 +1,12 @@
 """The rib-less baseline housing as its engineer would hand it over: a Code_Aster deck and the answer
 Code_Aster gave - the stand-in for the files a customer uploads beside the CAD and the drawing.
 
-Meshed face by face as agenticCAE meshed its designs (face_mesh.py): gmsh on every CAD face, 20 mm
-most and 4 mm least, curved edges at least 12 elements a turn so holes stay round, the faces gmsh
-cannot parametrise meshed in their unrolled plane instead of lidded; weld, collapse, MeshFix, gmsh
-tets; TET10 with straight mid-side nodes; a boundary triangle a seat's or bolt hole's when its middle
-is nearest that CAD face and every corner lies within 2 mm of it.
+Meshed face by face as agenticCAE meshed its designs (the product's fastcae.simulate.face_mesh):
+gmsh on every CAD face, 20 mm most and 4 mm least, curved edges at least 12 elements a turn so
+holes stay round, the faces gmsh cannot parametrise meshed in their unrolled plane instead of
+lidded; weld, collapse, MeshFix, gmsh tets; TET10 with straight mid-side nodes; a boundary triangle
+a seat's or bolt hole's when its middle is nearest that CAD face and every corner lies within 2 mm
+of it.
 
 Set up as agenticCAE set up its designs: the nine bores and the 25 flange bolt positions found by
 geometry and named as agenticCAE named them; each bolt a kinematic coupling to a reference node held
@@ -28,13 +29,12 @@ import sys
 import time
 from pathlib import Path
 
-import face_mesh
 import numpy as np
 from common import AGENTICCAE, SCRATCH
 
 from fastcae import extract
 from fastcae.project import Project
-from fastcae.simulate import aster, carry, med, signals, solve, tetmesh
+from fastcae.simulate import aster, carry, face_mesh, med, signals, solve, tetmesh
 from fastcae.simulate.fem import FEMesh
 from fastcae.simulate.setup import Analysis, Distributing, Held, Material, NodalLoad, Output, Rigid, Setup
 
@@ -107,7 +107,11 @@ def bolts(features) -> list[dict]:
     out = []
     for cb in sorted((c for c in holes if abs(c["r"] - COUNTERBORE_R) < 0.1), key=angle):
         a = angle(cb)
-        members = [c for c in holes if abs((angle(c) - a + 180.0) % 360.0 - 180.0) < 1.0 and c["r"] <= 27.6 and c["z"][1] <= 71.0]
+        members = [
+            c
+            for c in holes
+            if abs((angle(c) - a + 180.0) % 360.0 - 180.0) < 1.0 and c["r"] <= 27.6 and c["z"][1] <= 71.0
+        ]
         out.append({"xy": cb["xy"], "faces": [c["face"] for c in members]})
     return out
 
@@ -140,8 +144,12 @@ def main() -> None:
     vertices, triangles, face_id = closed(result.tess.vertices, result.tess.triangles, result.tess.face_id)
     bore_faces = bores(result.features)
     positions = bolts(result.features)
-    print(f"read in {time.time() - started:.0f} s; bores:", {k: len(v) for k, v in bore_faces.items()},
-          f"bolt positions: {len(positions)}", flush=True)
+    print(
+        f"read in {time.time() - started:.0f} s; bores:",
+        {k: len(v) for k, v in bore_faces.items()},
+        f"bolt positions: {len(positions)}",
+        flush=True,
+    )
     assert all(bore_faces.values()) and len(positions) == 25
 
     loads = json.loads((AGENTICCAE / "loads.json").read_text(encoding="utf-8"))
@@ -149,8 +157,11 @@ def main() -> None:
     t0 = time.time()
     nodes, tets, info = face_mesh.mesh(BREP, WORK)
     assert not info["patched_holes"], info
-    print(f"mesh: {len(tets):,} tets in {time.time() - t0:.0f} s; {info['faces']} faces, {len(info['unrolled_faces'])} "
-          f"meshed unrolled, none lidded; below q 0.1 {info['below_q0.1_pct']} %, {info['volume_cm3']} cm3", flush=True)
+    print(
+        f"mesh: {len(tets):,} tets in {time.time() - t0:.0f} s; {info['faces']} faces, {len(info['unrolled_faces'])} "
+        f"meshed unrolled, none lidded; below q 0.1 {info['below_q0.1_pct']} %, {info['volume_cm3']} cm3",
+        flush=True,
+    )
     body = tetmesh.finish(nodes, tets)
 
     node_groups: dict[str, np.ndarray] = {}
@@ -178,7 +189,10 @@ def main() -> None:
         nodes=all_nodes,
         cells={"TETRA10": body.cells["TETRA10"], "POI1": np.arange(first, first + len(refs))[:, None]},
         node_groups=node_groups,
-        cell_groups={"BULK": {"TETRA10": np.arange(len(body.cells["TETRA10"]))}, "REFPT": {"POI1": np.arange(len(refs))}},
+        cell_groups={
+            "BULK": {"TETRA10": np.arange(len(body.cells["TETRA10"]))},
+            "REFPT": {"POI1": np.arange(len(refs))},
+        },
         name="HOUSING",
     )
     for name in [*bore_faces, *[f"BOLT_{i:02d}" for i in range(len(positions))]]:
@@ -193,11 +207,19 @@ def main() -> None:
         ],
         discrete=[{"groups": ["REFPT"], "kind": "K_TR_D_N"}],
         materials=[Material(name="iron", young=169000.0, poisson=0.275, density=7.2e-9, groups=["BULK"])],
-        held=[Held(load_set="supports", groups=[f"REF_{b}" for b in bolt_names], dofs={"DX": 0.0, "DY": 0.0, "DZ": 0.0})],
+        held=[
+            Held(load_set="supports", groups=[f"REF_{b}" for b in bolt_names], dofs={"DX": 0.0, "DY": 0.0, "DZ": 0.0})
+        ],
         rigid=[Rigid(load_set="supports", groups=[b, f"REF_{b}"]) for b in bolt_names],
         distributing=[
-            Distributing(load_set="couplings", reference=f"REF_{b}", group=b,
-                         reference_dofs=["DX", "DY", "DZ", "DRX", "DRY", "DRZ"], group_dofs=["DX-DY-DZ"], weights=[1.0])
+            Distributing(
+                load_set="couplings",
+                reference=f"REF_{b}",
+                group=b,
+                reference_dofs=["DX", "DY", "DZ", "DRX", "DRY", "DRZ"],
+                group_dofs=["DX-DY-DZ"],
+                weights=[1.0],
+            )
             for b in coupled
         ],
         nodal_loads=[
@@ -205,8 +227,10 @@ def main() -> None:
             for b in bore_faces
             if b in loads
         ],
-        outputs=[Output(name=b, group=f"REF_{b}", field="DEPL", components=None, operation="EXTRACTION", table="signals")
-                 for b in coupled],
+        outputs=[
+            Output(name=b, group=f"REF_{b}", field="DEPL", components=None, operation="EXTRACTION", table="signals")
+            for b in coupled
+        ],
         analysis=Analysis(
             kind="linear static",
             load_sets=["supports", "couplings", "loads"],
@@ -225,7 +249,13 @@ def main() -> None:
     aster.write_export(
         STAGE / "convert.export",
         aster.Export(
-            params={"actions": "make_etude", "version": "stable", "ncpus": "1", "memory_limit": "4000", "time_limit": "900"},
+            params={
+                "actions": "make_etude",
+                "version": "stable",
+                "ncpus": "1",
+                "memory_limit": "4000",
+                "time_limit": "900",
+            },
             files=[
                 aster.ExportFile("comm", "convert.comm", "D", 1),
                 aster.ExportFile("mail", "baseline.mail", "D", 20),
@@ -244,7 +274,13 @@ def main() -> None:
         STAGE / "baseline.export",
         aster.Export(
             # One thread, as every proven run had it: with these couplings MUMPS crawls on 4-8 threads.
-            params={"actions": "make_etude", "version": "stable", "ncpus": "1", "memory_limit": "7000", "time_limit": "900"},
+            params={
+                "actions": "make_etude",
+                "version": "stable",
+                "ncpus": "1",
+                "memory_limit": "7000",
+                "time_limit": "900",
+            },
             files=[
                 aster.ExportFile("comm", "baseline.comm", "D", 1),
                 aster.ExportFile("mmed", "baseline.med", "D", 20),
@@ -275,13 +311,18 @@ def compare(vertices: np.ndarray, triangles: np.ndarray, face_id: np.ndarray) ->
     t0 = time.time()
     mine = solve.solve(back, read, gpu=True)
     print(f"cuDSS: {mine.unknowns:,} unknowns in {time.time() - t0:.0f} s", flush=True)
-    rows = signals.compare(signals.signals(back, read, reference), signals.signals(back, read, signals.from_solution(mine, "cuDSS")))
+    rows = signals.compare(
+        signals.signals(back, read, reference), signals.signals(back, read, signals.from_solution(mine, "cuDSS"))
+    )
     worst = max(abs(r["difference"]) for r in rows if abs(r["reference"]) > 1e-12)
     agreement = signals.field_agreement(back, reference, signals.from_solution(mine, "cuDSS"))
     print(f"cuDSS against Code_Aster: signals within {worst:.1e}, fields {agreement}", flush=True)
     for r in rows:
         if r["component"] in ("tilt", "p99.9", "largest", "reaction") and r["name"] != "BOLT":
-            print(f"  {r['name']:14s} {r['component']:9s} {r['reference']:12.5g} {r['other']:12.5g} {r['difference']:+.1e}")
+            print(
+                f"  {r['name']:14s} {r['component']:9s} {r['reference']:12.5g} "
+                f"{r['other']:12.5g} {r['difference']:+.1e}"
+            )
     ran = json.loads((STAGE / "aster_run.json").read_text(encoding="utf-8"))
     summary = {
         "tets": int(back.count("TETRA10")),
@@ -297,7 +338,14 @@ def compare(vertices: np.ndarray, triangles: np.ndarray, face_id: np.ndarray) ->
     }
     (WORK / "baseline_deck.json").write_text(json.dumps(summary, indent=1, default=float), encoding="utf-8")
     if "--copy" in sys.argv:
-        for name in ("baseline.export", "baseline.comm", "baseline.med", "baseline.rmed", "baseline_signals.resu", "baseline.mess"):
+        for name in (
+            "baseline.export",
+            "baseline.comm",
+            "baseline.med",
+            "baseline.rmed",
+            "baseline_signals.resu",
+            "baseline.mess",
+        ):
             target = PROJECT / name
             if target.exists():
                 raise SystemExit(f"{target} exists; not overwritten")

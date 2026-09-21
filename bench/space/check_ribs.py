@@ -14,8 +14,8 @@ from pathlib import Path
 
 import numpy as np
 
-from fastcae.generate.field import Grid
 from fastcae.geometry import check, exact_properties, load_cad, tessellate
+from fastcae.geometry.field import Grid
 from fastcae.space.check import compare
 
 
