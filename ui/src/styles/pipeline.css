@@ -41,21 +41,6 @@
   border-left: 2px solid var(--conflict);
 }
 
-.pipeline-apply {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 8px 12px;
-  padding: 6px 8px;
-  font-size: 11.5px;
-  background: var(--running-wash);
-  border-left: 2px solid var(--running);
-}
-
-.pipeline-apply button {
-  margin-left: auto;
-}
-
 .pipeline-stage > header {
   display: flex;
   align-items: baseline;
@@ -707,37 +692,6 @@ button.link:hover {
   color: var(--faint);
 }
 
-.question {
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--hairline);
-  background: var(--running-wash);
-}
-
-.question-text {
-  margin: 0 0 6px;
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.question-detail {
-  margin: 0 0 10px;
-  font-size: 11.5px;
-  line-height: 1.45;
-  color: var(--muted);
-}
-
-.question-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.question-meanwhile {
-  margin: 8px 0 0;
-  font-size: 11px;
-  color: var(--muted);
-}
-
 .io-row {
   display: grid;
   grid-template-columns: 48px 1fr auto;
@@ -789,143 +743,86 @@ button.link:hover {
   font-size: 11.5px;
 }
 
-/* The design space's key: top right on the CAD, over the part. */
-.space-legend {
+/* The design space's switches carry their colour: its green, and the heat scale where metal helps. */
+.stage-body .overlay .swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 3px;
+  border-radius: 2px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  vertical-align: -1px;
+}
+
+.stage-body .overlay .swatch.heat {
+  background: linear-gradient(90deg, #fff0a0, #fc8c3c, #b30026);
+}
+
+.stage-body .overlay button[data-active="false"] .swatch {
+  opacity: 0.35;
+}
+
+/* What the design space holds, under the picture. */
+.space-readout {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  left: 12px;
+  bottom: 12px;
   z-index: 4;
-  width: 232px;
-  max-height: calc(100% - 24px);
-  overflow: auto;
-  padding: 6px 0;
-  background: rgba(255, 255, 255, 0.93);
+  display: flex;
+  gap: 10px;
+  padding: 3px 8px;
+  background: rgba(255, 255, 255, 0.9);
   border: 1px solid var(--hairline);
   font-size: 11.5px;
 }
 
-.legend-group + .legend-group {
-  margin-top: 4px;
-  border-top: 1px solid var(--hairline);
-  padding-top: 4px;
+/* The answers a solve results view can show, as tabs under the picture. */
+.run-tabs {
+  display: inline-flex;
+  gap: 0;
 }
 
-.legend-title {
-  padding: 3px 10px 2px;
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--faint);
-}
-
-.legend-row {
-  display: flex;
+.run-tabs button {
+  display: inline-flex;
   align-items: center;
-  gap: 7px;
-  width: 100%;
-  padding: 2px 10px;
-  border: none;
+  gap: 5px;
+  padding: 2px 9px;
+  border: 1px solid var(--hairline);
   border-radius: 0;
   background: none;
-  text-align: left;
+  font-size: 11.5px;
   color: var(--muted);
 }
 
-.legend-row:hover:not(:disabled) {
-  background: var(--ground);
+.run-tabs button + button {
+  border-left: none;
 }
 
-.legend-row[data-on="true"] {
-  color: var(--ink);
+.run-tabs button[data-active="true"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
 }
 
-.legend-row:disabled {
-  opacity: 0.45;
-  cursor: default;
+.run-tabs button[data-active="true"] .prov {
+  background: transparent;
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.6);
 }
 
-.legend-row .swatch {
-  flex: none;
-  width: 11px;
-  height: 11px;
-  border-radius: 2px;
-  border: 1px solid rgba(0, 0, 0, 0.15);
+.fe-caption:has(.run-tabs) {
+  padding: 2px;
 }
 
-.legend-row[data-on="false"] .swatch {
-  background: transparent !important;
-}
-
-/* A view control: what it is, a slider, and where the slider stands. */
-.legend-slider {
-  display: grid;
-  grid-template-columns: 88px 1fr 38px;
-  align-items: center;
-  gap: 6px;
-  padding: 1px 10px 1px 0;
-}
-
-.legend-slider .legend-row {
-  padding-right: 0;
-}
-
-.legend-slider-label {
-  padding-left: 28px;
-  color: var(--ink);
-}
-
-.legend-slider input[type="range"] {
-  width: 100%;
-  min-width: 0;
-  accent-color: var(--blue);
-}
-
-.legend-slider input[type="range"]:disabled {
-  opacity: 0.4;
-}
-
-.legend-slider .num {
-  font-size: 10.5px;
-  color: var(--muted);
-  text-align: right;
-}
-
-.legend-paints {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-  padding: 2px 10px 4px;
-}
-
-.legend-paints button {
-  padding: 1px 7px;
-  font-size: 11px;
-}
-
-.paint-key {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 10px;
-  padding: 2px 10px 4px;
-  font-size: 10.5px;
-  color: var(--muted);
-}
-
-.paint-key i {
-  display: inline-block;
-  width: 9px;
-  height: 9px;
-  border-radius: 2px;
-  vertical-align: -1px;
-}
-
-.paint-ramp {
-  display: inline-block;
-  width: 90px;
-  height: 8px;
-  border: 1px solid rgba(0, 0, 0, 0.12);
+.solve-job {
+  position: absolute;
+  left: 12px;
+  bottom: 48px;
+  z-index: 4;
+  width: min(360px, calc(100% - 24px));
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--hairline);
 }
 
 .stage-body .overlay .segmented button {

@@ -6,7 +6,8 @@
  * mesh being fetched again.
  */
 
-import type { GlyphData, Skin } from "../render/fe";
+import type { GlyphData, Skin, Slice } from "../render/fe";
+import type { Plane } from "../stage/sectionPlane";
 
 export type Provenance = "imported" | "derived" | "generated";
 
@@ -117,58 +118,6 @@ export interface JobStatus {
 
 export type Run = "aster" | "cudss";
 
-export interface CertificateRow {
-  quantity: string;
-  /** For a row about one answer alone - its own balance - which one. */
-  of?: "reference" | "other";
-  reference: number;
-  other: number;
-  difference: number;
-  unit: string;
-  tolerance: number | null;
-  holds: boolean | null;
-  note: string;
-}
-
-export interface Certificate {
-  other: Run;
-  rows: CertificateRow[];
-  solver: { reference: string; other: string };
-  residual: number | null;
-  holds: boolean;
-}
-
-/** Where one design of a run is: its stage now, or how it came out - with each stage's seconds. */
-export interface DesignState {
-  index: number;
-  stage?: "build" | "mesh" | "setup" | "solve" | "record" | "done";
-  outcome?: "solved" | "set aside" | null;
-  reason?: string;
-  route?: string;
-  seconds?: number;
-  stages?: Record<string, number>;
-  unknowns?: number | null;
-  mass_kg?: number | null;
-  updated?: number;
-}
-
-export interface CampaignJob extends JobStatus {
-  args?: { run: string; designs: number[]; in_flight: number };
-  solved?: number;
-  set_aside?: number;
-  in_flight?: number[];
-  per_hour?: number | null;
-  total?: number;
-}
-
-export interface Solving {
-  run: string;
-  job: CampaignJob | null;
-  designs: DesignState[];
-  events: { t: number; message: string; design?: number; outcome?: string }[];
-  since: number;
-}
-
 async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(path);
   if (!response.ok) throw new Error(`${path}: ${response.status} ${await response.text()}`);
@@ -184,7 +133,7 @@ async function postJson<T>(path: string, body?: unknown): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-async function fetchSkin(path: string): Promise<Skin> {
+export async function fetchSkin(path: string): Promise<Skin> {
   const response = await fetch(path);
   if (!response.ok) throw new Error(`${path}: ${response.status}`);
   const buffer = await response.arrayBuffer();
@@ -212,7 +161,7 @@ export interface Values {
   vectors: Float32Array | null;
 }
 
-async function fetchValues(path: string): Promise<Values> {
+export async function fetchValues(path: string): Promise<Values> {
   const response = await fetch(path);
   if (!response.ok) throw new Error(`${path}: ${response.status} ${await response.text()}`);
   const buffer = await response.arrayBuffer();
@@ -224,33 +173,50 @@ async function fetchValues(path: string): Promise<Values> {
   return { values, vectors };
 }
 
+/** Where a plane cuts a mesh, as the server sends it (``FCSECT01``): the triangles' corners, the
+ * field and the displacement at them when there are any, and each triangle's element edges. */
+export async function fetchSection(path: string): Promise<Slice> {
+  const response = await fetch(path);
+  if (!response.ok) throw new Error(`${path}: ${response.status} ${await response.text()}`);
+  const buffer = await response.arrayBuffer();
+  const view = new DataView(buffer);
+  const triangles = view.getUint32(8, true);
+  const flags = view.getUint32(12, true);
+  let at = 16;
+  const positions = new Float32Array(buffer, at, triangles * 9);
+  at += triangles * 36;
+  let values: Float32Array | null = null;
+  if (flags & 1) {
+    values = new Float32Array(buffer, at, triangles * 3);
+    at += triangles * 12;
+  }
+  let vectors: Float32Array | null = null;
+  if (flags & 2) {
+    vectors = new Float32Array(buffer, at, triangles * 9);
+    at += triangles * 36;
+  }
+  const edges = new Uint8Array(buffer, at, triangles);
+  return { triangles, positions, values, vectors, edges };
+}
+
+/** The query naming a plane. */
+export function planeQuery(plane: Plane): string {
+  const [nx, ny, nz] = plane.normal;
+  return `nx=${nx}&ny=${ny}&nz=${nz}&d=${plane.d}`;
+}
+
 export const sim = {
   deck: () => getJson<Deck>("/api/deck"),
   deckSkin: () => fetchSkin("/api/deck/mesh"),
   deckGlyphs: () => getJson<GlyphData>("/api/deck/glyphs"),
   field: (run: Run, name: string, vectors = false) =>
     fetchValues(`/api/deck/field?run=${run}&name=${encodeURIComponent(name)}&vectors=${vectors}`),
-  difference: (name: string, a: Run, b: Run) =>
-    fetchValues(`/api/deck/difference?name=${encodeURIComponent(name)}&a=${a}&b=${b}`),
   signals: () => getJson<Signals>("/api/deck/signals"),
-  certificate: (other: Run) => getJson<Certificate>(`/api/deck/certificate?other=${other}`),
+  /** The deck's mesh cut by a plane - with a field of one answer on the cut, when one is named. */
+  section: (plane: Plane, run?: Run, name?: string) =>
+    fetchSection(
+      `/api/deck/section?${planeQuery(plane)}${run ? `&run=${run}` : ""}${name ? `&name=${encodeURIComponent(name)}` : ""}`,
+    ),
   solve: () => postJson<{ job: string }>("/api/deck/solve"),
   job: (id: string, since = 0) => getJson<JobStatus>(`/api/jobs/${encodeURIComponent(id)}?since=${since}`),
-  jobs: (kind?: string) =>
-    getJson<{ runner: Record<string, unknown> | null; jobs: JobStatus[] }>(`/api/jobs${kind ? `?kind=${kind}` : ""}`),
-  cancel: (id: string) => postJson<{ cancelled: boolean }>(`/api/jobs/${encodeURIComponent(id)}/cancel`),
-  solveRun: (run: string, count: number, inFlight: number) =>
-    postJson<{ job: string; designs: number[] }>(`/api/runs/${encodeURIComponent(run)}/solve`, {
-      count,
-      in_flight: inFlight,
-    }),
-  solving: (run: string) => getJson<Solving>(`/api/runs/${encodeURIComponent(run)}/solving`),
-  designSkin: (run: string, index: number) =>
-    fetchSkin(`/api/runs/${encodeURIComponent(run)}/designs/${index}/fe/mesh`),
-  designGlyphs: (run: string, index: number) =>
-    getJson<GlyphData>(`/api/runs/${encodeURIComponent(run)}/designs/${index}/fe/glyphs`),
-  designField: (run: string, index: number, name: string, vectors = false) =>
-    fetchValues(
-      `/api/runs/${encodeURIComponent(run)}/designs/${index}/fe/field?name=${encodeURIComponent(name)}&vectors=${vectors}`,
-    ),
 };

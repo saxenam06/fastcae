@@ -5,10 +5,10 @@
  * derived from anything but the files in that project's folder.
  *
  * Four tabs, in the order the work happens: Input - what the engineer brought, read by the pipeline
- * into typed entities, and the design space derived from them; Generate - campaigns of designs and
- * every design followed through its stages; Learn and Optimize. On Input the left rail is the
- * pipeline itself - every step, what it read and what it made - the canvases show whatever is in
- * focus, and the card on the right shows it in full. The project's name comes from its folder, so a
+ * into typed entities, and the design space; Generate - designs made in that space and every design
+ * followed through its stages; Learn and Optimize. On Input the left rail is the pipeline itself -
+ * every step, what it read and what it made - the canvases show whatever is in focus, and the card
+ * on the right shows it in full. The project's name comes from its folder, so a
  * `DEEPJEB_Bracket/` folder renames the whole application without a code change.
  */
 
@@ -23,12 +23,23 @@ import type {
   Step,
   Summary,
 } from "../api/client";
-import type { EntitySummary, Group, LayerKey, PaintKind, StepRun } from "../api/pipeline";
+import type { EntitySummary, Group, StepRun } from "../api/pipeline";
 import { AgentBar } from "../panel/AgentBar";
 import { Splitter } from "../panel/Splitter";
-import { CampaignCardView, CampaignRuns, useCampaign } from "../generate/Campaign";
-import { RunHealth } from "../generate/RunHealth";
-import { DesignReadout, DesignStage, DesignTabs, DesignsRail, useDesigns } from "../generate/Designs";
+import {
+  CampaignPage,
+  CampaignRail,
+  DesignCard,
+  DesignFe,
+  DesignOverlay,
+  DesignsRail,
+  onPart,
+  tabsFor,
+  useCampaigns,
+  useDesign,
+  useDesignCanvas,
+} from "../designs/Designs";
+import type { DesignTab } from "../designs/Designs";
 import { DrawingStage } from "../stage/DrawingStage";
 import { UploadStage } from "../stage/UploadStage";
 import { Stage as GeometryStage } from "../stage/Stage";
@@ -36,22 +47,17 @@ import { HoverCard } from "../stage/HoverCard";
 import { DESIGN_PICK } from "../render/renderer";
 import type { ColourMode } from "../render/renderer";
 import { MeshStage, useMeshView } from "../input/MeshSetup";
-import { AnswerStage } from "../input/Answer";
+import { ResultsStage } from "../input/Results";
 import { useSolveView } from "../input/Solve";
 import { useDeck } from "../input/useDeck";
 import { EntityCard } from "../pipeline/EntityCard";
 import { PipelineRail } from "../pipeline/PipelineRail";
-import { SpaceLegend } from "../pipeline/SpaceLegend";
-import type { SpaceView } from "../pipeline/SpaceLegend";
 import type { Focus } from "../pipeline/focus";
 import { merged, stepFocus } from "../pipeline/focus";
-import {
-  DEFAULT_LAYERS,
-  STEP_LAYERS,
-  useFacePaint,
-  useSpaceLayers,
-} from "../pipeline/spaceLayers";
-import { usePipeline } from "../pipeline/usePipeline";
+import { SPACE_TINT, useDesignSpace } from "../pipeline/spaceLayers";
+import { useVolumes } from "../volumes/useVolumes";
+import { VolumesPanel } from "../volumes/VolumesPanel";
+import { SPACE_STEP, usePipeline } from "../pipeline/usePipeline";
 import type { CadView, DeckView, GenerateTab, InputTab, View } from "./product";
 import {
   ART,
@@ -75,14 +81,6 @@ interface Model {
 /** The right-hand panes that fold away to the edge, one a place. */
 type Pane = "entity" | "designs";
 
-/** Which step's work each per-face paint is. */
-const PAINT_STEP: Record<PaintKind, string> = {
-  thickness: "thickness",
-  cap: "columns",
-  interface: "interfaces",
-  sealing: "sealing",
-};
-
 /** A step's outputs are shown together only while there are few enough to mean something. */
 const SHOWN_TOGETHER = 60;
 
@@ -98,8 +96,11 @@ export function App() {
   const [cadView, setCadView] = useState<CadView>("part");
   const [deckView, setDeckView] = useState<DeckView>("setup");
   const [generateTab, setGenerateTab] = useState<GenerateTab>("campaign");
-  // The launched campaign whose designs the Campaign tab shows being solved; none shows the card.
-  const [campaignRun, setCampaignRun] = useState<string | null>(null);
+  // A design is looked at stage by stage; its optimisation at any iteration, the last by default.
+  const [designTab, setDesignTab] = useState<DesignTab>("optimise");
+  const [designIteration, setDesignIteration] = useState(-1);
+  const [designShowSpace, setDesignShowSpace] = useState(false);
+  const [designShowPlanes, setDesignShowPlanes] = useState(false);
 
   // What is in focus - an entity, a group, a step - and so what every canvas highlights.
   const [focus, setFocus] = useState<Focus | null>(null);
@@ -107,15 +108,11 @@ export function App() {
   const [cardFace, setCardFace] = useState<FaceDetail | null>(null);
   const faceCache = useRef(new Map<number, FaceDetail>());
   const [colourMode, setColourMode] = useState<ColourMode>("surface");
-  const [shownLayers, setShownLayers] = useState<Set<LayerKey>>(() => new Set(DEFAULT_LAYERS));
-  const [paint, setPaint] = useState<PaintKind | null>(null);
-  // How the design space is looked at: the part shown or hidden, and how see-through it and the
-  // volumes are.
-  const [spaceView, setSpaceView] = useState<SpaceView>({
-    part: true,
-    partOpacity: 1,
-    volumeOpacity: 1,
-  });
+  // The design-space view's switches, as the deck's view has its own: the part, the design space,
+  // and the design space coloured by where metal helps. Everything drawn opaque.
+  const [spaceShow, setSpaceShow] = useState({ part: true, space: true, heat: false });
+  // The design-volume view's switches: the part, and the volumes over it.
+  const [volumeShow, setVolumeShow] = useState({ part: true, volumes: true });
   const [showPart, setShowPart] = useState(true);
 
   // Pane widths, remembered between sessions. Losing them on every reload is a small annoyance
@@ -136,12 +133,12 @@ export function App() {
   const project = session?.project?.name ?? null;
   const opened = session?.stage === "model" && model !== null;
   const pipeline = usePipeline(opened ? project : null);
-  const campaign = useCampaign(view === "generate" && generateTab === "campaign", project);
-  const designs = useDesigns(view === "generate" && generateTab === "designs", project);
+  const campaigns = useCampaigns(view === "generate", project);
+  const design = useDesign(view === "generate" ? campaigns.design : null);
   const onDeck = view === "input" && inputTab === "mesh";
   const deck = useDeck(onDeck, project);
   const meshView = useMeshView();
-  const answerView = useSolveView();
+  const resultsView = useSolveView();
 
   const loadModel = useCallback(async () => {
     const [summary, steps, mesh, callouts, controlled] = await Promise.all([
@@ -185,9 +182,9 @@ export function App() {
     [loadModel],
   );
 
-  // Reading the same files again, on purpose. Everything derived from a project is kept on disk
-  // and keyed on what those files contain, so opening one is instant after the first time; this is
-  // the way to say "read them anyway" - and derive the design space again with them.
+  // Reading the same files again, on purpose. Everything read from a project is kept on disk and
+  // keyed on what those files contain, so opening one is instant after the first time; this is the
+  // way to say "read them anyway" - the design space with them.
   const reextract = useCallback(async () => {
     if (!session?.project) return;
     const paths = session.project.artifacts.map((a) => a.path);
@@ -196,13 +193,15 @@ export function App() {
     await pipeline.run(false);
   }, [session, extract, pipeline]);
 
-  const openRun = useCallback(
-    (run: string) => {
+  const selectDesign = campaigns.selectDesign;
+  const openDesign = useCallback(
+    (id: string) => {
+      selectDesign(id);
+      setDesignIteration(-1);
       setView("generate");
       setGenerateTab("designs");
-      designs.openRun(run);
     },
-    [designs],
+    [selectDesign],
   );
 
   const reset = useCallback(async () => {
@@ -220,7 +219,7 @@ export function App() {
     (next: Focus) => {
       setFocus(next);
       setOpen((was) => ({ ...was, entity: true }));
-      const { canvas, layers, paint: paintKind, group } = next.show;
+      const { canvas, layers, group } = next.show;
       if (canvas === "none") return;
       setView("input");
       if (canvas === "drawing") setInputTab("drawing");
@@ -229,13 +228,12 @@ export function App() {
         setDeckView("setup");
         setMeshFocus(group);
       } else {
-        // On the CAD: with volumes or a paint among what is shown - or asked for as the design space
-        // - the design-space view, with just those on; faces alone are shown on whichever view is up.
+        // On the CAD: the design space shown - or asked for - opens the design-space view with it
+        // on; faces alone are shown on whichever view is up.
         setInputTab("cad");
-        if (canvas === "space" || layers.length || paintKind) {
+        if (canvas === "space" || layers.length) {
           setCadView("space");
-          setShownLayers(new Set(layers as LayerKey[]));
-          setPaint(paintKind);
+          setSpaceShow((was) => ({ ...was, space: true }));
         }
       }
     },
@@ -268,7 +266,7 @@ export function App() {
   const onGroup = useCallback(
     async (group: Group, step: StepRun) => {
       const members = await readMembers(group).catch(() => []);
-      const fallback = step.stage === "space" ? "space" : "none";
+      const fallback = step.id === SPACE_STEP ? "space" : "none";
       show({ kind: "group", step: step.id, group, entity: null, show: merged(members, fallback) });
     },
     [readMembers, show],
@@ -311,14 +309,12 @@ export function App() {
   );
 
   const refreshPipeline = pipeline.refresh;
-  const followPipeline = pipeline.follow;
   const agentChanged = useCallback(
     (what: string[]) => {
-      if (what.includes("answers")) void refreshPipeline().catch(() => undefined);
+      if (what.length) void refreshPipeline().catch(() => undefined);
     },
     [refreshPipeline],
   );
-  const agentDerives = useCallback(() => void followPipeline(true), [followPipeline]);
 
   // What goes to the agent with the engineer's words: what is in focus.
   const focusIds = useMemo(
@@ -380,44 +376,43 @@ export function App() {
     return () => window.clearTimeout(timer);
   }, [hovered]);
 
-  // The design space on the CAD: the layers switched on, as far as the run has made them.
-  const done = useMemo(
-    () =>
-      new Set(
-        [...pipeline.steps.values()]
-          .filter((s) => s.status === "done" || s.status === "cached")
-          .map((s) => s.id),
-      ),
-    [pipeline.steps],
-  );
-  // While a run derives, the design space follows it: each step's volumes are shown as that step
-  // finishes; when the run ends, what is allowed and what waits.
-  const followed = useRef<string | null>(null);
-  const runningNow = pipeline.running;
-  const stages = pipeline.pipeline?.stages;
-  useEffect(() => {
-    if (!runningNow) {
-      if (followed.current !== null) {
-        followed.current = null;
-        setShownLayers(new Set(DEFAULT_LAYERS));
-      }
-      return;
-    }
-    const order = stages?.find((s) => s.id === "space")?.steps.map((s) => s.id) ?? [];
-    const latest = [...order].reverse().find((id) => done.has(id) && STEP_LAYERS[id]) ?? null;
-    if (latest && latest !== followed.current) {
-      followed.current = latest;
-      setShownLayers(new Set(STEP_LAYERS[latest]));
-      setPaint(null);
-    }
-  }, [runningNow, done, stages]);
-
+  // The design space on the CAD, once it has been read.
+  const spaceStep = pipeline.steps.get(SPACE_STEP);
+  const spaceReady =
+    !pipeline.running && (spaceStep?.status === "done" || spaceStep?.status === "cached");
   const onSpace = view === "input" && inputTab === "cad" && cadView === "space";
-  const voxelLayers = useSpaceLayers(onSpace, pipeline.version, [...shownLayers], done);
-  const painted = useFacePaint(
-    onSpace ? paint : null,
+  // Design volumes: faces picked on the CAD, and the volumes they bound, see-through over it.
+  const onVolumes = view === "input" && inputTab === "cad" && cadView === "volumes";
+  const volumes = useVolumes(onVolumes);
+  const designSpace = useDesignSpace(
+    onSpace && spaceShow.space,
     pipeline.version,
-    paint !== null && done.has(PAINT_STEP[paint]) && !pipeline.running,
+    spaceShow.heat,
+    spaceReady,
+  );
+  // A design's stages that are drawn on the part's canvas, over the part - and the design space
+  // under the optimisation, asked for.
+  const designOnPart = view === "generate" && generateTab === "designs" && onPart(designTab);
+  // the tabs a campaign's designs are looked at in are its own stages: when the campaign changes
+  // to one made in other stages, the tab in hand may not exist there - start it at the first
+  const designTabs = tabsFor(campaigns.campaign);
+  useEffect(() => {
+    if (!designTabs.some((t) => t.id === designTab)) setDesignTab(designTabs[0]?.id ?? "optimise");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaigns.campaign?.id]);
+  const spaceUnderDesign = useDesignSpace(
+    designOnPart && designShowSpace,
+    pipeline.version,
+    false,
+    spaceReady,
+  );
+  const designCanvas = useDesignCanvas(
+    design,
+    designTab,
+    designIteration,
+    designShowSpace,
+    spaceUnderDesign.layers,
+    designShowPlanes,
   );
 
   if (error && !session) return <div className="error">{error}</div>;
@@ -437,19 +432,15 @@ export function App() {
   const paneWidth = pane === null ? 0 : open[pane] ? cardWidth : 30;
 
   // The part in 3D is kept alive on the CAD and on Designs, so going back and forth costs nothing;
-  // what is drawn over it depends on the tab.
-  const designField = onDesigns && designs.tab === "field";
-  const designPaths = onDesigns && designs.tab === "paths";
-  const overlay = designField ? designs.overlay : null;
-  // The faces a design cuts give way to its own surface - only once that surface is there to show.
-  const hidden = overlay ? designs.cutFaces : EMPTY;
-  const lines = designPaths ? designs.lines : null;
-  const voxels = designField && designs.showCells ? designs.cells : null;
-  const partShown = designField ? showPart : true;
-  // The part is what is looked at on the CAD and on a design's field or paths; elsewhere it stays
-  // loaded under the page that covers it.
-  const geometryInView = onCad || designField || designPaths;
-  const mode: ColourMode = onSpace ? (painted ? "paint" : "surface") : onCad ? colourMode : "surface";
+  // what is drawn over it depends on the tab: a design's metal, its plates, its CAD's new faces.
+  const overlay = designOnPart ? designCanvas.overlay : null;
+  const lines = designOnPart ? designCanvas.lines : null;
+  const partShown = designOnPart ? showPart : true;
+  const layersShown = onSpace ? designSpace.layers : designOnPart ? designCanvas.layers : NO_LAYERS;
+  // The part is what is looked at on the CAD and on a design's stages drawn over it; elsewhere it
+  // stays loaded under the page that covers it.
+  const geometryInView = onCad || designOnPart;
+  const mode: ColourMode = onSpace ? "surface" : onCad ? colourMode : "surface";
 
   return (
     <div
@@ -514,12 +505,7 @@ export function App() {
 
       {opened && model ? (
         <>
-          <AgentBar
-            focus={focusIds}
-            onShow={(ids) => void showIds(ids)}
-            onDerive={agentDerives}
-            onChanged={agentChanged}
-          />
+          <AgentBar focus={focusIds} onShow={(ids) => void showIds(ids)} onChanged={agentChanged} />
           {hasRail ? (
             <div className="rail">
               <div className="rail-scroll">
@@ -532,15 +518,9 @@ export function App() {
                     onEntity={onEntity}
                   />
                 ) : onCampaign ? (
-                  <CampaignRuns
-                    launched={campaign.launched}
-                    going={campaign.going}
-                    onOpenRun={setCampaignRun}
-                    selected={campaignRun}
-                    onNew={() => setCampaignRun(null)}
-                  />
+                  <CampaignRail state={campaigns} onNew={() => campaigns.selectCampaign("new")} />
                 ) : (
-                  <DesignsRail designs={designs} />
+                  <DesignsRail state={campaigns} />
                 )}
               </div>
               <Splitter side="right" onResize={(d) => setRailWidth((w) => clampPane(w + d))} />
@@ -593,9 +573,18 @@ export function App() {
                     {tab.label}
                   </button>
                 ))}
+                <span className="stage-tabs-spacer" />
+                {onDesigns ? (
+                  <span className="segmented stage-toggle">
+                    {designTabs.map((t) => (
+                      <button key={t.id} data-active={designTab === t.id} onClick={() => setDesignTab(t.id)}>
+                        {t.label}
+                      </button>
+                    ))}
+                  </span>
+                ) : null}
               </nav>
             ) : null}
-            {onDesigns ? <DesignTabs designs={designs} /> : null}
             <div className="stage-body">
               {onDrawing ? (
                 <DrawingStage
@@ -617,28 +606,34 @@ export function App() {
                     mesh={model.mesh}
                     faceCount={model.summary.faces ?? 0}
                     bbox={model.summary.bbox_mm ?? [0, 0, 0, 1, 1, 1]}
-                    showSurface={onSpace ? spaceView.part : partShown}
-                    surfaceAlpha={onSpace ? spaceView.partOpacity : 1}
-                    layerOpacity={onSpace ? spaceView.volumeOpacity : 1}
+                    showSurface={onSpace ? spaceShow.part : onVolumes ? volumeShow.part : partShown}
                     showOverlay
-                    showVoxels={voxels !== null || voxelLayers.length > 0}
+                    showVoxels={layersShown.length > 0}
                     overlay={overlay}
-                    hidden={hidden}
+                    hidden={EMPTY}
+                    sectionControl={onCad || (designOnPart && !!design)}
                     overlayAlpha={1.0}
                     overlayTint={DESIGN_TINT}
                     overlayPick={overlay ? "design" : "none"}
-                    voxels={voxels}
-                    voxelLayers={onSpace ? voxelLayers : NO_LAYERS}
-                    facePaint={onSpace ? (painted?.paint ?? null) : null}
+                    voxels={null}
+                    voxelLayers={layersShown}
                     focusBox={onCad ? focusBox : null}
                     lines={lines}
-                    selected={onCad ? focusFaces : EMPTY}
+                    selected={onVolumes ? volumes.selected : onCad ? focusFaces : EMPTY}
+                    ghosts={onVolumes && volumeShow.volumes ? volumes.ghosts : undefined}
                     frozen={model.controlled}
                     exterior={EMPTY}
                     hovered={hovered}
                     colourMode={mode}
                     onHover={setHovered}
-                    onPick={pick}
+                    onPick={
+                      onVolumes
+                        ? (faceId, event) => {
+                            if (faceId === null || faceId === DESIGN_PICK) return;
+                            volumes.pick(faceId, event.ctrlKey || event.metaKey || event.shiftKey);
+                          }
+                        : pick
+                    }
                   />
                   {onCad && cadView === "part" ? (
                     <div className="overlay">
@@ -652,27 +647,55 @@ export function App() {
                     </div>
                   ) : null}
                   {onSpace ? (
-                    <SpaceLegend
-                      view={spaceView}
-                      onView={setSpaceView}
-                      shown={shownLayers}
-                      onToggle={(key) =>
-                        setShownLayers((was) => {
-                          const next = new Set(was);
-                          if (next.has(key)) next.delete(key);
-                          else next.add(key);
-                          return next;
-                        })
-                      }
-                      done={done}
-                      paint={paint}
-                      onPaint={setPaint}
-                      painted={painted}
-                      paintReady={(kind) => done.has(PAINT_STEP[kind]) && !pipeline.running}
+                    <SpaceOverlay
+                      show={spaceShow}
+                      onShow={setSpaceShow}
+                      step={spaceStep ?? null}
+                      running={pipeline.running}
+                      error={designSpace.error}
                     />
                   ) : null}
-                  {onDesigns ? (
-                    <DesignStage designs={designs} showPart={showPart} onPart={setShowPart} />
+                  {onVolumes ? (
+                    <>
+                      <div className="overlay">
+                        <button
+                          data-active={volumeShow.part}
+                          onClick={() => setVolumeShow({ ...volumeShow, part: !volumeShow.part })}
+                        >
+                          part
+                        </button>
+                        <button
+                          data-active={volumeShow.volumes}
+                          onClick={() => setVolumeShow({ ...volumeShow, volumes: !volumeShow.volumes })}
+                        >
+                          <i className="swatch" style={{ background: "rgb(31,148,140)" }} /> design volumes
+                        </button>
+                      </div>
+                      <VolumesPanel state={volumes} />
+                    </>
+                  ) : null}
+                  {designOnPart && design ? (
+                    <DesignOverlay
+                      design={design}
+                      tab={designTab}
+                      iteration={designIteration}
+                      onIteration={setDesignIteration}
+                      showSpace={designShowSpace}
+                      onShowSpace={setDesignShowSpace}
+                      showPart={showPart}
+                      onShowPart={setShowPart}
+                      showPlanes={designShowPlanes}
+                      onShowPlanes={setDesignShowPlanes}
+                      fins={designCanvas.fins}
+                    />
+                  ) : null}
+                  {designOnPart && !design ? (
+                    <div className="stage-page">
+                      <div className="later">
+                        <h2>Designs</h2>
+                        <p>Pick a design on the left, or plan a campaign on Campaign.</p>
+                      </div>
+                    </div>
                   ) : null}
                   {geometryInView ? (
                     <>
@@ -683,12 +706,7 @@ export function App() {
                         onRelease={() => undefined}
                       />
                       <div className="hint">
-                        {onSpace && pipeline.running
-                          ? "deriving: each volume appears as its step finishes · "
-                          : ""}
-                        {voxels
-                          ? `${voxels.faces.length.toLocaleString()} visible cell faces of new metal at ${voxels.size} mm · `
-                          : ""}
+                        {onSpace && pipeline.running ? "reading the design space · " : ""}
                         drag orbit &middot; shift-drag pan &middot; wheel zoom &middot; click a face
                         for its card
                       </div>
@@ -701,22 +719,26 @@ export function App() {
                   {deckView === "setup" ? (
                     <MeshStage state={deck} view={meshView} />
                   ) : (
-                    <AnswerStage state={deck} view={answerView} />
+                    <ResultsStage state={deck} view={resultsView} />
                   )}
                 </div>
               ) : null}
               {onCampaign ? (
                 <div className="stage-page">
-                  {campaignRun ? (
-                    <RunHealth
-                      run={campaignRun}
-                      name={campaign.launched.find((r) => r.run === campaignRun)?.name}
-                      onOpen={openRun}
-                    />
-                  ) : (
-                    <CampaignCardView campaign={campaign} onOpenRun={openRun} />
-                  )}
+                  <CampaignPage state={campaigns} onOpen={openDesign} />
                 </div>
+              ) : null}
+              {onDesigns && (designTab === "mesh" || designTab === "solve") ? (
+                design ? (
+                  <DesignFe design={design} tab={designTab} />
+                ) : (
+                  <div className="stage-page">
+                    <div className="later">
+                      <h2>Designs</h2>
+                      <p>Pick a design on the left, or plan a campaign on Campaign.</p>
+                    </div>
+                  </div>
+                )
               ) : null}
               {view === "learn" || view === "optimize" ? (
                 <div className="stage-page">
@@ -741,8 +763,8 @@ export function App() {
                       onCollapse={() => setOpen((was) => ({ ...was, entity: false }))}
                     />
                   ) : (
-                    <DesignReadout
-                      designs={designs}
+                    <DesignCard
+                      design={design}
                       onCollapse={() => setOpen((was) => ({ ...was, designs: false }))}
                     />
                   )}
@@ -865,6 +887,57 @@ function lookAt(
     if (out[0] * axis[0] + out[1] * axis[1] + out[2] * axis[2] < 0) axis = axis.map((v) => -v);
   }
   return { box, from: axis };
+}
+
+/**
+ * The design-space view's switches, as the deck's view has its own - the part, the design space,
+ * where metal helps - with what the design space holds beside them, and what is happening while it
+ * is read or defined.
+ */
+function SpaceOverlay({
+  show,
+  onShow,
+  step,
+  running,
+  error,
+}: {
+  show: { part: boolean; space: boolean; heat: boolean };
+  onShow: (show: { part: boolean; space: boolean; heat: boolean }) => void;
+  step: StepRun | null;
+  running: boolean;
+  error: string | null;
+}) {
+  const swatch = `rgb(${SPACE_TINT.map((c) => Math.round(c * 255)).join(",")})`;
+  return (
+    <>
+      <div className="overlay">
+        <button data-active={show.part} onClick={() => onShow({ ...show, part: !show.part })}>
+          part
+        </button>
+        <button data-active={show.space} onClick={() => onShow({ ...show, space: !show.space })}>
+          <i className="swatch" style={{ background: swatch }} /> design space
+        </button>
+        <button
+          data-active={show.heat}
+          disabled={!show.space}
+          onClick={() => onShow({ ...show, heat: !show.heat })}
+          title="The design space coloured by how much load metal there would carry"
+        >
+          <i className="swatch heat" /> where metal helps
+        </button>
+      </div>
+      <div className="space-readout">
+        {running ? (
+          <span className="dim">{step?.detail || "reading the design space…"}</span>
+        ) : step?.status === "done" || step?.status === "cached" ? (
+          <span>{step.detail}</span>
+        ) : (
+          <span className="dim">no design space yet</span>
+        )}
+        {error ? <span className="fe-error">{error}</span> : null}
+      </div>
+    </>
+  );
 }
 
 /** Learn and Optimize, not built yet: what each will do, and what it waits for. */

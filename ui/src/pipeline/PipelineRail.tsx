@@ -1,8 +1,9 @@
 /**
- * The pipeline on the left: every step of both stages in the order it runs, what each read and what
- * it produced. A step opens to its inputs - each naming the step that made it - and its outputs,
- * each a group that opens to its entities. Clicking anything shows it on its canvas and on the
- * card; nothing here is part-specific, it is whatever the steps reported.
+ * The pipeline on the left: every step in the order it runs - the engineer's files read, the design
+ * space last - what each read and what it produced. A step opens to its inputs - each naming the
+ * step that made it - and its outputs, each a group that opens to its entities. Clicking anything
+ * shows it on its canvas and on the card; nothing here is part-specific, it is whatever the steps
+ * reported.
  */
 
 import { useEffect, useState } from "react";
@@ -22,7 +23,6 @@ export const ORIGIN_WORDS: Record<Origin, string> = {
   imported: "Read from the engineer's files, as they are",
   derived: "Computed from them by a rule",
   inferred: "A reading that could be wrong",
-  confirmed: "Settled by your answer",
   generated: "Proposed by fastcae",
 };
 
@@ -68,21 +68,9 @@ export function PipelineRail({ state, focus, onStep, onGroup, onEntity }: Props)
     <nav className="pipeline">
       <header className="pipeline-head">
         <span>Pipeline</span>
-        <span className="pipeline-state">
-          {state.running ? "deriving…" : state.pipeline?.cached ? "read back" : ""}
-        </span>
+        <span className="pipeline-state">{state.running ? "design space…" : ""}</span>
       </header>
       {state.error ? <div className="pipeline-error">{state.error}</div> : null}
-      {state.unapplied > 0 && !state.running ? (
-        <div className="pipeline-apply">
-          <span>
-            {state.unapplied} answer{state.unapplied === 1 ? "" : "s"} not applied yet
-          </span>
-          <button className="primary" onClick={() => void state.run(true)}>
-            Apply
-          </button>
-        </div>
-      ) : null}
       {!state.pipeline ? <div className="rail-note">reading the pipeline…</div> : null}
       {stages.map((stage) => {
         const finished = stage.steps.filter((s) => ["done", "cached", "skipped"].includes(s.status));

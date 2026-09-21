@@ -6,6 +6,7 @@
  */
 
 import { useMemo, useState } from "react";
+import { sim } from "../api/simulate";
 import { FE_COLOURS } from "../render/fe";
 import { CameraLink, FeStage } from "../stage/FeStage";
 import type { Hovered } from "../stage/FeStage";
@@ -36,6 +37,9 @@ export function useMeshView(): MeshView {
   return { link, edges, setEdges, glyphs, setGlyphs, patches, setPatches, hovered, setHovered, focus, setFocus };
 }
 
+/** The deck's mesh cut by the section's plane: its elements' edges on the cut. */
+const DECK_MESH_SECTION = { key: "deck:mesh", fetch: sim.section };
+
 function rgb(c: number[]): string {
   return `rgb(${c[0]},${c[1]},${c[2]})`;
 }
@@ -61,6 +65,7 @@ export function MeshStage({ state, view }: { state: DeckState; view: MeshView })
         frameKey="deck"
         hoveredGroup={hoveredIndex}
         onHover={view.setHovered}
+        sectionSource={DECK_MESH_SECTION}
         caption={
           <>
             <b>{deck.files.find((f) => f.role === "mesh")?.name}</b> <Provenance kind="imported" />

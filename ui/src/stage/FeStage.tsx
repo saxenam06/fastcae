@@ -5,10 +5,13 @@
  * comparison needs. What is drawn arrives as props and reaches the renderer through explicit calls.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { Values } from "../api/simulate";
-import type { Camera, ColourMode, GlyphData, GlyphLabel, Pick, Skin } from "../render/fe";
+import type { Camera, ColourMode, GlyphData, GlyphLabel, Pick, Skin, Slice } from "../render/fe";
 import { FeRenderer, newCamera } from "../render/fe";
+import { SectionControl, useSection } from "./Section";
+import type { Plane } from "./sectionPlane";
+import { outlineOf, planeKey, planeOf } from "./sectionPlane";
 
 /** A camera two views can share, and who to tell when it moves. */
 export class CameraLink {
@@ -47,6 +50,12 @@ interface Props {
   hoveredGroup?: number | null;
   onHover?: (hovered: Hovered | null) => void;
   caption?: React.ReactNode;
+  /**
+   * Where a section's plane cuts this mesh, through its elements - with the field shown on the cut,
+   * where there is one. ``key`` names what is cut and what field is on it: a change of it cuts
+   * again, and nothing else does.
+   */
+  sectionSource?: { key: string; fetch: (plane: Plane) => Promise<Slice> } | null;
 }
 
 export function FeStage(props: Props) {
@@ -55,6 +64,11 @@ export function FeStage(props: Props) {
   const dirty = useRef(true);
   const propsRef = useRef(props);
   propsRef.current = props;
+  const { section } = useSection();
+  const plane = useMemo(() => planeOf(section, props.bbox), [section, props.bbox]);
+  const planeRef = useRef(plane);
+  planeRef.current = plane;
+  const cutKey = planeKey(plane);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -126,6 +140,35 @@ export function FeStage(props: Props) {
     r.hoveredGroup = props.hoveredGroup ?? -1;
     dirty.current = true;
   }, [props.mode, props.range, props.edges, props.showGlyphs, props.deform, props.hoveredGroup]);
+
+  // The section: the plane at once, and the slice through the elements once the plane rests - the
+  // inside shows hatched meanwhile, never a slice left where the plane was.
+  useEffect(() => {
+    const r = rendererRef.current;
+    if (!r) return;
+    const cut = planeRef.current;
+    const bbox = propsRef.current.bbox;
+    r.setSection(cut, cut && bbox ? outlineOf(cut, bbox) : null);
+    r.setSlice(null);
+    dirty.current = true;
+    const source = propsRef.current.sectionSource;
+    if (!cut || !source) return;
+    let live = true;
+    const timer = window.setTimeout(() => {
+      source
+        .fetch(cut)
+        .then((slice) => {
+          if (!live) return;
+          r.setSlice(slice);
+          dirty.current = true;
+        })
+        .catch(() => undefined);
+    }, 140);
+    return () => {
+      live = false;
+      window.clearTimeout(timer);
+    };
+  }, [cutKey, props.bbox, props.sectionSource?.key, props.skin]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -202,6 +245,7 @@ export function FeStage(props: Props) {
     <div className="fe-view">
       <canvas ref={canvasRef} />
       {props.caption ? <div className="fe-caption">{props.caption}</div> : null}
+      <SectionControl bbox={props.bbox} facing={() => rendererRef.current?.facing() ?? null} />
     </div>
   );
 }

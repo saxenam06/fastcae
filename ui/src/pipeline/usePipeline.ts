@@ -1,33 +1,22 @@
 /**
- * The pipeline as the interface holds it: the steps of both stages, merged with what a run in
- * progress has reported so far, and the entities they produced, read on demand and kept.
+ * The pipeline as the interface holds it: the steps that read the engineer's files, the design
+ * space last, and the entities they produced, read on demand and kept.
  *
- * Opening a project shows the Read stage at once - extraction ran it - and starts the design-space
- * stage straight away. The server reads the space back when nothing it depends on has changed, so
- * that costs a second; otherwise each step is shown starting and finishing as it runs.
+ * Opening a project shows the steps extraction ran, and reads the design space from the project's
+ * folder - a second or two. Where there is none yet, the rules define it and the step says what
+ * they are doing as they go.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type {
-  EntityDetail,
-  EntitySummary,
-  Group,
-  Pipeline,
-  PipelineEvent,
-  RunStatus,
-  StepRun,
-} from "../api/pipeline";
+import type { EntityDetail, EntitySummary, Group, Pipeline, PipelineEvent, StepRun } from "../api/pipeline";
 import { pipelineApi } from "../api/pipeline";
 
-interface LiveStep {
-  status: RunStatus;
-  seconds?: number;
-  detail?: string;
-}
+/** The design space's step: the last of the pipeline. */
+export const SPACE_STEP = "space";
 
 export interface PipelineState {
   pipeline: Pipeline | null;
-  /** Every step by id, with a run's live status laid over what the server last said. */
+  /** Every step by id, the design space's with what a run in progress has said laid over it. */
   steps: Map<string, StepRun>;
   /** When each running step was first seen running, in this page's clock. */
   started: Map<string, number>;
@@ -35,27 +24,22 @@ export interface PipelineState {
   error: string | null;
   /** Bumped whenever the design space changes, so whatever shows it reads it again. */
   version: number;
-  /** Answers recorded since the space was last derived: they apply on the next run. */
-  unapplied: number;
-  run: (reuse?: boolean) => Promise<void>;
-  /** Follow a run something else started - the agent - until it ends. */
-  follow: (starting?: boolean) => Promise<void>;
+  /** Read the design space - or, ``again``, define it anew by the rules. */
+  run: (again?: boolean) => Promise<void>;
+  /** Follow a run something else started until it ends. */
+  follow: () => Promise<void>;
   /** Read the pipeline again: something else changed it. */
   refresh: () => Promise<Pipeline>;
-  answer: (question: string, value: string | null) => Promise<void>;
   entity: (id: string) => Promise<EntityDetail>;
   members: (group: Group) => Promise<EntitySummary[]>;
 }
 
 export function usePipeline(project: string | null): PipelineState {
   const [pipeline, setPipeline] = useState<Pipeline | null>(null);
-  const [live, setLive] = useState<Record<string, LiveStep>>({});
+  const [said, setSaid] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
-  // A run this page started and is streaming, as opposed to one it follows by asking.
-  const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
-  const [unapplied, setUnapplied] = useState(0);
   const details = useRef(new Map<string, EntityDetail>());
   const opened = useRef<string | null>(null);
   const [started, setStarted] = useState(() => new Map<string, number>());
@@ -68,31 +52,21 @@ export function usePipeline(project: string | null): PipelineState {
   }, []);
 
   const run = useCallback(
-    async (reuse = true) => {
+    async (again = false) => {
       setRunning(true);
-      setStreaming(true);
       setError(null);
-      setLive({});
-      // The space shown so far is on its way out: whatever shows layers reads the run's instead.
-      setVersion((v) => v + 1);
+      setSaid(null);
       try {
-        await pipelineApi.run({ reuse }, (event: PipelineEvent) => {
-          if (event.type === "step") {
-            setLive((was) => ({
-              ...was,
-              [event.id]: { status: event.status, seconds: event.seconds, detail: event.detail },
-            }));
-          } else if (event.type === "error") {
-            setError(event.message);
-          }
+        await refresh().catch(() => undefined);
+        await pipelineApi.run({ again }, (event: PipelineEvent) => {
+          if (event.type === "say") setSaid(event.detail);
+          else if (event.type === "error") setError(event.message);
         });
-        setUnapplied(0);
       } catch (caught) {
         setError(String(caught));
       } finally {
         await refresh().catch(() => undefined);
-        setLive({});
-        setStreaming(false);
+        setSaid(null);
         setRunning(false);
         setVersion((v) => v + 1);
       }
@@ -100,18 +74,15 @@ export function usePipeline(project: string | null): PipelineState {
     [refresh],
   );
 
-  // A run this page did not start - it was reloaded mid-run, or the agent started it - is followed
-  // by asking again until it ends; the server's pipeline carries each step's live status. One
-  // about to start is waited for a few seconds first.
-  const follow = useCallback(async (starting = false) => {
+  // A run this page did not start - it was reloaded mid-run - is followed by asking again until
+  // it ends.
+  const follow = useCallback(async () => {
     setRunning(true);
     try {
-      let seen = !starting;
-      for (let asked = 0; ; asked++) {
+      for (;;) {
         await new Promise((r) => setTimeout(r, 1500));
         const found = await refresh();
-        if (found.running) seen = true;
-        else if (seen || asked > 6) break;
+        if (!found.running) break;
       }
     } catch (caught) {
       setError(String(caught));
@@ -121,8 +92,7 @@ export function usePipeline(project: string | null): PipelineState {
     }
   }, [refresh]);
 
-  // A project opened: its pipeline, and the design space derived - or read back - if it is not
-  // held yet.
+  // A project opened: its pipeline, and its design space read - or defined - if it is not held yet.
   useEffect(() => {
     if (!project) {
       setPipeline(null);
@@ -134,10 +104,9 @@ export function usePipeline(project: string | null): PipelineState {
       .then((found) => {
         if (!live || opened.current === project) return;
         opened.current = project;
-        const space = found.stages.find((s) => s.id === "space");
-        const idle = space?.steps.every((s) => s.status === "pending") ?? false;
+        const space = found.stages.flatMap((s) => s.steps).find((s) => s.id === SPACE_STEP);
         if (found.running) void follow();
-        else if (idle) void run(true);
+        else if (space?.status === "pending") void run(false);
       })
       .catch((caught) => live && setError(String(caught)));
     return () => {
@@ -149,27 +118,19 @@ export function usePipeline(project: string | null): PipelineState {
     const out = new Map<string, StepRun>();
     for (const stage of pipeline?.stages ?? []) {
       for (const step of stage.steps) {
-        // While a run streams, a design-space step is what the run has said about it - its outputs
-        // arrive with the space when the run ends.
-        const now = streaming && stage.id === "space" ? live[step.id] : undefined;
+        // While the design space is read or defined, its step says what the rules last said.
         out.set(
           step.id,
-          streaming && stage.id === "space"
-            ? {
-                ...step,
-                status: now?.status ?? "pending",
-                seconds: now?.seconds ?? null,
-                detail: now?.detail ?? "",
-                outputs: [],
-              }
+          step.id === SPACE_STEP && running
+            ? { ...step, status: "running", detail: said ?? step.detail, outputs: [] }
             : step,
         );
       }
     }
     return out;
-  }, [pipeline, live, streaming]);
+  }, [pipeline, said, running]);
 
-  // A step's clock starts when it is first seen running - from the stream or from asking.
+  // A step's clock starts when it is first seen running.
   useEffect(() => {
     setStarted((was) => {
       const next = new Map<string, number>();
@@ -198,29 +159,5 @@ export function usePipeline(project: string | null): PipelineState {
     return found.entities;
   }, []);
 
-  const answer = useCallback(
-    async (question: string, value: string | null) => {
-      await pipelineApi.answer(question, value);
-      details.current.delete(question);
-      setUnapplied((n) => n + 1);
-      await refresh();
-    },
-    [refresh],
-  );
-
-  return {
-    pipeline,
-    steps,
-    started,
-    running,
-    error,
-    version,
-    unapplied,
-    run,
-    follow,
-    refresh,
-    answer,
-    entity,
-    members,
-  };
+  return { pipeline, steps, started, running, error, version, run, follow, refresh, entity, members };
 }

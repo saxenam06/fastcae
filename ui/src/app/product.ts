@@ -26,9 +26,9 @@ export const PRODUCT = {
 } as const;
 
 /**
- * The tabs, in the order the work happens: what the engineer brought, read into typed entities by
- * the pipeline and the design space derived from them; designs generated in that space; surrogates
- * learnt from them; and the search.
+ * The tabs, in the order the work happens: what the engineer brought - the files read into typed
+ * entities, and the design space; designs generated in that space; surrogates learnt from them; and
+ * the search.
  *
  * Every tab is shown whether or not it is built yet. A shell that hides its unbuilt stages
  * describes a tool; one that shows them describes a product, and tells anyone looking where what
@@ -38,10 +38,10 @@ export type View = "input" | "generate" | "learn" | "optimize";
 
 /** Input's three: the engineer's own files, as the pipeline read them. */
 export type InputTab = "drawing" | "cad" | "mesh";
-/** The CAD as its faces, or as the design space derived round it. */
-export type CadView = "part" | "space";
-/** The deck as it sets the part up, or the answer the engineer's solver gave. */
-export type DeckView = "setup" | "answer";
+/** The CAD as its faces, with the design space round it, or with the design volumes picked on it. */
+export type CadView = "part" | "space" | "volumes";
+/** The deck as it sets the part up, or what its solve gave. */
+export type DeckView = "setup" | "results";
 /** Generate's two: campaigns launched, and every design they kept. */
 export type GenerateTab = "campaign" | "designs";
 
@@ -50,23 +50,24 @@ export const INPUT_TABS: { id: InputTab; label: string; summary: string }[] = [
   {
     id: "cad",
     label: "CAD",
-    summary: "The part as its CAD describes it, and the design space derived round it",
+    summary: "The part as its CAD describes it, and the design space round it",
   },
   {
     id: "mesh",
     label: "Mesh & setup",
-    summary: "The solver deck's mesh, supports, couplings and loads, and the answer it gave",
+    summary: "The solver deck's mesh, supports, couplings and loads, and what its solve gave",
   },
 ];
 
 export const CAD_VIEWS: { id: CadView; label: string }[] = [
   { id: "part", label: "Part" },
   { id: "space", label: "Design space" },
+  { id: "volumes", label: "Design volumes" },
 ];
 
 export const DECK_VIEWS: { id: DeckView; label: string }[] = [
   { id: "setup", label: "Setup" },
-  { id: "answer", label: "Answer" },
+  { id: "results", label: "Solve results" },
 ];
 
 export const GENERATE_TABS: { id: GenerateTab; label: string; summary: string }[] = [
@@ -79,8 +80,8 @@ export const VIEWS: { id: View; label: string; summary: string; ready: boolean }
     id: "input",
     label: "Input",
     summary:
-      "What the engineer brought - the drawing, the CAD, the solver deck and its answer - read " +
-      "into typed entities, and the design space derived from them.",
+      "What the engineer brought - the drawing, the CAD, the solver deck and its results - read " +
+      "into typed entities, and the design space.",
     ready: true,
   },
   {

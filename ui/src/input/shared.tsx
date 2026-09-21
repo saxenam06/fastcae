@@ -30,13 +30,6 @@ export function fmtCount(n: number): string {
   return n.toLocaleString("en-GB");
 }
 
-export function fmtNumber(v: number): string {
-  if (!Number.isFinite(v)) return "–";
-  const a = Math.abs(v);
-  if (a !== 0 && (a < 1e-3 || a >= 1e7)) return v.toExponential(3);
-  return v.toLocaleString("en-GB", { maximumSignificantDigits: 6 });
-}
-
 export function fmtSeconds(s: number | undefined | null): string {
   if (s === undefined || s === null || !Number.isFinite(s)) return "–";
   if (s < 60) return `${s.toFixed(s < 10 ? 1 : 0)} s`;

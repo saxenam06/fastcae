@@ -1,7 +1,7 @@
 /**
  * The agent, above every tab: the engineer's words - with what is in focus on the screen - go to
- * it; it reads the pipeline, its entities and the part, shows what it talks about, and records an
- * answer only when the engineer's words give it. One conversation, whichever tab is open.
+ * it; it reads the pipeline, its entities and the part, and shows what it talks about. One
+ * conversation, whichever tab is open.
  *
  * One line to say something; under it a drawer with what was said, what the agent is doing while it
  * reads, and its answer - opened when something is sent, closed at a click. Entity ids in the answer
@@ -18,8 +18,6 @@ const DOING: Record<string, string> = {
   entities: "looking for entities",
   entity: "reading an entity",
   show: "showing you",
-  answer: "recording your answer",
-  derive: "deriving the design space again",
   find: "looking at the part",
   describe: "reading the part",
   relate: "relating it to the part",
@@ -27,22 +25,20 @@ const DOING: Record<string, string> = {
   search_drawing: "reading the drawing",
 };
 
-/** An entity's id as the pipeline names it: ``interface:bore:196``, ``group:BORE_MAIN_S2``. */
-const ENTITY_ID = /\b[a-z_]+(?::[A-Za-z0-9_.-]*[A-Za-z0-9_])+/g;
+/** An entity's id as the pipeline names it: ``face:196``, ``group:BORE_MAIN_S2``, ``design_space``. */
+const ENTITY_ID = /\bdesign_space\b|\b[a-z_]+(?::[A-Za-z0-9_.-]*[A-Za-z0-9_])+/g;
 
 interface AgentBarProps {
   /** The entities in focus on the screen: they go with what is said. */
   focus: string[];
   /** Bring these entities into focus, on their canvases. */
   onShow: (ids: string[]) => void;
-  /** The agent is deriving the design space again: follow it on the pipeline. */
-  onDerive: () => void;
-  /** The agent changed something - answers, the space: read it again. */
+  /** The agent changed something: read it again. */
   onChanged: (what: string[]) => void;
 }
 
 export function AgentBar(props: AgentBarProps) {
-  const { focus, onShow, onDerive, onChanged } = props;
+  const { focus, onShow, onChanged } = props;
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState<string | null>(null);
@@ -78,7 +74,6 @@ export function AgentBar(props: AgentBarProps) {
         if (event.type === "token") setAnswer((before) => before + event.text);
         else if (event.type === "tool_start") {
           setDoing((before) => [...before, DOING[event.name] ?? event.name]);
-          if (event.name === "derive") onDerive();
         } else if (event.type === "tool_result" && event.summary.startsWith("refused"))
           setDoing((before) => [...before, event.summary]);
         else if (event.type === "show" && event.ids.length) onShow(event.ids);
@@ -90,7 +85,7 @@ export function AgentBar(props: AgentBarProps) {
     } finally {
       setBusy(false);
     }
-  }, [text, busy, focus, onShow, onDerive, onChanged]);
+  }, [text, busy, focus, onShow, onChanged]);
 
   const fresh = useCallback(async () => {
     await api.newChat().catch(() => undefined);
@@ -105,13 +100,13 @@ export function AgentBar(props: AgentBarProps) {
   return (
     <section className="agent-bar" data-open={open && something}>
       <div className="agent-line">
-        <span className="agent-label" title="Reads the pipeline and the part, and settles what the files leave open">
+        <span className="agent-label" title="Reads the pipeline, the part and the drawing, and shows what it talks about">
           Agent
         </span>
         <input
           value={text}
           disabled={busy}
-          placeholder="Ask what was read, why a face is frozen, where metal may go - or answer a question in your words."
+          placeholder="Ask what was read, what holds a face, where metal may go."
           onChange={(event) => setText(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter") void send();

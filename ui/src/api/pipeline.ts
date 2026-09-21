@@ -1,9 +1,10 @@
-// The pipeline as the server holds it: steps in two stages, the typed entities they produced, and
-// the engineer's answers. The same JSON an agent reads - see src/fastcae/pipeline/entities.py.
+// The pipeline as the server holds it: the steps that read the engineer's files, the design space
+// last, and the typed entities they produced. The same JSON an agent reads - see
+// src/fastcae/pipeline/entities.py.
 
-import { fetchVoxels, getJson, postJson, stream, type VoxelCells } from "./client";
+import { fetchVoxels, getJson, stream, type VoxelCells } from "./client";
 
-export type Origin = "imported" | "derived" | "inferred" | "confirmed" | "generated";
+export type Origin = "imported" | "derived" | "inferred" | "generated";
 
 export type CanvasName = "drawing" | "cad" | "mesh" | "space" | "none";
 
@@ -15,7 +16,6 @@ export interface Show {
   text: string | null;
   group: string | null;
   layers: string[];
-  paint: PaintKind | null;
   point: [number, number, number] | null;
 }
 
@@ -34,7 +34,7 @@ export type RunStatus = "pending" | "running" | "done" | "cached" | "skipped" | 
 
 export interface StepRun {
   id: string;
-  stage: "read" | "space";
+  stage: "read";
   label: string;
   status: RunStatus;
   seconds: number | null;
@@ -45,15 +45,15 @@ export interface StepRun {
 }
 
 export interface PipelineStage {
-  id: "read" | "space";
+  id: "read";
   label: string;
   steps: StepRun[];
 }
 
 export interface Pipeline {
   stages: PipelineStage[];
+  /** The design space is being read, or defined. */
   running: boolean;
-  cached: boolean;
 }
 
 export interface EntitySummary {
@@ -96,63 +96,19 @@ export interface EntityDetail extends EntitySummary {
   [field: string]: unknown;
 }
 
-/** A question's own fields. */
-export interface QuestionDetail extends EntityDetail {
-  question_kind: string;
-  text: string;
-  detail: string;
-  options: string[];
-  meanwhile: string;
-  answer: string | null;
-}
-
-/** What a run streams: each step as it starts and finishes, then how it ended. */
+/** What reading - or defining - the design space streams: what the rules say as they go, then how
+ * it ended. */
 export type PipelineEvent =
-  | {
-      type: "step";
-      id: string;
-      label: string;
-      status: RunStatus;
-      seconds?: number;
-      detail?: string;
-    }
+  | { type: "say"; detail: string }
   | { type: "done"; cached: boolean }
   | { type: "error"; message: string };
 
 export interface RunRequest {
-  reuse?: boolean;
-  inside?: boolean | null;
-  panel_layer?: number | null;
-  pocket_reach?: number | null;
+  /** Define it again by the rules - never over one the engineer brought. */
+  again?: boolean;
 }
 
-/** Design-space layers of cells, as the server names them. */
-export type LayerKey =
-  | "part"
-  | "plug"
-  | "beyond"
-  | "mating"
-  | "ring"
-  | "hole"
-  | "buffer"
-  | "waiting"
-  | "cavity"
-  | "leak"
-  | "panel"
-  | "pocket"
-  | "allowed"
-  | "unknown"
-  | "benefit";
-
-export type PaintKind = "thickness" | "cap" | "interface" | "sealing";
-
-/** A per-face value: millimetres, or the group that froze or asked about a face. */
-export interface FaceValues {
-  kind: PaintKind;
-  faces: Record<string, number | string>;
-}
-
-/** The benefit of metal on each visible face of the allowed space, and the range to colour it by. */
+/** Where metal helps, on each visible face of the design space, and the range to colour it by. */
 export interface BenefitValues {
   range: [number, number];
   values: Float32Array;
@@ -169,7 +125,7 @@ async function benefit(): Promise<BenefitValues> {
 
 export const pipelineApi = {
   pipeline: () => getJson<Pipeline>("/api/pipeline"),
-  /** Run the design-space stage - or read it back - reporting each step as it goes. */
+  /** Read the design space - or define it - reporting what the rules say as they go. */
   run: (request: RunRequest, onEvent: (event: PipelineEvent) => void) =>
     stream<PipelineEvent>("/api/pipeline/run", request, onEvent),
   entities: (query: { kind?: string; step?: string; ids?: string[]; text?: string; limit?: number }) => {
@@ -182,9 +138,7 @@ export const pipelineApi = {
     return getJson<{ total: number; entities: EntitySummary[] }>(`/api/entities?${params}`);
   },
   entity: (id: string) => getJson<EntityDetail>(`/api/entities/${encodeURI(id)}`),
-  answer: (question: string, value: string | null) =>
-    postJson<{ answers: Record<string, string>; rerun: string }>("/api/answers", { question, value }),
-  cells: (layer: LayerKey): Promise<VoxelCells> => fetchVoxels(`/api/designspace/cells/${layer}`),
+  /** The design space's cells. */
+  cells: (): Promise<VoxelCells> => fetchVoxels("/api/designspace/cells/design"),
   benefit,
-  faces: (kind: PaintKind) => getJson<FaceValues>(`/api/designspace/faces/${kind}`),
 };

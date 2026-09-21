@@ -64,6 +64,22 @@ export function Legend({ title, unit, range, data, bands, diverging, onRange }: 
   );
 }
 
+/**
+ * The range a contour opens on: the field's own, less the last half percent at either end - a
+ * coupling's or a support's few nodes can carry many times the stress anywhere else, and a bar
+ * stretched to them leaves the rest of the part one colour. The legend says what is cut off.
+ */
+export function typicalRange(values: ArrayLike<number> | null): [number, number] {
+  if (!values || !values.length) return [0, 1];
+  const finite = Float64Array.from(values).filter((v) => Number.isFinite(v));
+  if (!finite.length) return [0, 1];
+  finite.sort();
+  const at = (q: number) => finite[Math.min(finite.length - 1, Math.max(0, Math.round(q * (finite.length - 1))))];
+  const lo = at(0.005);
+  const hi = at(0.995);
+  return hi > lo ? [lo, hi] : [finite[0], finite[finite.length - 1] + 1e-12];
+}
+
 export function fmt(v: number): string {
   if (!Number.isFinite(v)) return "–";
   const a = Math.abs(v);

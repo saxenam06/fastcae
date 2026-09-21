@@ -51,6 +51,16 @@ export interface Camera {
 
 export type ColourMode = "patches" | "contour" | "difference" | "plain";
 
+/** Where a plane cuts the mesh, as the server sends it: triangles in the plane, three corners
+ * each, the field and displacement at each corner when asked for, each triangle's element edges. */
+export interface Slice {
+  triangles: number;
+  positions: Float32Array;
+  values: Float32Array | null;
+  vectors: Float32Array | null;
+  edges: Uint8Array;
+}
+
 /** agenticCAE's colours: free surface, bore patch, bolt patch, spokes, supports, X / Y / Z. */
 export const FE_COLOURS = {
   surface: [154, 162, 170],
@@ -88,15 +98,23 @@ layout(location = 0) in vec3 a_position;
 layout(location = 1) in float a_value;
 layout(location = 2) in uint a_group;
 layout(location = 3) in vec3 a_offset;
+// Which of the triangle's edges are an element's: bit k the edge opposite corner k. The skin's
+// are all; a section's quadrilateral, drawn as two triangles, leaves out the diagonal.
+layout(location = 4) in uint a_edges;
 uniform mat4 u_viewProjection;
 uniform float u_deform;
 out vec3 v_world;
+out vec3 v_ref;
 out float v_value;
 flat out uint v_group;
+flat out uint v_edges;
 out vec3 v_bary;
 void main() {
   vec3 p = a_position + u_deform * a_offset;
   v_world = p;
+  // Cut where the mesh is, not where it is drawn deformed: the section's slice is cut there too.
+  v_ref = a_position;
+  v_edges = a_edges;
   v_value = a_value;
   v_group = a_group;
   int corner = gl_VertexID % 3;
@@ -108,10 +126,14 @@ const SURFACE_FS = `#version 300 es
 precision highp float;
 precision highp int;
 in vec3 v_world;
+in vec3 v_ref;
 in float v_value;
 flat in uint v_group;
+flat in uint v_edges;
 in vec3 v_bary;
 uniform vec3 u_eye;
+uniform vec4 u_clip;
+uniform int u_clipOn;
 uniform int u_mode;         // 0 patches, 1 contour, 2 difference, 3 plain
 uniform int u_edges;
 uniform vec2 u_range;
@@ -122,6 +144,7 @@ uniform sampler2D u_groupColours;
 uniform int u_hovered;
 uniform vec3 u_surface;
 uniform vec3 u_plain;
+uniform int u_cut;          // drawing the section's face: hatched, as a cut is in the CAD
 out vec4 outColour;
 
 vec3 ramp(float t) {
@@ -132,6 +155,14 @@ vec3 ramp(float t) {
 }
 
 void main() {
+  if (u_clipOn == 1 && dot(v_ref, u_clip.xyz) > u_clip.w) discard;
+  // The mesh's inside, seen through the cut: its outside faces point out, so only there is one
+  // seen from behind. Flat and hatched until the slice through the elements covers it.
+  if (u_clipOn == 1 && !gl_FrontFacing) {
+    float line = mod(gl_FragCoord.x + gl_FragCoord.y, 9.0) < 1.5 ? 0.58 : 0.84;
+    outColour = vec4(u_plain * line, 1.0);
+    return;
+  }
   vec3 n = normalize(cross(dFdx(v_world), dFdy(v_world)));
   vec3 view = normalize(u_eye - v_world);
   if (dot(n, view) < 0.0) n = -n;
@@ -163,9 +194,12 @@ void main() {
   if (u_edges == 1) {
     vec3 d = fwidth(v_bary);
     vec3 a = smoothstep(vec3(0.0), d * 1.1, v_bary);
+    vec3 isEdge = vec3(float(v_edges & 1u), float((v_edges >> 1u) & 1u), float((v_edges >> 2u) & 1u));
+    a = mix(vec3(1.0), a, isEdge);
     float edge = 1.0 - min(min(a.x, a.y), a.z);
     colour = mix(colour, vec3(0.10, 0.12, 0.16), edge * 0.55);
   }
+  if (u_cut == 1 && mod(gl_FragCoord.x + gl_FragCoord.y, 9.0) < 1.5) colour *= 0.72;
   outColour = vec4(colour, 1.0);
 }`;
 
@@ -176,8 +210,10 @@ layout(location = 3) in vec3 a_offset;
 uniform mat4 u_viewProjection;
 uniform float u_deform;
 flat out uint v_id;
+out vec3 v_ref;
 void main() {
   v_id = a_id;
+  v_ref = a_position;
   gl_Position = u_viewProjection * vec4(a_position + u_deform * a_offset, 1.0);
 }`;
 
@@ -185,9 +221,13 @@ const PICK_FS = `#version 300 es
 precision highp float;
 precision highp int;
 flat in uint v_id;
+in vec3 v_ref;
 uniform uint u_base;
+uniform vec4 u_clip;
+uniform int u_clipOn;
 out vec4 outColour;
 void main() {
+  if (u_clipOn == 1 && dot(v_ref, u_clip.xyz) > u_clip.w) discard;
   uint id = v_id == 65535u && u_base == 1u ? 0u : v_id + u_base;
   outColour = vec4(float(id & 255u), float((id >> 8) & 255u), float((id >> 16) & 255u), 255.0) / 255.0;
 }`;
@@ -216,8 +256,11 @@ flat in uint v_id;
 uniform vec3 u_eye;
 uniform int u_lit;
 uniform int u_hovered;
+uniform vec4 u_clip;
+uniform int u_clipOn;
 out vec4 outColour;
 void main() {
+  if (u_clipOn == 1 && dot(v_world, u_clip.xyz) > u_clip.w) discard;
   vec3 colour = v_colour;
   if (u_lit == 1) {
     vec3 n = normalize(cross(dFdx(v_world), dFdy(v_world)));
@@ -231,6 +274,7 @@ void main() {
 
 const NO_GROUP = 0xffff;
 const GLYPH_BASE = 0x10000;
+const NO_PLANE = new Float32Array([0, 0, 1, 0]);
 
 export class FeRenderer {
   private gl: WebGL2RenderingContext;
@@ -252,6 +296,15 @@ export class FeRenderer {
   private pickTexture: WebGLTexture;
   private pickDepth: WebGLRenderbuffer;
   private pickSize = { width: 0, height: 0 };
+  /** A section's plane (normal, offset) or null; its outline; the slice through the elements. */
+  private clip: Float32Array | null = null;
+  private outlineVao: WebGLVertexArrayObject | null = null;
+  private outlineBuffers: WebGLBuffer[] = [];
+  private outlineCount = 0;
+  private sliceVao: WebGLVertexArrayObject | null = null;
+  private sliceBuffers: WebGLBuffer[] = [];
+  private sliceCount = 0;
+  private sliceHasValues = false;
 
   labels: GlyphLabel[] = [];
   mode: ColourMode = "patches";
@@ -419,14 +472,19 @@ export class FeRenderer {
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     const vp = this.viewProjection(width / Math.max(height, 1));
     const eye = this.eye();
+    const mode = { patches: 0, contour: 1, difference: 2, plain: 3 }[this.mode];
     if (this.vao && this.vertexCount) {
       const p = this.surface;
       gl.useProgram(p);
+      this.applyClip(p, true);
+      // The skin's triangles are whole elements' faces: every edge an element edge.
+      gl.vertexAttribI4ui(4, 7, 0, 0, 0);
       gl.uniformMatrix4fv(gl.getUniformLocation(p, "u_viewProjection"), false, vp);
       gl.uniform3fv(gl.getUniformLocation(p, "u_eye"), eye);
       gl.uniform1f(gl.getUniformLocation(p, "u_deform"), this.deform);
-      gl.uniform1i(gl.getUniformLocation(p, "u_mode"), { patches: 0, contour: 1, difference: 2, plain: 3 }[this.mode]);
+      gl.uniform1i(gl.getUniformLocation(p, "u_mode"), mode);
       gl.uniform1i(gl.getUniformLocation(p, "u_edges"), this.edges ? 1 : 0);
+      gl.uniform1i(gl.getUniformLocation(p, "u_cut"), 0);
       gl.uniform2f(gl.getUniformLocation(p, "u_range"), this.range[0], this.range[1]);
       gl.uniform1f(gl.getUniformLocation(p, "u_bands"), this.bands);
       const stops = this.mode === "difference" ? DIFFERENCE_STOPS : this.stops;
@@ -442,9 +500,106 @@ export class FeRenderer {
       gl.uniform1i(gl.getUniformLocation(p, "u_groupColours"), 0);
       gl.bindVertexArray(this.vao);
       gl.drawArrays(gl.TRIANGLES, 0, this.vertexCount);
+      // The section's own face, through the elements: the field inside the part where there is
+      // one, the mesh's cut edges always, hatched as a cut. It lies in the plane, so it is never cut itself.
+      if (this.clip && this.sliceVao && this.sliceCount) {
+        this.applyClip(p, false);
+        gl.uniform1i(gl.getUniformLocation(p, "u_mode"), this.sliceHasValues && (mode === 1 || mode === 2) ? mode : 3);
+        gl.uniform1i(gl.getUniformLocation(p, "u_hovered"), -1);
+        gl.uniform1i(gl.getUniformLocation(p, "u_cut"), 1);
+        gl.vertexAttribI4ui(2, NO_GROUP, 0, 0, 0);
+        gl.bindVertexArray(this.sliceVao);
+        gl.drawArrays(gl.TRIANGLES, 0, this.sliceCount);
+      }
     }
     if (this.showGlyphs && this.deform === 0) this.drawGlyphs(vp, eye);
+    if (this.outlineVao && this.outlineCount) {
+      const g = this.glyphProgram;
+      gl.useProgram(g);
+      gl.uniformMatrix4fv(gl.getUniformLocation(g, "u_viewProjection"), false, vp);
+      gl.uniform1i(gl.getUniformLocation(g, "u_lit"), 0);
+      gl.uniform1i(gl.getUniformLocation(g, "u_hovered"), -1);
+      this.applyClip(g, false);
+      gl.disable(gl.DEPTH_TEST);
+      gl.bindVertexArray(this.outlineVao);
+      gl.drawArrays(gl.LINES, 0, this.outlineCount);
+      gl.enable(gl.DEPTH_TEST);
+    }
     gl.bindVertexArray(null);
+  }
+
+  /** Cut the mesh with this plane - ``normal . x > d`` taken away - or, null, cut nothing; and draw
+   * the plane's outline in the model's box. */
+  setSection(plane: { normal: [number, number, number]; d: number } | null, outline: Float32Array | null): void {
+    const gl = this.gl;
+    this.clip = plane ? new Float32Array([...plane.normal, plane.d]) : null;
+    for (const b of this.outlineBuffers) gl.deleteBuffer(b);
+    if (this.outlineVao) gl.deleteVertexArray(this.outlineVao);
+    this.outlineVao = null;
+    this.outlineBuffers = [];
+    this.outlineCount = 0;
+    if (!plane || !outline || !outline.length) return;
+    const count = outline.length / 3;
+    const colours = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) colours.set([0.059, 0.239, 0.569], i * 3);
+    this.outlineVao = gl.createVertexArray()!;
+    gl.bindVertexArray(this.outlineVao);
+    const p = buffer(gl, outline);
+    attribute(gl, p, 0, 3);
+    const c = buffer(gl, colours);
+    attribute(gl, c, 1, 3);
+    const ids = buffer(gl, new Uint32Array(count).fill(0xffffffff));
+    gl.bindBuffer(gl.ARRAY_BUFFER, ids);
+    gl.enableVertexAttribArray(2);
+    gl.vertexAttribIPointer(2, 1, gl.UNSIGNED_INT, 0, 0);
+    gl.bindVertexArray(null);
+    this.outlineBuffers = [p, c, ids];
+    this.outlineCount = count;
+  }
+
+  /** The section's face through the elements, or none. */
+  setSlice(slice: Slice | null): void {
+    const gl = this.gl;
+    for (const b of this.sliceBuffers) gl.deleteBuffer(b);
+    if (this.sliceVao) gl.deleteVertexArray(this.sliceVao);
+    this.sliceVao = null;
+    this.sliceBuffers = [];
+    this.sliceCount = 0;
+    this.sliceHasValues = false;
+    if (!slice || !slice.triangles) return;
+    const count = slice.triangles * 3;
+    const edges = new Uint32Array(count);
+    for (let t = 0; t < slice.triangles; t++) edges.fill(slice.edges[t], t * 3, t * 3 + 3);
+    this.sliceVao = gl.createVertexArray()!;
+    gl.bindVertexArray(this.sliceVao);
+    const position = buffer(gl, slice.positions);
+    attribute(gl, position, 0, 3);
+    const value = buffer(gl, slice.values ?? new Float32Array(count));
+    attribute(gl, value, 1, 1);
+    const offset = buffer(gl, slice.vectors ?? new Float32Array(count * 3));
+    attribute(gl, offset, 3, 3);
+    const edge = buffer(gl, edges);
+    gl.bindBuffer(gl.ARRAY_BUFFER, edge);
+    gl.enableVertexAttribArray(4);
+    gl.vertexAttribIPointer(4, 1, gl.UNSIGNED_INT, 0, 0);
+    gl.bindVertexArray(null);
+    this.sliceBuffers = [position, value, offset, edge];
+    this.sliceCount = count;
+    this.sliceHasValues = slice.values !== null;
+  }
+
+  /** The way the camera looks, towards it: the normal of a plane square to the view. */
+  facing(): [number, number, number] {
+    const e = this.eye();
+    const t = this.camera.target;
+    const n = normalise([e[0] - t[0], e[1] - t[1], e[2] - t[2]]);
+    return [n[0], n[1], n[2]];
+  }
+
+  private applyClip(program: WebGLProgram, on: boolean): void {
+    const gl = this.gl;
+    gl.uniform1i(gl.getUniformLocation(program, "u_clipOn"), on && this.clip ? 1 : 0);
+    gl.uniform4fv(gl.getUniformLocation(program, "u_clip"), this.clip ?? NO_PLANE);
   }
 
   private drawGlyphs(vp: Float32Array, eye: Float32Array): void {
@@ -454,6 +609,7 @@ export class FeRenderer {
     gl.uniformMatrix4fv(gl.getUniformLocation(p, "u_viewProjection"), false, vp);
     gl.uniform3fv(gl.getUniformLocation(p, "u_eye"), eye);
     gl.uniform1i(gl.getUniformLocation(p, "u_hovered"), this.hoveredGlyph);
+    this.applyClip(p, true);
     if (this.glyphVao && this.glyphTriangles) {
       gl.uniform1i(gl.getUniformLocation(p, "u_lit"), 1);
       gl.bindVertexArray(this.glyphVao);
@@ -482,11 +638,20 @@ export class FeRenderer {
     const p = this.pickProgram;
     gl.useProgram(p);
     gl.uniformMatrix4fv(gl.getUniformLocation(p, "u_viewProjection"), false, vp);
+    this.applyClip(p, true);
     if (this.vao && this.vertexCount) {
       gl.uniform1f(gl.getUniformLocation(p, "u_deform"), this.deform);
       gl.uniform1ui(gl.getUniformLocation(p, "u_base"), 1);
       gl.bindVertexArray(this.vao);
       gl.drawArrays(gl.TRIANGLES, 0, this.vertexCount);
+      // The section's face hides what is behind it and names nothing.
+      if (this.clip && this.sliceVao && this.sliceCount) {
+        this.applyClip(p, false);
+        gl.vertexAttribI4ui(2, NO_GROUP, 0, 0, 0);
+        gl.bindVertexArray(this.sliceVao);
+        gl.drawArrays(gl.TRIANGLES, 0, this.sliceCount);
+        this.applyClip(p, true);
+      }
     }
     if (this.showGlyphs && this.deform === 0 && this.glyphVao) {
       gl.uniform1f(gl.getUniformLocation(p, "u_deform"), 0);
@@ -535,6 +700,8 @@ export class FeRenderer {
     const gl = this.gl;
     this.setSkin(null);
     this.setGlyphs(null);
+    this.setSection(null, null);
+    this.setSlice(null);
     gl.deleteTexture(this.groupTexture);
     gl.deleteTexture(this.pickTexture);
     gl.deleteRenderbuffer(this.pickDepth);

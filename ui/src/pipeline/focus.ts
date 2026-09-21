@@ -26,7 +26,6 @@ export const NOTHING: Show = {
   text: null,
   group: null,
   layers: [],
-  paint: null,
   point: null,
 };
 
@@ -42,6 +41,7 @@ export const STEP_CANVAS: Record<string, CanvasName> = {
   "deck.read": "mesh",
   "deck.results": "mesh",
   "deck.anchor": "cad",
+  space: "space",
 };
 
 /** One show for many entities: every face and layer of them, on the canvas most of them use. */
@@ -55,11 +55,9 @@ export function merged(members: EntitySummary[], fallback: CanvasName = "none"):
   const canvas = [...votes.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? fallback;
   const faces = new Set<number>();
   const layers = new Set<string>();
-  let paint: Show["paint"] = null;
   for (const m of members) {
     for (const f of m.show.faces) faces.add(f);
     for (const l of m.show.layers) layers.add(l);
-    paint = paint ?? m.show.paint;
   }
   return {
     canvas,
@@ -68,12 +66,11 @@ export function merged(members: EntitySummary[], fallback: CanvasName = "none"):
     text: null,
     group: null,
     layers: [...layers],
-    paint,
     point: null,
   };
 }
 
 export function stepFocus(step: StepRun, members: EntitySummary[]): Focus {
-  const fallback = step.stage === "space" ? "space" : (STEP_CANVAS[step.id] ?? "none");
+  const fallback = STEP_CANVAS[step.id] ?? "none";
   return { kind: "step", step: step.id, group: null, entity: null, show: merged(members, fallback) };
 }

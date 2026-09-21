@@ -1,15 +1,13 @@
 /**
  * The card on the right: whatever is in focus, in full. An entity shows its typed fields, the
  * evidence behind it, what it is tied to and what is tied to it - every one of those a link that
- * moves the focus there. A question offers its answers. A step shows what it read and made; a group,
- * its members.
+ * moves the focus there. A step shows what it read and made; a group, its members.
  *
- * The same JSON an agent reads; the card only lays it out. Nothing here knows a kind by name except
- * a question, which is the one entity that asks something back.
+ * The same JSON an agent reads; the card only lays it out. Nothing here knows a kind by name.
  */
 
 import { useEffect, useState } from "react";
-import type { EntityDetail, EntitySummary, Group, QuestionDetail, StepRun } from "../api/pipeline";
+import type { EntityDetail, EntitySummary, Group, StepRun } from "../api/pipeline";
 import type { Focus } from "./focus";
 import { EntityRow, ORIGIN_WORDS, fmtTime } from "./PipelineRail";
 import type { PipelineState } from "./usePipeline";
@@ -52,9 +50,6 @@ export function EntityCard(props: Props) {
 /** Fields every entity has, laid out in the card's head rather than among its own. */
 const COMMON = new Set(["id", "kind", "label", "step", "origin", "show", "links", "evidence", "status", "backlinks"]);
 
-/** Fields a question lays out itself. */
-const QUESTION_FIELDS = new Set(["question_kind", "text", "detail", "options", "meanwhile", "answer"]);
-
 const ROLE_WORDS: Record<string, string> = {
   on: "lies on",
   evidenced_by: "evidence",
@@ -64,7 +59,7 @@ const ROLE_WORDS: Record<string, string> = {
   holds: "holds",
   ties: "ties",
   reads: "reads",
-  minus: "minus",
+  round: "round",
 };
 
 const BACK_WORDS: Record<string, string> = {
@@ -76,7 +71,7 @@ const BACK_WORDS: Record<string, string> = {
   holds: "held by",
   ties: "tied by",
   reads: "read by",
-  minus: "taken from",
+  round: "has round it",
 };
 
 function EntityView({ id, state, onEntity, onStep }: Props & { id: string }) {
@@ -96,9 +91,7 @@ function EntityView({ id, state, onEntity, onStep }: Props & { id: string }) {
   if (error) return <div className="card-error">{error}</div>;
   if (!entity || entity.id !== id) return <div className="dim card-pad">reading…</div>;
   const step = state.steps.get(entity.step);
-  const fields = Object.entries(entity).filter(
-    ([k]) => !COMMON.has(k) && !(entity.kind === "question" && QUESTION_FIELDS.has(k)),
-  );
+  const fields = Object.entries(entity).filter(([k]) => !COMMON.has(k));
   return (
     <>
       <header className="entity-head">
@@ -120,7 +113,6 @@ function EntityView({ id, state, onEntity, onStep }: Props & { id: string }) {
           </div>
         ) : null}
       </header>
-      {entity.kind === "question" ? <QuestionView question={entity as QuestionDetail} state={state} /> : null}
       {fields.length ? (
         <details className="card-section" open>
           <summary>Fields</summary>
@@ -328,49 +320,6 @@ function fmtValue(v: number): string {
   const a = Math.abs(v);
   if (a !== 0 && (a < 1e-3 || a >= 1e7)) return v.toExponential(3);
   return v.toLocaleString("en-GB", { maximumSignificantDigits: 4 });
-}
-
-// --- a question -------------------------------------------------------------------------------------
-
-function QuestionView({ question, state }: { question: QuestionDetail; state: PipelineState }) {
-  const [busy, setBusy] = useState(false);
-  const answer = async (value: string | null) => {
-    setBusy(true);
-    try {
-      await state.answer(question.id, value);
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <section className="question">
-      <p className="question-text">{question.text}</p>
-      {question.detail ? <p className="question-detail">{question.detail}</p> : null}
-      <div className="question-options">
-        {question.options.map((option) => (
-          <button
-            key={option}
-            data-active={question.answer === option}
-            disabled={busy || state.running}
-            onClick={() => void answer(question.answer === option ? null : option)}
-            title={question.answer === option ? "Take the answer back" : undefined}
-          >
-            {option}
-          </button>
-        ))}
-      </div>
-      <p className="question-meanwhile">
-        {question.answer ? (
-          <>
-            answered <b>{question.answer}</b>
-            {state.unapplied ? " · applies on the next run" : ""}
-          </>
-        ) : question.meanwhile ? (
-          <>until answered: {question.meanwhile}</>
-        ) : null}
-      </p>
-    </section>
-  );
 }
 
 // --- a group, a step --------------------------------------------------------------------------------

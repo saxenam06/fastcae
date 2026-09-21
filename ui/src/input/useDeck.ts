@@ -20,7 +20,6 @@ export interface DeckState {
   colours: ([number, number, number] | null)[];
   roleOf: (group: string) => string[];
   field: (run: Run, name: string, vectors?: boolean) => Promise<Values>;
-  difference: (name: string, a: Run, b: Run) => Promise<Values>;
   job: JobStatus | null;
   submit: (start: () => Promise<{ job: string }>) => Promise<void>;
 }
@@ -87,15 +86,6 @@ export function useDeck(active: boolean, project: string | null): DeckState {
     return values;
   }, []);
 
-  const difference = useCallback(async (name: string, a: Run, b: Run) => {
-    const key = `diff:${name}:${a}:${b}`;
-    const known = cache.current.get(key);
-    if (known) return known;
-    const values = await sim.difference(name, a, b);
-    cache.current.set(key, values);
-    return values;
-  }, []);
-
   // A job in flight is followed until it ends; then everything it could have changed is read again.
   const submit = useCallback(
     async (start: () => Promise<{ job: string }>) => {
@@ -119,5 +109,5 @@ export function useDeck(active: boolean, project: string | null): DeckState {
     [deck],
   );
 
-  return { deck, skin, glyphs, signals, error, loading, reload, colours, roleOf, field, difference, job, submit };
+  return { deck, skin, glyphs, signals, error, loading, reload, colours, roleOf, field, job, submit };
 }
