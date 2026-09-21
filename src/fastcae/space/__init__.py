@@ -1,14 +1,13 @@
-"""The design space: for every cell of air near a part, whether metal may be added there.
+"""The design space: the one volume of air round a part where metal may be added.
 
-Derived from the part's CAD and its solver deck alone - a drawing adds evidence when there is one.
-Nothing here knows what the part is for. It reads geometric kinds (planes, bores, holes, walls) and
-what the deck acts on, and answers three things per cell: **allowed**, **forbidden and why**, or
-**unknown** - evidence too weak to decide, so an engineer is asked.
-
-See :func:`derive.derive` for the steps.
+Taken as defined - an input kept in the project's folder, like the CAD. Where the engineer has
+brought none, rules that hold for any part define it from the CAD, the solver deck and the drawing:
+a layer over the walls, outside and in, less what sits in the bores and passes through them, what
+mates against held faces, and each fastener with its tool. See :func:`derive.derive` for the rules
+and :mod:`store` for how it is kept.
 """
 
 from .derive import derive
-from .model import Evidence, Label, Params, Reason, Space
+from .model import Evidence, Label, Params, Space
 
-__all__ = ["Evidence", "Label", "Params", "Reason", "Space", "derive"]
+__all__ = ["Evidence", "Label", "Params", "Space", "derive"]

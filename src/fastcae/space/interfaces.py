@@ -1,7 +1,7 @@
 """Which faces meet something else: the interfaces, each with the evidence that says so.
 
-Four kinds of evidence freeze a face - the deck loads it, the deck holds it, the drawing tolerances
-it, or a hole the deck holds or loads opens onto it. Three only ask - it looks machined, a hole
+Four kinds of evidence hold a face - the deck loads it, the deck holds it, the drawing tolerances
+it, or a hole the deck holds or loads opens onto it. Three are weak - it looks machined, a hole
 pattern the deck does not mention opens onto it, or it is a bore the deck does not mention. A face
 is then grown into the whole of what it belongs to: the rest of the same bore (coaxial, same
 radius, touching) or the rest of the same plane (coplanar, touching).
@@ -178,11 +178,11 @@ class _Builder:
     def covered(self) -> set[int]:
         return {f for s in self.sets for f in s["faces"]}
 
-    def frozen_faces(self) -> set[int]:
+    def held_faces(self) -> set[int]:
         return {
             f
             for s in self.sets
-            if any(Evidence(e["kind"]).freezes for e in s["evidence"])
+            if any(Evidence(e["kind"]).holds for e in s["evidence"])
             for f in s["faces"]
         }
 
@@ -271,13 +271,8 @@ def find(
     anchoring: dict[str, Any] | None = None,
     setup: Any = None,
     controlled: dict[str, Any] | None = None,
-    answers: dict[str, str] | None = None,
 ) -> tuple[list[Interface], dict[str, Any]]:
-    """Every interface of the part, with its evidence. Returns them and what was counted but not
-    asked about.
-
-    ``answers`` are the engineer's, by interface id: ``freeze`` confirms an asked interface,
-    ``free`` releases one - it meets nothing, and nothing is kept clear round it."""
+    """Every interface of the part, with its evidence. Returns them and what was only counted."""
     build = _Builder(atlas, features)
 
     # 1. The deck: what it loads and what it holds.
@@ -322,7 +317,7 @@ def find(
                 ref=f"control:{feature_id}",
             )
 
-    strong = build.frozen_faces()
+    strong = build.held_faces()
 
     # 4. Hole patterns the deck says nothing about: the planes their holes open onto.
     hole_by_wall = {f: h for h in features.of_kind(FeatureKind.HOLE) for f in h.face_ids}
@@ -404,27 +399,8 @@ def find(
             )
         )
     # Named by kind and lowest face: the same interface keeps its name while the file does not
-    # change, whatever the answers make of the others.
+    # change.
     for i in interfaces:
         i.id = f"{i.kind}:{min(i.faces)}"
-    released: list[Interface] = []
-    kept: list[Interface] = []
-    for i in interfaces:
-        answer = (answers or {}).get(i.id)
-        if answer == "free" and not any(
-            Evidence(e["kind"]).freezes and e["kind"] != "confirmed" for e in i.evidence
-        ):
-            released.append(i)
-            continue
-        if answer == "freeze" and not i.frozen:
-            i.evidence.append(
-                {
-                    "kind": str(Evidence.CONFIRMED),
-                    "detail": "the engineer said something meets it",
-                    "confidence": 1.0,
-                    "ref": "engineer",
-                }
-            )
-        kept.append(i)
-    kept.sort(key=lambda i: (not i.frozen, i.kind, -i.area_mm2))
-    return kept, {"machined_below_question_area": skipped, "released": released}
+    interfaces.sort(key=lambda i: (not i.held, i.kind, -i.area_mm2))
+    return interfaces, {"machined_too_small": skipped}

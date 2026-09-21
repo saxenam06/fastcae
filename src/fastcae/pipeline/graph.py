@@ -1,8 +1,8 @@
-"""The pipeline as one graph: its steps in two stages, every entity they produced, and every link
-between entities read both ways.
+"""The pipeline as one graph: its steps, every entity they produced, and every link between
+entities read both ways.
 
-Built from what the server already holds - the extraction and the derived design space - so asking
-for it never recomputes anything. The rail, the canvases and the agent all read this one graph.
+Built from what the server already holds - the extraction and the design space - so asking for it
+never recomputes anything. The rail, the canvases and the agent all read this one graph.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from pydantic import TypeAdapter
 from ..space.model import Space
 from .entities import AnyEntity, Entity, Link, Stage
 from .read import read_stage
-from .space import space_stage
+from .space import space_step
 
 ENTITY_SCHEMA = TypeAdapter(AnyEntity)
 
@@ -99,18 +99,16 @@ class Graph:
 def build(  # type: ignore[no-untyped-def]
     extraction,
     space: Space | None,
-    answers: dict[str, str] | None = None,
-    live: dict | None = None,
+    cached: bool = False,
     running: bool = False,
+    said: str = "",
+    since: float | None = None,
 ) -> Graph:
-    """The graph of what the server holds: the extraction's entities, and the design space's -
-    unless a run is replacing it, when only what the run has reported so far is shown."""
+    """The graph of what the server holds: the engineer's files as read, and the design space - its
+    entity only once it is there, not while it is being defined."""
     read_steps, read_entities = read_stage(extraction)
-    space_steps, space_entities = space_stage(space, read_entities, answers, live, running)
-    stages = [
-        Stage(id="read", label="Read the engineer's files", steps=read_steps),
-        Stage(id="space", label="Derive the design space", steps=space_steps),
-    ]
+    step, space_entities = space_step(space, read_entities, cached, running, said, since)
+    stages = [Stage(id="read", label="Read the engineer's files", steps=[*read_steps, step])]
     return Graph(stages, read_entities + space_entities)
 
 

@@ -2,8 +2,8 @@
 
 When a part exists both without and with its ribs - a baseline and the design that went into
 production - the ribs are the one piece of evidence about the design space that no rule wrote. Every
-rib cell of the finished part should fall where the space allows metal. How much does, where the
-rest falls and why, and how big the space is beside the ribs, are the numbers this reports.
+rib cell of the finished part should fall in the design space. How much does, where the rest falls
+and why, and how big the space is beside the ribs, are the numbers this reports.
 
 The grid's own resolution is part of the answer: a rib's outermost layer of cells is half in, half
 out wherever its faces fall between cell centres, so coverage is also given without that layer.
@@ -16,8 +16,8 @@ from typing import Any
 import numpy as np
 from scipy import ndimage
 
-from ..generate.field import Grid, build_field
 from ..geometry.brep import Tessellation
+from ..geometry.field import Grid, build_field
 from .model import LABEL_WORDS, Label
 
 NOISE_CELLS = 30
@@ -56,7 +56,7 @@ def compare(
             LABEL_WORDS[Label(i)]: round(float(c) / total, 4) for i, c in enumerate(counts) if c
         }
 
-    admissible = labels == Label.ADMISSIBLE
+    admissible = labels == Label.DESIGN
     report: dict[str, Any] = {
         "rib_cm3": round(float(rib.sum()) * cell_cm3, 1),
         "rib_pieces": int(len(np.unique(pieces)) - 1),
@@ -67,11 +67,6 @@ def compare(
         "core_by_label": shares(core),
         "covered": round(float((rib & admissible).sum()) / max(float(rib.sum()), 1.0), 4),
         "covered_core": round(float((core & admissible).sum()) / max(float(core.sum()), 1.0), 4),
-        "covered_or_unknown": round(
-            float((rib & (admissible | (labels == Label.UNKNOWN))).sum())
-            / max(float(rib.sum()), 1.0),
-            4,
-        ),
         "space_to_rib": round(float(admissible.sum()) / max(float(rib.sum()), 1.0), 2),
     }
     if benefit is not None:
@@ -93,7 +88,7 @@ def compare(
         if n == 0:
             continue
         cells = labels[pieces == label_id]
-        blocking = np.bincount(cells[cells != Label.ADMISSIBLE], minlength=len(Label))
+        blocking = np.bincount(cells[cells != Label.DESIGN], minlength=len(Label))
         top = int(np.argmax(blocking)) if blocking.any() else None
         per_piece.append(
             {

@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import ast
 import re
-import shutil
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -656,18 +655,3 @@ def run(
         folder=back_to,
         log_tail=(ran.out + ran.err)[-4000:],
     )
-
-
-def copy_deck(export: Path, to: Path) -> Path:
-    """The deck's input files copied beside each other in ``to``, and its export rewritten to
-    them."""
-    to.mkdir(parents=True, exist_ok=True)
-    spec = read_export(export)
-    for f in spec.files:
-        source = (export.parent / f.path).resolve()
-        if "D" in f.mode and source.exists():
-            shutil.copy2(source, to / Path(f.path).name)
-        f.path = Path(f.path).name
-    target = to / export.name
-    write_export(target, spec)
-    return target

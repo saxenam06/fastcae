@@ -1,9 +1,8 @@
-"""The pipeline over HTTP: its steps, the typed entities they produced, and the engineer's answers.
+"""The pipeline over HTTP: its steps and the typed entities they produced.
 
-``GET /api/pipeline`` is the rail: two stages, each step with its status, what it read and what it
-produced. ``GET /api/entities`` lists entities, ``GET /api/entities/{id}`` gives one in full with
-everything linked to it both ways - the same JSON an agent reads. ``POST /api/answers`` records an
-answer in the project's data; the next run applies it.
+``GET /api/pipeline`` is the rail: every step with its status, what it read and what it produced,
+the design space last. ``GET /api/entities`` lists entities, ``GET /api/entities/{id}`` gives one in
+full with everything linked to it both ways - the same JSON an agent reads.
 """
 
 from __future__ import annotations
@@ -12,9 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 
-from ..pipeline import answers as answer_store
 from ..pipeline import graph as pipeline_graph
 from . import designspace
 
@@ -25,19 +22,12 @@ _cached: dict[str, Any] = {"key": None, "graph": None}
 
 def current_graph() -> pipeline_graph.Graph:
     """The graph of what the server holds now, built again only when something in it changed."""
-    project, extraction = designspace.opened()
+    _, extraction = designspace.opened()
     held = designspace.held
-    answers = answer_store.load(project)
-    key = (
-        id(extraction),
-        id(held.space),
-        held.version,
-        held.running,
-        tuple(sorted(answers.items())),
-    )
+    key = (id(extraction), id(held.space), held.version, held.running, held.cached)
     if _cached["key"] != key:
         _cached["graph"] = pipeline_graph.build(
-            extraction, held.space, answers, dict(held.live), held.running
+            extraction, held.space, held.cached, held.running, held.said, held.since
         )
         _cached["key"] = key
     return _cached["graph"]
@@ -47,14 +37,13 @@ def current_graph() -> pipeline_graph.Graph:
 def get_pipeline() -> dict[str, Any]:
     out = current_graph().pipeline()
     out["running"] = designspace.held.running
-    out["cached"] = designspace.held.cached
     return out
 
 
 @router.post("/api/pipeline/run")
 def post_pipeline_run(request: designspace.RunRequest) -> StreamingResponse:
-    """Run the design-space stage - or read it back - as a stream: each step as it starts and
-    finishes, then ``done``. The Read stage ran when the files were extracted."""
+    """Read the design space - or define it - as a stream. The engineer's files were read when the
+    project was extracted."""
     return designspace.stream_of(request)
 
 
@@ -85,34 +74,3 @@ def get_entity(entity_id: str) -> dict[str, Any]:
     if found is None:
         raise HTTPException(404, f"no entity {entity_id!r}")
     return found
-
-
-class AnswerRequest(BaseModel):
-    question: str
-    value: str | None = None
-    """An option the question offers, or None to take the answer back."""
-
-
-@router.post("/api/answers")
-def post_answer(request: AnswerRequest) -> dict[str, Any]:
-    """Record an answer in the project's data. The design space runs again to apply it."""
-    try:
-        return record_answer(request.question, request.value)
-    except KeyError as error:
-        raise HTTPException(404, str(error.args[0])) from None
-    except ValueError as error:
-        raise HTTPException(400, str(error)) from None
-
-
-def record_answer(question: str, value: str | None) -> dict[str, Any]:
-    """Keep an answer - one of the options the question offers, or None to take it back - with the
-    part. KeyError for a question there is not, ValueError for an answer it does not offer."""
-    project, _ = designspace.opened()
-    entity = current_graph().entities.get(question)
-    if entity is None or entity.kind != "question":
-        raise KeyError(f"no question {question!r}")
-    options = getattr(entity, "options", [])
-    if value is not None and options and value not in options:
-        raise ValueError(f"{value!r} is not one of {', '.join(options)}")
-    answers = answer_store.save(project, question, value)
-    return {"answers": answers, "rerun": "space"}

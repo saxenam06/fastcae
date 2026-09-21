@@ -56,6 +56,11 @@ class Solution:
     unknowns: int
     times: dict[str, float] = field(default_factory=dict)
     info: dict[str, object] = field(default_factory=dict)
+    component_u: np.ndarray | None = None
+    """With ``components``, every node's displacement under each load component on its own
+    (nodes, 3, components) in single precision - the order of ``info["components"]``. The answer
+    to any mix of these loads is their weighted sum, so a measure the study did not ask for can be
+    read later without solving again."""
 
 
 def _cross(r: np.ndarray) -> np.ndarray:
@@ -247,8 +252,15 @@ def _group_weights(mesh: FEMesh, members: np.ndarray, weights: list[float]) -> n
     return np.full(len(members), weights[0] if weights else 1.0)
 
 
-def solve(mesh: FEMesh, setup: Setup, gpu: bool = True, log=print) -> Solution:  # type: ignore[no-untyped-def]
-    """Solve the deck's linear static analysis on its mesh."""
+def solve(  # type: ignore[no-untyped-def]
+    mesh: FEMesh, setup: Setup, gpu: bool = True, log=print, components: bool = False
+) -> Solution:
+    """Solve the deck's linear static analysis on its mesh.
+
+    With ``components``, each non-zero component of every nodal load is solved on its own as well
+    - further right-hand sides on the one factorisation - and ``info["components"]`` holds, for
+    each, the motion of every distributing coupling's reference: what a measure taken as a
+    re-weighted sum of the load's parts (a robust misalignment) is read from."""
     tets = mesh.tet10
     if tets is None:
         raise Unsupported("the mesh's volume is not quadratic tetrahedra alone")
@@ -309,6 +321,31 @@ def solve(mesh: FEMesh, setup: Setup, gpu: bool = True, log=print) -> Solution: 
                             u0[3 * node + c] = h.dofs[name]
 
     # Loads.
+    parts: list[tuple[str, str, float]] = []
+    if components:
+        parts = [
+            (load.group, c, float(v))
+            for load in nodal
+            for c, v in load.values.items()
+            if c in FORCES + MOMENTS and abs(float(v)) > 0.0
+        ]
+    f_parts = np.zeros((3 * n, len(parts)))
+    ref_parts = np.zeros((len(refs), 6, len(parts)))
+    for k, (group, c, v) in enumerate(parts):
+        _one_load(
+            mesh,
+            nodal,
+            distributing,
+            refs,
+            ref_index,
+            distributing_refs,
+            group,
+            c,
+            v,
+            f_parts[:, k],
+            ref_parts[:, :, k],
+            nodes,
+        )
     for load in nodal:
         vec = np.array([load.values.get(c, 0.0) for c in FORCES])
         mom = np.array([load.values.get(c, 0.0) for c in MOMENTS])
@@ -397,11 +434,18 @@ def solve(mesh: FEMesh, setup: Setup, gpu: bool = True, log=print) -> Solution: 
     f_red = tmat.T @ (f - k_full @ u0)
     for j, value in extra_load:
         f_red[j] += value
+    if parts:
+        extra_parts = np.zeros((col, len(parts)))
+        for i, r in enumerate(refs):
+            for j, c in r["columns"].items():
+                extra_parts[c] = ref_parts[i, j]
+        f_red = np.column_stack([f_red, tmat.T @ f_parts + extra_parts])
     times["reduce_s"] = time.time() - t0
     log(f"{col:,} unknowns after supports and couplings, reduced in {times['reduce_s']:.1f} s")
 
     t0 = time.time()
-    q, solver_info = _factor_and_solve(k_red, f_red, gpu)
+    q_all, solver_info = _factor_and_solve(k_red, f_red, gpu)
+    q = q_all[:, 0] if q_all.ndim == 2 else q_all
     times["solve_s"] = time.time() - t0
     times.update({k: v for k, v in solver_info.items() if k.endswith("_s")})
     log(f"solved in {times['solve_s']:.1f} s")
@@ -439,6 +483,32 @@ def solve(mesh: FEMesh, setup: Setup, gpu: bool = True, log=print) -> Solution: 
                     force += residual[node]
             reactions[g] = force.tolist()
 
+    info_parts = []
+    component_u = np.zeros((n, 3, len(parts)), np.float32) if parts else None
+    for k, (group, c, v) in enumerate(parts):
+        uk = (tmat @ q_all[:, k + 1]).reshape(-1, 3)
+        moved = {}
+        for d in distributing:
+            ref_node = int(mesh.group_nodes(d.reference)[0])
+            members = mesh.group_nodes(d.group)
+            t_c, theta, centre = rigid_fit(
+                nodes[members], uk[members], _group_weights(mesh, members, d.weights)
+            )
+            ref_u = t_c + np.cross(theta, nodes[ref_node] - centre)
+            uk[ref_node] = ref_u
+            moved[d.reference] = {"u": ref_u.tolist(), "rotation": theta.tolist()}
+        for r in refs:
+            motion = np.zeros(6)
+            for j, cc in r["columns"].items():
+                motion[j] = q_all[cc, k + 1]
+            # A coupling's reference is not a node of the mesh's own unknowns: it carries the
+            # coupling's motion, read from the reduced answer, as the whole deck's u does.
+            uk[r["node"]] = motion[:3]
+            moved[r["group"]] = {"u": motion[:3].tolist(), "rotation": motion[3:].tolist()}
+        info_parts.append({"group": group, "component": c, "value": v, "refs": moved})
+        assert component_u is not None
+        component_u[:, :, k] = uk
+
     t0 = time.time()
     stress, vm = nodal_stress(nodes, tets, young, poisson, u, n)
     times["stress_s"] = time.time() - t0
@@ -451,8 +521,48 @@ def solve(mesh: FEMesh, setup: Setup, gpu: bool = True, log=print) -> Solution: 
         reactions=reactions,
         unknowns=col,
         times=times,
-        info={"solver": solver_info.get("solver", "?"), "residual": solver_info.get("residual")},
+        component_u=component_u,
+        info={
+            "solver": solver_info.get("solver", "?"),
+            "residual": solver_info.get("residual"),
+            **({"components": info_parts} if parts else {}),
+        },
     )
+
+
+def _one_load(  # type: ignore[no-untyped-def]
+    mesh, nodal, distributing, refs, ref_index, distributing_refs, group, c, v, f, ref_load, nodes
+) -> None:
+    """One component of one nodal load, spread as the deck's own loads are: onto a rigid coupling's
+    reference, over a distributing coupling's nodes, or onto the nodes themselves."""
+    vec = np.zeros(3)
+    mom = np.zeros(3)
+    if c in FORCES:
+        vec[FORCES.index(c)] = v
+    else:
+        mom[MOMENTS.index(c)] = v
+    targets = [int(x) for x in mesh.group_nodes(group)]
+    for node in targets:
+        if node in ref_index:
+            ref_load[ref_index[node]] += np.concatenate([vec, mom])
+        elif node in distributing_refs:
+            continue
+        else:
+            f[3 * node : 3 * node + 3] += vec
+    for d in distributing:
+        ref_node = int(mesh.group_nodes(d.reference)[0])
+        if ref_node not in targets:
+            continue
+        members = mesh.group_nodes(d.group)
+        w = _group_weights(mesh, members, d.weights)
+        x = nodes[members]
+        wn = w / w.sum()
+        centre = wn @ x
+        r = x - centre
+        inertia = np.einsum("n,nk,nk->", w, r, r) * np.eye(3) - np.einsum("n,ni,nj->ij", w, r, r)
+        a = np.linalg.solve(inertia, np.cross(nodes[ref_node] - centre, vec) + mom)
+        share = wn[:, None] * vec[None, :] + w[:, None] * np.cross(a[None, :], r)
+        np.add.at(f, (3 * members[:, None] + np.arange(3)).ravel(), share.ravel())
 
 
 def _mtlayer() -> str | None:
@@ -468,7 +578,11 @@ def _mtlayer() -> str | None:
     return None
 
 
-def _factor_and_solve(k: sp.csr_matrix, f: np.ndarray, gpu: bool) -> tuple[np.ndarray, dict]:
+def _factor_and_solve(
+    k: sp.csr_matrix, f: np.ndarray, gpu: bool, device_limit: str | None = None
+) -> tuple[np.ndarray, dict]:
+    """``k x = f`` - ``f`` one right-hand side or several, as columns. ``device_limit`` caps the
+    card memory cuDSS may use (\"3GiB\"): what does not fit is kept in host memory."""
     if not gpu:
         from scipy.sparse.linalg import spsolve
 
@@ -490,13 +604,15 @@ def _factor_and_solve(k: sp.csr_matrix, f: np.ndarray, gpu: bool) -> tuple[np.nd
 
     release()
     a = csp.csr_matrix(k)
-    b = cp.asarray(f)
+    # Right-hand sides column by column in memory, as cuDSS reads them.
+    b = cp.asfortranarray(cp.asarray(f if f.ndim == 2 else f.reshape(-1, 1)))
     options = {"sparse_system_type": DirectSolverMatrixType.SPD, "multithreading_lib": _mtlayer()}
-    execution = ExecutionCUDA(
-        hybrid_memory_mode_options=HybridMemoryModeOptions(hybrid_memory_mode=True)
-    )
+    hybrid = {"hybrid_memory_mode": True}
+    if device_limit:
+        hybrid["hybrid_device_memory_limit"] = device_limit
+    execution = ExecutionCUDA(hybrid_memory_mode_options=HybridMemoryModeOptions(**hybrid))
     try:
-        with DirectSolver(a, b.reshape(-1, 1), options=options, execution=execution) as solver:
+        with DirectSolver(a, b, options=options, execution=execution) as solver:
             t0 = time.time()
             solver.plan()
             cp.cuda.Device().synchronize()
@@ -509,7 +625,7 @@ def _factor_and_solve(k: sp.csr_matrix, f: np.ndarray, gpu: bool) -> tuple[np.nd
             x = solver.solve()
             cp.cuda.Device().synchronize()
             solve_s = time.time() - t0
-        x = cp.asnumpy(x).ravel()
+        x = cp.asnumpy(x).reshape(f.shape)
     finally:
         # Whether it solved or ran out: the card handed back, for the next build or solve.
         a = b = None

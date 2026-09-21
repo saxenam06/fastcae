@@ -22,7 +22,7 @@ from dataclasses import asdict, dataclass
 
 import numpy as np
 
-from .fem import FEMesh, tet_volumes, triangle_areas
+from .fem import FEMesh, tet_volumes
 from .med import NodalField
 from .setup import ROTATIONS, TRANSLATIONS, Setup
 
@@ -521,10 +521,3 @@ def certificate(
         }
     )
     return rows
-
-
-def surface_area(mesh: FEMesh, group: str) -> float:
-    members = np.zeros(mesh.n_nodes, bool)
-    members[mesh.group_nodes(group)] = True
-    patch = mesh.skin.corners[members[mesh.skin.corners].all(axis=1)]
-    return float(triangle_areas(mesh.nodes, patch).sum())

@@ -24,6 +24,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, Too
 from ..extract import Extraction
 from ..project import Project
 from . import tools as agent_tools
+from .context import Context
 from .prompt import SYSTEM
 
 MODEL = "openrouter:deepseek/deepseek-v4-pro"
@@ -90,7 +91,7 @@ class Runtime:
         project: Project,
         extraction: Extraction,
         model: Any = None,
-        context: agent_tools.Context | None = None,
+        context: Context | None = None,
     ):
         from langchain.agents import create_agent
         from langgraph.checkpoint.sqlite import SqliteSaver
@@ -99,7 +100,7 @@ class Runtime:
         self.folder = project.root / ".fastcae" / "agent"
         self.folder.mkdir(parents=True, exist_ok=True)
         self.thread = self._thread()
-        self.context = context or agent_tools.Context(project, extraction, said=[])
+        self.context = context or Context(project, extraction)
         self.context.said[:] = self._said()
         self.connection = sqlite3.connect(
             self.folder / "checkpoints.sqlite", check_same_thread=False
@@ -253,16 +254,12 @@ def _summary(message: ToolMessage) -> str:
     if message.name == "pipeline" and isinstance(data, dict):
         steps = data.get("steps", [])
         ran = sum(s["status"] in ("done", "cached") for s in steps)
-        return f"{ran} of {len(steps)} steps done" + (" - deriving" if data.get("deriving") else "")
+        reading = " - reading the design space" if data.get("reading_design_space") else ""
+        return f"{ran} of {len(steps)} steps done" + reading
     if message.name == "entity" and isinstance(data, dict) and "label" in data:
         return f"{data['id']}: {data['label']}"[:240]
     if message.name == "show" and isinstance(data, dict):
         return f"shown: {', '.join(data.get('shown', [])) or 'nothing'}"[:240]
-    if message.name == "answer" and isinstance(data, dict) and "answers" in data:
-        return f"{len(data['answers'])} answers kept"
-    if message.name == "derive" and isinstance(data, dict) and "steps" in data:
-        said = {s["step"]: s.get("said", "") for s in data["steps"]}
-        return f"derived again: {said.get('labels', '')}"[:240]
     if isinstance(data, list):
         return f"{len(data)} described"
     if not isinstance(data, dict):

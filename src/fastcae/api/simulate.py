@@ -1,4 +1,4 @@
-"""HTTP surface of Simulate: the baseline's deck and answers, the runner's jobs.
+"""The deck over HTTP: its mesh, setup and results, solved again by cuDSS - and the runner's jobs.
 
 Routes unpack, call the engine, pack. Meshes travel as binary: the outside of the mesh - its
 boundary triangles and the nodes on them - with each triangle's group, and fields as one value per
@@ -12,10 +12,9 @@ import struct
 
 import numpy as np
 from fastapi import APIRouter, HTTPException, Response
-from pydantic import BaseModel, Field
 
 from .. import runner
-from ..simulate import baseline, campaign, records, signals
+from ..simulate import baseline, section, signals
 from ..simulate.fem import FEMesh
 from ..simulate.setup import FORCES, MOMENTS
 
@@ -27,8 +26,10 @@ NO_GROUP = 0xFFFF
 
 
 def _open():  # type: ignore[no-untyped-def]
-    from .app import _state
+    from .app import _resume, _state
 
+    if _state.project is None or _state.extraction is None:
+        _resume()  # the server restarts on a source change; pick the session back up
     if _state.project is None or _state.extraction is None:
         raise HTTPException(409, "no project is open")
     return _state.project, _state.extraction
@@ -112,17 +113,41 @@ def _skin_nodes(mesh: FEMesh) -> np.ndarray:
     return np.unique(mesh.skin.corners)
 
 
-def _field_values(mesh: FEMesh, answer: signals.Answer, name: str) -> np.ndarray:
-    nodes = _skin_nodes(mesh)
+def node_values(u: np.ndarray, von_mises: np.ndarray | None, name: str) -> np.ndarray:
+    """One field of an answer at every node of its mesh."""
     if name == "displacement":
-        return np.linalg.norm(answer.u[nodes], axis=1)
+        return np.linalg.norm(u[:, :3], axis=1)
     if name in ("DX", "DY", "DZ"):
-        return answer.u[nodes, ("DX", "DY", "DZ").index(name)]
+        return u[:, ("DX", "DY", "DZ").index(name)]
     if name == "von Mises":
-        if answer.von_mises is None:
+        if von_mises is None:
             raise HTTPException(404, "this answer has no von Mises stress")
-        return answer.von_mises[nodes]
+        return von_mises
     raise HTTPException(404, f"no field {name!r}")
+
+
+def _field_values(mesh: FEMesh, answer: signals.Answer, name: str) -> np.ndarray:
+    return node_values(answer.u, answer.von_mises, name)[_skin_nodes(mesh)]
+
+
+def section_blob(
+    mesh: FEMesh,
+    nx: float,
+    ny: float,
+    nz: float,
+    d: float,
+    values: np.ndarray | None,
+    vectors: np.ndarray | None,
+) -> bytes:
+    """Where the plane ``(nx, ny, nz) . x = d`` cuts the mesh: its triangles, with the field and
+    the displacement on them when given."""
+    if not np.isfinite([nx, ny, nz, d]).all() or np.hypot(np.hypot(nx, ny), nz) < 1e-12:
+        raise HTTPException(422, "the plane needs a normal and an offset")
+    tets = mesh.tet10 if mesh.tet10 is not None else mesh.cells.get("TETRA4")
+    if tets is None:
+        raise HTTPException(409, "the mesh has no tets to cut")
+    cut = section.cut(mesh.nodes, tets, (nx, ny, nz), d, values, vectors)
+    return section.encode(cut)
 
 
 # --- the deck ---------------------------------------------------------------------------------
@@ -291,16 +316,21 @@ def get_field(run: str, name: str, vectors: bool = False) -> Response:
     )
 
 
-@router.get("/api/deck/difference")
-def get_difference(name: str, a: str = "aster", b: str = "cudss") -> Response:
-    """Where two answers on the same mesh differ: b - a, node by node."""
-    mesh_a, answer_a, _ = _answer(a)
-    mesh_b, answer_b, _ = _answer(b)
-    if mesh_a.n_nodes != mesh_b.n_nodes:
-        raise HTTPException(409, "the two answers are on different meshes")
+@router.get("/api/deck/section")
+def get_section(
+    nx: float, ny: float, nz: float, d: float, run: str | None = None, name: str | None = None
+) -> Response:
+    """Where a plane cuts the deck's mesh, as triangles in the plane - with one field of an answer
+    and its displacement on them, when an answer is named."""
+    if run:
+        mesh, answer, _ = _answer(run)
+        values = node_values(answer.u, answer.von_mises, name) if name else None
+        vectors = answer.u[:, :3]
+    else:
+        _, _, deck = _deck()
+        mesh, values, vectors = deck.mesh, None, None
     return Response(
-        values_blob(_field_values(mesh_b, answer_b, name) - _field_values(mesh_a, answer_a, name)),
-        media_type="application/octet-stream",
+        section_blob(mesh, nx, ny, nz, d, values, vectors), media_type="application/octet-stream"
     )
 
 
@@ -383,150 +413,6 @@ def post_solve() -> dict:
     """Solve the deck's own mesh and setup with cuDSS, on the runner."""
     project, _, _ = _deck()
     return {"job": runner.submit("baseline.cudss", project.name).id}
-
-
-# --- a campaign's designs, solved ----------------------------------------------------------------
-
-
-class SolveRun(BaseModel):
-    count: int = Field(default=20, ge=1, le=5000)
-    designs: list[int] | None = None
-    in_flight: int = Field(default=campaign.IN_FLIGHT, ge=1, le=4)
-
-
-@router.post("/api/runs/{run}/solve")
-def post_solve_run(run: str, request: SolveRun) -> dict:
-    """Solve a campaign's designs on the runner: those given, or the ``count`` that differ most."""
-    from ..generate.session import run_designs
-    from .app import _intent
-
-    project, _, _ = _deck()
-    designs = request.designs
-    if designs is None:
-        listed = run_designs(_intent(), run, show="varied", k=request.count)
-        if "cannot" in listed:
-            raise HTTPException(404, listed["cannot"])
-        designs = [row["index"] for row in listed["rows"]]
-        if len(designs) < request.count:
-            # Past the most different, the rest in the order they were made.
-            everyone = run_designs(_intent(), run, show="all", limit=request.count + len(designs))
-            designs += [r["index"] for r in everyone["rows"] if r["index"] not in designs]
-            designs = designs[: request.count]
-    job = runner.submit(
-        "campaign.solve",
-        project.name,
-        {"run": run, "designs": designs, "in_flight": request.in_flight},
-    )
-    return {"job": job.id, "designs": designs}
-
-
-@router.get("/api/runs/{run}/solving")
-def get_solving(run: str, since: int = 0) -> dict:
-    """A run's designs as the runner has them: the latest solve job, where each design is in it,
-    what its records say, and what happened, in order."""
-    project, _, _ = _deck()
-    mine = [
-        j
-        for j in runner.jobs(project=project.name, kind="campaign.solve", limit=200)
-        if (j.get("args") or {}).get("run") == run
-    ]
-    job = mine[0] if mine else None
-    live: dict[int, dict] = {}
-    events: list[dict] = []
-    if job is not None:
-        folder = runner.Job(job["id"]).folder / "designs"
-        for path in folder.glob("*.json") if folder.exists() else []:
-            try:
-                state = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                continue
-            live[int(state["index"])] = state
-        events = runner.Job(job["id"]).events(since)
-    kept = campaign.run_status(project, run)["designs"]
-    for row in kept:
-        state = live.get(int(row["index"]))
-        if state is None or state.get("outcome") is not None:
-            live[int(row["index"])] = {**(state or {}), **row, "stage": "done"}
-    return {
-        "run": run,
-        "job": job,
-        "designs": sorted(live.values(), key=lambda s: (s.get("outcome") is not None, s["index"])),
-        "events": events[-200:],
-        "since": since + len(events),
-    }
-
-
-# --- one solved design, from its record --------------------------------------------------------
-
-_STORES: dict[tuple, tuple] = {}
-
-
-def _store(run: str, index: int):  # type: ignore[no-untyped-def]
-    """A solved design's mesh and answer, from its Zarr store - the last few read kept."""
-    project, result, deck = _deck()
-    path = campaign.solved_folder(project, run) / f"{int(index)}.zarr"
-    if not path.is_dir():
-        raise HTTPException(404, f"design {int(index) + 1} of {run} has not been solved")
-    key = (str(path), path.stat().st_mtime_ns)
-    if key not in _STORES:
-        while len(_STORES) >= 3:
-            _STORES.pop(next(iter(_STORES)))
-        _STORES[key] = records.read_store(path)
-    mesh, answer = _STORES[key]
-    return result, deck, mesh, answer
-
-
-@router.get("/api/runs/{run}/designs/{index}/fe/mesh")
-def get_design_fe_mesh(run: str, index: int) -> Response:
-    """A solved design's mesh outside, each triangle with the deck's group it lies in."""
-    _, deck, mesh, _ = _store(run, index)
-    return Response(
-        skin_blob(mesh, _patch_names(deck.setup)), media_type="application/octet-stream"
-    )
-
-
-@router.get("/api/runs/{run}/designs/{index}/fe/glyphs")
-def get_design_fe_glyphs(run: str, index: int) -> dict:
-    """The deck's supports, couplings and loads on a solved design, where it put them."""
-    import copy
-
-    result, deck, mesh, _ = _store(run, index)
-    references = (result.anchoring or {}).get("references") or {}
-    names = list(references)
-    first = len(mesh.nodes)
-    placed = FEMesh(
-        nodes=np.vstack([mesh.nodes, np.array([references[n] for n in names]).reshape(-1, 3)]),
-        cells={**mesh.cells, "POI1": np.arange(first, first + len(names))[:, None]},
-        node_groups={
-            **mesh.node_groups,
-            **{n: np.array([first + i]) for i, n in enumerate(names)},
-        },
-        cell_groups={},
-        name=mesh.name,
-    )
-    setup = copy.deepcopy(deck.setup)
-    setup.resolve({g for g, m in placed.node_groups.items() if len(m) == 1})
-    return glyphs(placed, setup)
-
-
-@router.get("/api/runs/{run}/designs/{index}/fe/field")
-def get_design_fe_field(run: str, index: int, name: str, vectors: bool = False) -> Response:
-    """One field of a solved design's answer at every node of its outside."""
-    _, _, mesh, answer = _store(run, index)
-    nodes = _skin_nodes(mesh)
-    disp = answer["disp"]
-    if name == "displacement":
-        values = np.linalg.norm(disp[nodes], axis=1)
-    elif name in ("DX", "DY", "DZ"):
-        values = disp[nodes, ("DX", "DY", "DZ").index(name)]
-    elif name == "von Mises":
-        values = answer["vm"][nodes]
-    else:
-        raise HTTPException(404, f"no field {name!r}")
-    return Response(
-        values_blob(values, disp[nodes] if vectors else None),
-        media_type="application/octet-stream",
-    )
 
 
 # --- jobs ----------------------------------------------------------------------------------------

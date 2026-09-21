@@ -12,8 +12,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..generate.field import Field, Grid, build_field
 from ..geometry.brep import Tessellation
+from ..geometry.field import Field, Grid, build_field
 
 # Rays marched per pass. Bounds peak memory: a pass holds one cell index per ray per step.
 RAY_CHUNK = 60_000
@@ -270,33 +270,6 @@ def thickness_behind(
         first = np.where(out_of_metal.any(axis=1), out_of_metal.argmax(axis=1), len(distance))
         before = np.arange(len(distance))[None, :] < first[:, None]
         out[lo:hi] = 2.0 * np.where(before, d, 0.0).max(axis=1)
-    return out
-
-
-def ray_max(
-    grid: Grid,
-    values: np.ndarray,
-    stop: np.ndarray,
-    starts: np.ndarray,
-    directions: np.ndarray,
-    length_mm: float,
-) -> np.ndarray:
-    """The largest of ``values`` each ray passes over before it reaches a ``stop`` cell or has run
-    its length. Rays that stop at once give 0."""
-    step = 0.5 * grid.spacing_mm
-    distance = np.arange(int(math.ceil(length_mm / step)) + 1) * step
-    flat_values, flat_stop = values.ravel(), stop.ravel()
-    out = np.zeros(len(starts), np.float32)
-    per_chunk = max(1, RAY_CHUNK * 64 // len(distance))
-    for lo in range(0, len(starts), per_chunk):
-        hi = min(lo + per_chunk, len(starts))
-        p = starts[lo:hi, None, :] + directions[lo:hi, None, :] * distance[None, :, None]
-        cells, on = cell_of(grid, p.reshape(-1, 3))
-        cells = cells.reshape(hi - lo, -1)
-        blocked = ~on.reshape(hi - lo, -1) | flat_stop[cells]
-        first = np.where(blocked.any(axis=1), blocked.argmax(axis=1), len(distance))
-        before = np.arange(len(distance))[None, :] < first[:, None]
-        out[lo:hi] = np.where(before, flat_values[cells], 0.0).max(axis=1)
     return out
 
 

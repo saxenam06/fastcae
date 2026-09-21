@@ -11,8 +11,8 @@ from __future__ import annotations
 import numpy as np
 from scipy import ndimage
 
-from ..generate.field import Grid
 from ..geometry.brep import Tessellation
+from ..geometry.field import Grid
 from .grid import box_of, centres_of_box, march, orthonormal, sample_surface
 from .model import Interface
 
@@ -146,6 +146,35 @@ def bore_beyond(
         grid, solid, starts, side * e["axis"], length, step_mm=RAY_STEP * grid.spacing_mm
     )
     return cells
+
+
+def bore_collar(
+    grid: Grid, solid: np.ndarray, tess: Tessellation, interface: Interface, width_mm: float
+) -> np.ndarray:
+    """Round a bore, outside it: the air within ``width_mm`` of its radius along its length and
+    ``width_mm`` past each end, and the face of what sits in it for ``width_mm`` past each end -
+    room round the openings for what goes in and what holds it there. Never the bore itself: what
+    sits in it is its plug."""
+    if interface.axis is None or interface.axis_point is None or interface.radius_mm is None:
+        return np.empty(0, np.int64)
+    e = bore_ends(tess, interface)
+    a, p0, r = e["axis"], e["point"], e["radius"]
+    s0, s1 = e["stations"]
+    reach = r + width_mm
+    ends = np.array([p0 + a * (s0 - width_mm), p0 + a * (s1 + width_mm)])
+    box = box_of(grid, ends.min(axis=0) - reach, ends.max(axis=0) + reach)
+    centres = centres_of_box(grid, box)
+    rel = centres - p0
+    s = rel @ a
+    radial = np.linalg.norm(rel - s[..., None] * a, axis=-1)
+    del rel, centres
+    along = (s >= s0 - width_mm) & (s <= s1 + width_mm)
+    in_bore = (s >= s0) & (s <= s1) & (radial <= r)
+    collar = along & (radial <= reach) & ~in_bore & ~solid[box]
+    ii, jj, kk = np.nonzero(collar)
+    return np.ravel_multi_index(
+        (ii + box[0].start, jj + box[1].start, kk + box[2].start), grid.shape
+    ).astype(np.int64)
 
 
 def ring_neighbour(

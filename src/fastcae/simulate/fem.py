@@ -184,14 +184,6 @@ def tet_volumes(nodes: np.ndarray, tets: np.ndarray) -> np.ndarray:
     )
 
 
-def quality(nodes: np.ndarray, tets: np.ndarray) -> np.ndarray:
-    """Mean-ratio quality of each tetrahedron's corners: 1 for a regular one, 0 for a flat one."""
-    p = nodes[tets[:, :4]]
-    v = tet_volumes(nodes, tets)
-    l2 = sum(np.sum((p[:, a] - p[:, b]) ** 2, axis=1) for a, b in EDGES)
-    return 12.0 * (3.0 * v) ** (2.0 / 3.0) / l2
-
-
 def triangle_areas(nodes: np.ndarray, tris: np.ndarray) -> np.ndarray:
     p = nodes[tris[:, :3]]
     return 0.5 * np.linalg.norm(np.cross(p[:, 1] - p[:, 0], p[:, 2] - p[:, 0]), axis=1)

@@ -1,10 +1,10 @@
 """Where added metal would help: the part solved under the deck's own loads and supports, then its
-allowed space filled with a material that follows the part as it deflects.
+design space filled with a material that follows the part as it deflects.
 
-Two solves, not one. A single model with the allowed space as a very soft material is the textbook
+Two solves, not one. A single model with the design space as a very soft material is the textbook
 way, and it is badly conditioned: a large soft region makes the iterative solver crawl, and a soft
 region large enough still stiffens the part. Its limit as the material gets softer is exactly two
-separate problems - the part alone, then the allowed space alone with its surface pinned to wherever
+separate problems - the part alone, then the design space alone with its surface pinned to wherever
 the part moved - and each of those is well conditioned.
 
 How much strain energy the filler would carry at full stiffness, cell by cell, is the classic first
@@ -25,8 +25,8 @@ import warp.fem as fem
 from scipy.spatial import cKDTree
 from warp.sparse import bsr_diag
 
-from ..generate.field import Grid
 from ..geometry.brep import Tessellation
+from ..geometry.field import Grid
 from .interfaces import deck_roles
 from .model import Evidence, Label
 
@@ -136,7 +136,12 @@ class _Voxels:
 
 
 def _solve(
-    k, rhs: np.ndarray, fixed: np.ndarray, values: np.ndarray | None, start: np.ndarray | None
+    k,
+    rhs: np.ndarray,
+    fixed: np.ndarray,
+    values: np.ndarray | None,
+    start: np.ndarray | None,
+    tol: float = 1e-6,
 ):  # type: ignore[no-untyped-def]
     """Conjugate gradients with the ``fixed`` nodes held - at zero, or at ``values``."""
     n = len(rhs)
@@ -149,7 +154,7 @@ def _solve(
         (start if start is not None else np.zeros((n, 3))).astype(np.float32), dtype=wp.vec3
     )
     t0 = time.perf_counter()
-    err, its = fem_utils.bsr_cg(k, x=x, b=b, tol=1e-6, max_iters=30_000, quiet=True)
+    err, its = fem_utils.bsr_cg(k, x=x, b=b, tol=tol, max_iters=30_000, quiet=True)
     wp.synchronize()
     return x.numpy().astype(np.float64), int(its), float(err), time.perf_counter() - t0
 
@@ -164,12 +169,12 @@ def preview(  # noqa: C901
     say=print,  # type: ignore[no-untyped-def]
     metal_share: float = 0.25,
 ) -> dict[str, Any]:
-    """Benefit of adding metal at each allowed cell, on the design space's own grid (0 where not
-    allowed), and what the two solves took."""
+    """Benefit of adding metal at each cell of the design space, on its own grid (0 outside it),
+    and what the two solves took."""
     h = grid.spacing_mm
     big = factor * h
     part = _block_mean(labels == Label.PART, factor) >= metal_share
-    band = ~part & (_block_mean(labels == Label.ADMISSIBLE, factor) >= 0.25)
+    band = ~part & (_block_mean(labels == Label.DESIGN, factor) >= 0.25)
     centre0 = np.asarray(grid.origin) + 0.5 * (factor - 1) * h
     material = next(iter(setup.materials), None) if setup is not None else None
     young = float(material.young) if material else E_DEFAULT
@@ -221,7 +226,7 @@ def preview(  # noqa: C901
             f"CG {its1} its in {s1:.0f} s"
         )
 
-    # 2. The allowed space alone, its surface pinned where the part moved it.
+    # 2. The design space alone, its surface pinned where the part moved it.
     filler = _Voxels(np.argwhere(band).astype(np.int32), centre0, big, lame)
     shared = metal.find(filler.nodes)
     pinned = np.flatnonzero(shared >= 0)
@@ -243,7 +248,7 @@ def preview(  # noqa: C901
     benefit = np.zeros(labels.shape, np.float32)
     nx, ny, nz = fine.shape
     benefit[:nx, :ny, :nz] = fine
-    benefit[labels != Label.ADMISSIBLE] = 0.0
+    benefit[labels != Label.DESIGN] = 0.0
     loaded = np.abs(force).sum(axis=1) > 0
     return {
         "benefit": benefit,

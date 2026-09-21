@@ -5,9 +5,9 @@ draw what a step produced, and the agent that reasons about it. An entity says w
 and typed fields), where it came from (the step, its origin, its evidence), what it is tied to
 (links to other entities), and where it can be seen (a canvas and what to highlight there).
 
-Origins stay distinguishable - imported, derived, inferred, confirmed, generated - because a face
-the deck loads and a face that merely looks machined are different kinds of knowledge, and whoever
-acts on them has to be able to tell.
+Origins stay distinguishable - imported, derived, inferred, generated - because a face the deck
+loads and a callout matched to a feature are different kinds of knowledge, and whoever acts on them
+has to be able to tell.
 
 Nothing here names what a part is for. A bore is a bore on a housing and on a bracket.
 """
@@ -27,10 +27,8 @@ class Origin(StrEnum):
     """Computed from imported entities by a deterministic rule: a volume, a thickness."""
     INFERRED = "inferred"
     """A reading that could be wrong: a callout matched to a feature, a face that looks machined."""
-    CONFIRMED = "confirmed"
-    """Settled by the engineer's answer."""
     GENERATED = "generated"
-    """Made by fastcae as a proposal: a design, a question."""
+    """Made by fastcae as a proposal: a design."""
 
 
 class Canvas(StrEnum):
@@ -38,7 +36,7 @@ class Canvas(StrEnum):
     CAD = "cad"
     MESH = "mesh"
     SPACE = "space"
-    """The CAD in its design-space view: volumes drawn as cells, faces painted by value."""
+    """The CAD in its design-space view: the design space drawn as cells."""
     NONE = "none"
 
 
@@ -55,10 +53,7 @@ class Show(BaseModel):
     group: str | None = None
     """A solver-deck group, as the deck names it."""
     layers: list[str] = Field(default_factory=list)
-    """Design-space layers of cells to draw."""
-    paint: str | None = None
-    """A per-face value to paint the part with: ``thickness``, ``cap``, ``interface`` or
-    ``sealing``."""
+    """Design-space layers of cells to draw: ``design``."""
     point: tuple[float, float, float] | None = None
 
 
@@ -93,7 +88,7 @@ class Entity(BaseModel):
     links: list[Link] = Field(default_factory=list)
     evidence: list[Proof] = Field(default_factory=list)
     status: str = "ok"
-    """``ok``, or what needs attention: ``asked``, ``conflict``, ``failed``, ``waiting``."""
+    """``ok``, or what needs attention: ``conflict``, ``failed``."""
 
 
 # --- read: the engineer's files -------------------------------------------------------------------
@@ -240,98 +235,28 @@ class Anchor(Entity):
 # --- design space ---------------------------------------------------------------------------------
 
 
-class Grid(Entity):
-    kind: Literal["grid"] = "grid"
+class DesignSpace(Entity):
+    """The one volume of air round the part where metal may be added: taken as defined, kept in the
+    project's folder - the engineer's, or defined by fastcae's rules in their place."""
+
+    kind: Literal["design_space"] = "design_space"
+    volume_L: float
+    outside_L: float
+    """On the outer walls."""
+    inside_L: float
+    """On the inner walls."""
     spacing_mm: float
     cells: int
-    part_L: float
-
-
-class FaceMap(Entity):
-    """A value on every face it covers, painted on the part."""
-
-    kind: Literal["face_map"] = "face_map"
-    what: Literal["thickness", "cap", "interface", "sealing"]
-    unit: str = ""
-    faces: int = 0
-    summary: dict[str, Any] = Field(default_factory=dict)
-
-
-class Interface(Entity):
-    """Faces taken to meet something else: frozen on strong evidence, asked about on weak."""
-
-    kind: Literal["interface"] = "interface"
-    interface_kind: str
-    """``plane``, ``bore``, ``boss``, ``hole``, ``surface``."""
-    state: Literal["frozen", "asked", "released"]
-    faces: list[int]
-    radius_mm: float | None = None
-    area_mm2: float = 0.0
-    thickness_mm: float | None = None
-
-
-class KeepOut(Entity):
-    """Space something else occupies: forbidden, or waiting on an answer."""
-
-    kind: Literal["keep_out"] = "keep_out"
-    keep_out_kind: Literal["plug", "beyond", "mating", "ring", "hole", "buffer", "waiting"]
-    volume_L: float
-
-
-class Inside(Entity):
-    kind: Literal["inside"] = "inside"
-    state: Literal["closed", "leaks", "none"]
-    volume_L: float
-    probes: list[dict[str, float]] = Field(default_factory=list)
-
-
-class Opening(Entity):
-    kind: Literal["opening"] = "opening"
-    volume_L: float
-
-
-class Continuation(Entity):
-    """What carries on past a bore's ends."""
-
-    kind: Literal["continuation"] = "continuation"
-    ends: list[str]
-
-
-class Band(Entity):
-    kind: Literal["band"] = "band"
-    band_kind: Literal["layer", "pockets"]
-    volume_L: float
-    detail: dict[str, Any] = Field(default_factory=dict)
-
-
-class Region(Entity):
-    kind: Literal["region"] = "region"
-    region_kind: Literal["allowed", "waiting"]
-    volume_L: float
-
-
-class Question(Entity):
-    kind: Literal["question"] = "question"
-    question_kind: str
-    text: str
-    detail: str = ""
-    options: list[str] = Field(default_factory=list)
-    meanwhile: str = ""
-    answer: str | None = None
-
-
-class Mirror(Entity):
-    kind: Literal["mirror"] = "mirror"
-    normal: list[float]
-    through: list[float]
-    match_share: float
-
-
-class Benefit(Entity):
-    """Where added metal would carry the most load, from one solve of the part under the deck."""
-
-    kind: Literal["benefit"] = "benefit"
-    stats: dict[str, Any] = Field(default_factory=dict)
+    defined_by: Literal["rules", "engineer"]
+    file: str
+    kept_clear: dict[str, Any] = Field(default_factory=dict)
+    """What keeps air clear of it: litres taken from where metal could go, by what takes them, and
+    how many bores, held faces and holes it keeps clear round."""
+    rules: dict[str, Any] = Field(default_factory=dict)
+    """The settings it was defined with."""
+    benefit: dict[str, Any] = Field(default_factory=dict)
+    """Where metal helps: how it was found - the part solved under the deck, then the design space
+    pinned to how it moved."""
 
 
 AnyEntity = Annotated[
@@ -352,18 +277,7 @@ AnyEntity = Annotated[
     | Signal
     | ResultField
     | Anchor
-    | Grid
-    | FaceMap
-    | Interface
-    | KeepOut
-    | Inside
-    | Opening
-    | Continuation
-    | Band
-    | Region
-    | Question
-    | Mirror
-    | Benefit,
+    | DesignSpace,
     Field(discriminator="kind"),
 ]
 
@@ -385,7 +299,7 @@ class Group(BaseModel):
 
 class StepRun(BaseModel):
     id: str
-    stage: Literal["read", "space"]
+    stage: Literal["read"]
     label: str
     status: Literal["pending", "running", "done", "cached", "skipped", "failed"] = "pending"
     seconds: float | None = None
@@ -396,6 +310,6 @@ class StepRun(BaseModel):
 
 
 class Stage(BaseModel):
-    id: Literal["read", "space"]
+    id: Literal["read"]
     label: str
     steps: list[StepRun]

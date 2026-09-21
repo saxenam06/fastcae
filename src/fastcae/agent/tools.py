@@ -1,13 +1,11 @@
 """The agent's tools: a few general ones, each doing one job, for the agent to compose.
 
-Over the pipeline - what fastcae read from the engineer's files and derived from them:
+Over the pipeline - what fastcae read from the engineer's files, and the design space:
 
 - **pipeline**: every step in order, whether it ran, what it said, what it made.
 - **entities**: the typed entities a step made, of a kind, or holding some words.
 - **entity**: one in full - its fields, the evidence behind it, what it is tied to both ways.
 - **show** entities to the engineer, on the canvas each belongs to.
-- **answer** one of the pipeline's questions, with the engineer's own words; **derive** the design
-  space again to apply what was answered.
 
 Over the part itself:
 
@@ -20,33 +18,27 @@ Over the part itself:
 
 Each calls what the routes call; nothing here computes geometry of its own, and nothing an agent
 does is out of reach of the interface. Results are compact JSON - enough to reason from, never
-whole meshes. The agent records an answer only when the engineer's words give it, and never
-changes what was read from the engineer's files.
+whole meshes. The agent never changes what was read from the engineer's files, nor the design
+space.
 """
 
 from __future__ import annotations
 
 import json
-import threading
 from typing import Any, Literal
 
 import numpy as np
 from langchain_core.tools import BaseTool, tool
 
 from ..features import Feature, FeatureKind, extent, neighbours
-from ..generate import reading
-from ..generate import session as sessions
-from ..generate.session import Session
+from . import context as contexts
+from . import reading
+from .context import Context
 
 LIMIT = 40
 # How many questions of the part, since the engineer last wrote, before every answer reminds the
 # agent that the engineer can be asked instead.
 QUESTIONS = 8
-# How long a derivation may take before the agent is told it is still running.
-DERIVE_WAIT_S = 600.0
-
-# What the tools work on: the open project, and the conversation.
-Context = Session
 
 
 def build(ctx: Context) -> list[BaseTool]:
@@ -93,9 +85,9 @@ def build(ctx: Context) -> list[BaseTool]:
 
     @tool
     def pipeline() -> str:
-        """The pipeline that read the engineer's files - drawing, CAD, solver deck - and derived the
-        design space from them: every step in order, whether it ran, what it said, and what it made,
-        each group of entities by label, kind and count. Start here."""
+        """The pipeline that read the engineer's files - drawing, CAD, solver deck - and the design
+        space, last: every step in order, whether it ran, what it said, and what it made, each group
+        of entities by label, kind and count. Start here."""
         from ..api import designspace
 
         steps = []
@@ -112,17 +104,16 @@ def build(ctx: Context) -> list[BaseTool]:
                 if step.warnings:
                     item["warnings"] = step.warnings[:3]
                 steps.append(item)
-        return answered({"steps": steps, "deriving": designspace.held.running})
+        return answered({"steps": steps, "reading_design_space": designspace.held.running})
 
     @tool
     def entities(
         kind: str | None = None, step: str | None = None, text: str | None = None, limit: int = 30
     ) -> str:
         """Entities the pipeline made, in a few words each: of one kind, made by one step, or whose
-        label or id holds some words. Kinds: artifact, part, face, feature, axis, callout, control,
-        conflict, deck_group, support, coupling, load, material, signal, result_field, anchor,
-        grid, face_map, interface, keep_out, inside, opening, continuation, band, region,
-        question, mirror, benefit."""
+        label or id holds some words. Kinds: artifact, part, health, face, feature, axis, callout,
+        control, conflict, deck_group, support, coupling, load, material, signal, result_field,
+        anchor, design_space."""
         found = graph().find(kind, step, None, text, limit=max(1, min(int(limit), LIMIT)))
         rows = [
             {k: e[k] for k in ("id", "kind", "label", "status", "origin")}
@@ -154,63 +145,6 @@ def build(ctx: Context) -> list[BaseTool]:
         missing = [i for i in ids if i not in known]
         if missing:
             out["unknown"] = missing
-        return json.dumps(out)
-
-    @tool
-    def answer(question: str, value: str | None, quotes: list[str]) -> str:
-        """Record the engineer's answer to one of the pipeline's questions - only what their words
-        give, quoted exactly. value: one of the options the question offers, or null to take an
-        answer back. What is answered applies when the design space is derived again."""
-        from ..api import pipeline as pipeline_api
-
-        heard = " ".join(ctx.said)
-        missing = [q for q in quotes if not q.strip() or q not in heard]
-        if not quotes or missing:
-            refused = "every answer rests on the engineer's words, quoted exactly"
-            if missing:
-                refused += f"; not said: {missing}"
-            return json.dumps({"refused": refused})
-        try:
-            recorded = pipeline_api.record_answer(question, value)
-        except (KeyError, ValueError) as error:
-            return json.dumps({"refused": str(error.args[0] if error.args else error)})
-        ctx.changed.add("answers")
-        ctx.questions = 0
-        return json.dumps(
-            {"answers": recorded["answers"], "next": "derive applies them, once all are given"}
-        )
-
-    @tool
-    def derive() -> str:
-        """Derive the design space again, applying every answer recorded since it was last derived.
-        About a minute on a large part; the engineer sees each step on the pipeline as it runs.
-        What comes back is each step and what it said."""
-        from ..api import designspace
-
-        if designspace.held.running:
-            return json.dumps({"refused": "the design space is being derived already"})
-        records: list[dict[str, Any]] = []
-        failed: list[str] = []
-        ended = threading.Event()
-
-        def heard(event: dict[str, Any] | None) -> None:
-            if event is None:
-                ended.set()
-            elif event["type"] == "step" and event["status"] != "running":
-                record = {"step": event["id"], "status": event["status"]}
-                if event.get("detail"):
-                    record["said"] = event["detail"]
-                records.append(record)
-            elif event["type"] == "error":
-                failed.append(event["message"])
-
-        designspace.start(designspace.RunRequest(reuse=True), heard)
-        if not ended.wait(DERIVE_WAIT_S):
-            return json.dumps({"still_running": "the pipeline shows it; ask pipeline later"})
-        ctx.changed.add("space")
-        out: dict[str, Any] = {"steps": records}
-        if failed:
-            out["failed"] = failed
         return json.dumps(out)
 
     # --- the part --------------------------------------------------------------------------------
@@ -325,9 +259,9 @@ def build(ctx: Context) -> list[BaseTool]:
         """
         try:
             if relation == "between":
-                return answered(reading.between(extraction, sessions._measure(ctx), list(ids)))
+                return answered(reading.between(extraction, contexts.measure(ctx), list(ids)))
             if relation == "across":
-                finder = sessions._measure(ctx)
+                finder = contexts.measure(ctx)
                 return answered({ref: reading.across(extraction, finder, ref) for ref in ids[:6]})
             if relation == "stands_on":
                 return answered({ref: reading.stands_on(extraction, ref) for ref in ids[:6]})
@@ -391,7 +325,7 @@ def build(ctx: Context) -> list[BaseTool]:
         if f is None:
             return answered({"error": _unknown(id)})
         if direction is None:
-            through = reading.thickness_at(extraction, sessions._measure(ctx).exit_along, id)
+            through = reading.thickness_at(extraction, contexts.measure(ctx).exit_along, id)
             return answered({"id": id, "metal_under_it_mm": through})
         low, high = extent(tess, f.face_ids, tuple(direction))
         return answered(
@@ -413,8 +347,6 @@ def build(ctx: Context) -> list[BaseTool]:
         entities,
         entity,
         show,
-        answer,
-        derive,
         find,
         describe,
         relate,
