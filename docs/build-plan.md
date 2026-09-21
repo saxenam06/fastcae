@@ -1,10 +1,11 @@
 # Build plan
 
 **The plan as agreed.** What is built, in what order, and how each step is judged. The design space
-is derived and shown; the next phase finds patterns in it, makes every design as its own CAD, and
-takes the designs to a trained, trusted surrogate. The rules of the design space are in
-[design-space.md](design-space.md), the pipeline in [pipeline.md](pipeline.md), the research behind
-the next phase in [research/](research/README.md); what runs today in [status.md](status.md).
+is one defined volume; designs are optimised in it, read as ribs, made as their own CAD, meshed face
+by face and solved; the next phase regularises them into families and takes them to a trained,
+trusted surrogate. The design space is in [design-space.md](design-space.md), the pipeline in
+[pipeline.md](pipeline.md), designs in [designs.md](designs.md), the research behind the next phase in
+[research/](research/README.md); what runs today in [status.md](status.md).
 
 ---
 
@@ -18,8 +19,8 @@ several objectives at once - each a real, castable design - and shows which choi
 next one.
 
 The engineer brings a plain STEP file, its solver deck with the answer it gave, and its drawing when
-there is one - nothing else. fastcae derives where metal may go and what must stay clear, asks only
-what the files leave open, and grows the designs inside that space.
+there is one - and its design space when there is one; where there is none, fastcae defines it from
+the files and keeps it with the part. The designs grow inside it.
 
 ## What is agreed
 
@@ -30,22 +31,23 @@ what the files leave open, and grows the designs inside that space.
    after the fuse. A fuse that fails is rejected, labelled, and another design drawn in its place -
    never a mesh made another way.
 3. **Meshed as the baseline is.** Every design is meshed face by face as TET10 with the recipe the
-   baseline's deck mesh is made with (`bench/solvers/face_mesh.py`), and solved by cuDSS once cuDSS
-   has reproduced the deck's Code_Aster answer on that baseline mesh.
-4. **The design space is derived, not drawn.** From the CAD's faces, the deck's loads and supports
-   tied to them, and the drawing, by rules that hold for any part - with one place to answer what the
-   files leave open ([design-space.md](design-space.md)). Metal is added outside only by default;
-   sealing walls take no through-holes.
-5. **Patterns are found, then kept as families.** A rib-height map on the free wall is optimised on
-   the grid for stiffness under the deck's loads; its ridges are traced, straightened, snapped to what
-   they meet, and regularised by CP-SAT - mirror pairs, a set of angles, spacing - into a family.
-   Designs are drawn inside a family, never as random stacks of variants.
+   baseline's deck mesh is made with (`src/fastcae/simulate/face_mesh.py`), and solved by cuDSS -
+   which reproduces the deck's Code_Aster answer on that mesh to about 10⁻¹⁰.
+4. **The design space is defined, one volume.** Taken as an input kept with the part; where none is
+   brought, fastcae's rules define it from the CAD, the deck and the drawing: a layer three walls deep
+   over every wall, outside and in, and the pockets between features, clear of every bore's bearing,
+   shaft and collar, of what mates against held faces, and of every fastener and its tool
+   ([design-space.md](design-space.md)). No questions, no workflow to derive it on screen.
+5. **Where metal goes is optimised, then kept as ribs.** For each load mix the deck offers and each
+   volume of metal, the layout is optimised on the voxel grid (BESO) and read as rib plates, fused into
+   the part's CAD ([designs.md](designs.md)). Next, the ribs are straightened, snapped to what they
+   meet, and regularised by CP-SAT - mirror pairs, a set of angles, spacing - into families; designs
+   are drawn inside a family, never as random stacks of variants.
 6. **One pipeline of typed entities.** Every step's inputs and outputs are entities with an origin,
    evidence and links; the interface and the agent read the same ones ([pipeline.md](pipeline.md)).
-   Answers are decisions kept with the part; everything derived is kept in the cache while nothing
-   it depends on changes.
+   Everything derived is kept in the cache while nothing it depends on changes.
 7. **Minimal input, general code.** No code names a part's faces; no step is written for one part or
-   one request. What the files do not say becomes a question, not a setting.
+   one request.
 8. **Not pursued**: learned CAD generators (HNC-CAD and its kind), a library of B-rep operators over a
    hand-built context graph, agents driving a CAD tool's feature tree, and GET, MMC or TreeTOp as the
    source of patterns - TreeTOp's blending may refine a family later. Variants authored by hand on a
@@ -57,14 +59,16 @@ what the files leave open, and grows the designs inside that space.
 STEP + deck + drawing
       │  Read: faces, features, callouts, deck groups, supports, couplings, loads - tied to CAD faces
       ▼
-design space ─── interfaces (frozen · asked) · what sits round them · the inside · sealing walls ·
-      │           allowed / waiting · height straight out · where metal helps · questions
-      │           (the engineer's answers applied)
+design space ─── one volume, kept with the project: the engineer's, or defined by the rules
+      │           (outside and inside, clear of bores, held faces, fasteners) · where metal helps
       ▼
-patterns ─── rib-height map on the free wall ─► ridges ─► CP-SAT: a family (mirror pairs, angles,
-      │       spacing)
+optimise ─── per load mix and volume of metal, on the voxel grid (BESO)
+      │
       ▼
-designs ─── drawn inside a family ─► rib solids fused into the baseline STEP (a failed fuse: another)
+ribs ─── the layout read as plates ─► [next: ridges straightened, CP-SAT families]
+      │
+      ▼
+designs ─── plates fused into the part's CAD, a STEP each (a failed fuse or mesh: rejected)
       │
       ▼
 mesh ─── face by face, TET10, the baseline's recipe ─► the deck's setup by CAD face ─► cuDSS
@@ -77,38 +81,35 @@ record ─── Zarr per design, Parquet of metrics, the recipe and every check
 
 Each step names what is built and what shows it done. Every step keeps the tests passing.
 
-**1. The design space, derived** - built.
-- `src/fastcae/space/`: the twelve steps of [design-space.md](design-space.md), each reporting what
-  it made; kept and read back whole; the physics preview on the grid.
-- *Done*: on the housing, 79 s derived and a second read back; on a closed box with a bore and holes
-  and no deck, the inside found to its true volume and every face asked about; the production
-  housing's ribs measured against it.
+**1. The design space, one defined volume** - built.
+- `src/fastcae/space/`: kept in the project's folder and read back; defined by the rules where none
+  is brought; where metal helps on every cell.
+- *Done*: on the housing, 319 L defined in 81 s and read back in a second; on a closed box with a bore
+  and holes and no deck, the inside found to its true volume, the bore kept clear with its collar
+  outside it.
 
 **2. The pipeline as typed entities, on screen** - built.
-- `src/fastcae/pipeline/`: the entity kinds, the Read and design-space stages as entities, one graph
-  with links both ways, answers kept in `project.json`; routes for the pipeline, entities, the
-  schema, answers, layers and face values; the design space's layers served while a run derives.
+- `src/fastcae/pipeline/`: the entity kinds, the Read steps and the design space as entities, one
+  graph with links both ways.
 - The interface: four tabs - Input, Generate, Learn, Optimize; the pipeline as Input's rail; focus
-  shown on the drawing, the CAD, the design space and the deck's mesh; the card; the agent over the
-  same entities.
-- *Done*: route tests over a box derive, stream, read back, link both ways, answer, release and take
-  back; the agent's tools read, show, answer from quoted words only and derive; the interface
-  type-checks and builds.
+  on the drawing, the CAD, the design space and the deck's mesh; the card; the agent over the same
+  entities.
 
-**3. The baseline, reproduced on its face-by-face mesh.** cuDSS against Code_Aster on the deck mesh
-made by `face_mesh.py`; the certificate as before. *Done when* it agrees to a millionth.
+**3. The baseline, reproduced on its face-by-face mesh** - built. cuDSS against Code_Aster on the deck
+mesh made by `face_mesh.py`: about 10⁻¹⁰ on the fields, 30 s against 196 s; a fresh mesh of the same
+CAD, the deck carried by CAD face, reproduces the deck node for node.
 
-**4. One design as CAD, end to end.** A rib solid - section along a line, foot, draft - fused into the
-baseline STEP; meshed face by face; the deck's setup carried by CAD face; solved by cuDSS; a failed
-fuse set aside with its reason. *Done when* the design's bores are as exact as the baseline's and its
-answer stands beside the baseline's.
+**4. Designs as CAD, end to end** - built. Optimised per load mix and volume of metal, read as plates,
+fused into the part's CAD, meshed face by face, the deck carried by CAD face, solved by cuDSS; a
+failed fuse or mesh rejected with its reason; every stage on screen. The runner makes a campaign
+(`ribs.network`, [designs.md](designs.md)).
 
-**5. Patterns and families.** The rib-height map optimised on the Warp grid, its ridges straightened
-and snapped, CP-SAT's families; members drawn inside a family. *Done when* the housing yields families
-an engineer recognises as ribs - symmetric where the part is - and their members build as CAD.
+**5. Families.** The plates straightened and snapped, CP-SAT's families - mirror pairs, angles,
+spacing; members drawn inside a family. *Done when* the housing yields families an engineer
+recognises as ribs and their members build as CAD.
 
-**6. Designs run.** The runner takes a family's members through fuse, mesh, setup, solve and record,
-two or three at a time; the Designs view follows them.
+**6. Designs run at scale.** Two or three designs in progress at once - the GPU optimising and
+solving, the cores meshing - shown as a timeline.
 
 ## Next: from designs to a trained, trusted surrogate
 
@@ -151,7 +152,7 @@ product.
    methods: [../bench/solvers/RESULTS.md](../bench/solvers/RESULTS.md); why each got its result and
    what not choosing the others gives up: [research/solver-choice.md](research/solver-choice.md).
 4. **Meshing**: every design face by face from its own CAD, TET10, by the recipe the baseline's
-   deck mesh is made with (`bench/solvers/face_mesh.py`) - bores round, edges crisp, sizes graded,
+   deck mesh is made with (`src/fastcae/simulate/face_mesh.py`) - bores round, edges crisp, sizes graded,
    no lids. The compiled CGAL field mesher (`native/cgal_field/cgal_field.cpp`) measured below meshes
    a field, not a CAD, and makes no training data.
 5. **The gate: the field route against real CAD** - run. The production housing with its ribs and
@@ -206,14 +207,12 @@ product.
 
 ### In this order
 
-0. The design space consolidated into one defined volume - see Open.
-1. The baseline's own solver deck as an input - read, reproduced by cuDSS to 10⁻¹¹
-   ([research/baseline-deck.md](research/baseline-deck.md)); its deck mesh now made face by face.
-2. The design space derived and the pipeline on screen - built (steps 1-2 above).
-3. cuDSS reproduced on the face-by-face baseline mesh (step 3).
-4. One design as CAD, end to end (step 4).
-5. Patterns and families (step 5).
-6. Designs run by the runner, one, two and three at a time, as a timeline (step 6).
+1. The baseline's own solver deck as an input, meshed face by face, reproduced by cuDSS - built
+   ([research/baseline-deck.md](research/baseline-deck.md)).
+2. The design space as one defined volume, and the pipeline on screen - built.
+3. Designs as CAD, end to end, every stage on screen - built.
+4. Families (step 5).
+5. Designs run at scale, as a timeline (step 6).
 7. The 40-design check.
 8. Round 1.
 
@@ -223,13 +222,8 @@ product.
   recommended: Code_Aster in WSL, about 2-3 minutes a design, rare.
 - **Optimisation** - repair weighted by each piece's worth; pymoo on the surrogate with CP-SAT as its
   repair, then BoTorch/Ax with real solves (see [research/optimization.md](research/optimization.md)).
-- **Inner walls, and how deep.** Every production rib on the housing is an inner web; outside only
-  covers none of them. Allowing inner walls by default, and three or five wall thicknesses deep or
-  webs from wall to wall, waits on the engineer.
-- **One defined design space.** Agreed next: one volume, *Design space* - what is allowed, what
-  waited on an answer and the inside, kept clear of bearings, shafts and gears, the buffer round a
-  bore outside it rather than in it - taken as defined, with no questions and no workflow to derive
-  it on screen.
+- **Plates from a layout.** Plates keep about half the metal the optimiser placed, the thickest
+  members held to two walls; some spill a little outside the design space.
 - **The whole gearbox in context** - the assembly, each rotating part swept round its axis - so the
   inside is kept clear of what turns there, not only of each bore's bearing and a shaft. Later.
 - **What a record keeps** - a design's Zarr store is about 28 MB with the volume (TET10 connectivity,
