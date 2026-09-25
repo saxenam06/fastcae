@@ -11,15 +11,18 @@ matter for the next design.
 The loop: extract what the part and its drawing say, generate designs from what the engineer asks
 for, simulate them, learn from the results, and optimise - which steers what is sampled next.
 
-Two of the six stages run. **Extract** reads a folder of artifacts and produces an understood
-model, with every claim traceable to the file, page and literal text it came from. **Generate** runs
-as a product flow. On the CAD tab the engineer authors **variants** - each one change in one place:
+**Extract** reads a folder of artifacts and produces an understood model, with every claim
+traceable to the file, page and literal text it came from - the CAD, the drawing, and the
+engineer's solver deck with the answer it gave. **Simulate** reproduces that answer before a
+design is trusted to it. **Generate** runs as a product flow. On Variant Setup the engineer
+authors **variants** - each one change in one place:
 ribs on a floor, webs between two faces, faces thickened, holes through a plate - with what it may
-vary and every rule it must hold, in the part's named entities. On Generate they compose a
+vary and every rule it must hold, in the part's named entities. On Campaign they compose a
 **campaign** of the variants they choose, count it, screen a hundred designs and launch it: each
 design a set of the variants at a point of each, placed, repaired by CP-SAT where its pieces break a
 rule between them, screened, and kept beside the project with everything needed to make it again.
-Every design is followed through its stages, and any one's field is built at a click. Under it: the
+The runner builds, meshes, sets up, solves and records the designs two or three at a time, and
+every design is followed through its stages on Explore. Under it: the
 part as a signed distance field on a fixed grid, ribs on a floor or webs between what they join with
 nothing under them, each with its own root fillet, flat or T, pads where a wall is too thin, faces
 moved exactly, holes cut, a closed surface, checks. The agent that writes the design space from
@@ -38,13 +41,16 @@ API on `127.0.0.1:8021`, interface on **http://localhost:5183/**. Neither port i
 one, because the machine this was built on already runs something on 8000 and 5173 and a silent
 bind failure is worse than an unusual number.
 
-Five tabs, in the order the work happens: **Drawing**, **CAD**, **Generate**, **Learn**,
-**Optimize**. **Design a variant**, on the CAD tab's right, is where variants are authored: select
-faces on the part, choose what to add there, set what it may vary and what it must hold, look at its
-paths and another sample, and create it at the bottom. **Generate** is for many: *Campaign* is a card
-in three steps - compose the variants, check everything the pipeline will hold them to, sample and
-launch - and *Designs* lists every design a campaign kept, with how far each has got - its paths, its
-field, then mesh, setup and results - and builds any one's field. **The agent** - `agent/`, a model
+Six tabs, in the order the work happens. **Input**: the drawing, the CAD, the solver deck's mesh
+and setup, and the answer it gave. **Reproduce**: fastcae's answer to the deck's question beside
+the engineer's, with a certificate. **Variant Setup**: **Design a variant**, on the right, is where
+variants are authored - select faces on the part, choose what to add there, set what it may vary
+and what it must hold, look at its paths and another sample, and create it at the bottom - and
+*Route* walks the route every design takes on the baseline. **Campaign** is a card in three steps -
+compose the variants, check everything the pipeline will hold them to, sample and launch - and a
+launched campaign's designs solved by the runner. **Explore** lists every design a campaign kept,
+with how far each has got - its paths, its field, then mesh, setup and results - and builds any
+one's field. **Models** waits for the data. **The agent** - `agent/`, a model
 composing a few general tools over the engine - is paused, its bar hidden. Its settings go in a
 `.env` at the repository root, which is never committed:
 
@@ -81,7 +87,12 @@ a person confirms. A project without it behaves as if nobody had decided anythin
 What campaigns make is kept outside the project, in `_archived_designs/<project>/<code>-<name>/`
 beside `assets/`: the card, a copy of every variant as it was launched, every design kept with its
 recipe and seed, a summary, and each design built so far. It is output, not a decision, and not
-tracked by git.
+tracked by git. Any process can build a design of it from that folder alone -
+`fastcae.generate.build.build_design(folder, index)` - with no surface drawn unless asked.
+
+A design's exact distances go to the GPU when NVIDIA Warp is installed (`uv sync --extra gpu`) and a
+CUDA device is present, and to the CPU otherwise, with the same answer to a few thousandths of a
+millimetre; `FASTCAE_DISTANCE=cpu` or `gpu` chooses.
 
 A folder whose name starts with `_` or `.` is set aside rather than a project.
 
@@ -133,10 +144,14 @@ src/fastcae/
     repair.py     a placed design mended by CP-SAT: the fewest ribs, pads or holes left out so no
                   rule between pieces breaks
     holes.py      a hole as a capped cylinder, and holes cut into a design's field
+    distance.py   the part's exact distance from a window's cells: on the GPU with NVIDIA Warp -
+                  its long triangles split first - or on the CPU, the same answer
+    _warp.py      the GPU's nearest-point queries, imported only when Warp is there
     thicken.py    faces moved along their normal, exactly, in a window round them
     screen.py     a placed design screened in milliseconds, and weighed in its material
     intent.py     designs made from their pieces - faces moved, ribs and pads, holes - with the
-                  two-part verdict
+                  two-part verdict, every step and check timed, a surface only when asked for
+    build.py      a campaign's design built by any process from the campaign's folder alone
     reading.py    reading the part for the agent: what a feature stands on, what rises round a
                   floor, the axes and what is on each, how thick the metal is
     slots.py      ribs on a floor read off the part: every slot filled round what was given

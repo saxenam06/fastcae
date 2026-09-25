@@ -17,21 +17,25 @@ and back: what is learned and the objectives set steer which designs are sampled
 
 Generate leads because it is the thing a solver cannot do: the campaign, the training set and the
 search all exist to serve designs that had to be generated first. Generative design in CAD tools
-gives a handful of optimal shapes per setup; this gives thousands of near-production variants that
-follow the engineer's rules, for a surrogate to find designs good on several objectives at once.
-What is generated comes from **variants** the engineer authors on the part - each one change in one
-place, with what it may vary and every rule it must hold, in the part's named entities - and from
-**campaigns** that compose them: a card that says which variants, how designs are drawn and how
-many. Designs are placed, repaired, screened and built by code alone - see [ribs.md](ribs.md).
+gives a handful of optimal shapes per setup; this gives thousands of production-grade variants of
+the engineer's own part, each its own CAD, meshed and solved as their deck solves the part, for a
+surrogate to find designs good on several objectives at once.
 
-**What leaves the engineer's machine** is only what a model is sent: variants and summaries of named
-entities, names and numbers - never CAD files or meshes. The provider is a setting, so a client's
-approved one or a local model can take its place. The model is paused while variants and campaigns
-are made by hand.
+What is generated grows inside the **design space** - one volume round the part where metal may go,
+taken as defined and kept with the project; where the engineer brings none, fastcae's rules define it
+from the CAD's faces, the solver deck's loads and supports tied to them, and what the drawing
+tolerances ([design-space.md](design-space.md)). One **pipeline** reads the files and, last, the
+design space, every step's inputs and outputs typed entities that the interface and the agent read
+alike ([pipeline.md](pipeline.md)). Designs are optimised in it, built as their own CAD, meshed face
+by face and solved ([designs.md](designs.md)).
 
-Extract and Model are built; Generate is being built. The other three are shown in the interface
-and not yet implemented — a shell that hides its unbuilt stages describes a tool; one that shows
-them describes a product.
+**What leaves the engineer's machine** is only what a model is sent: entities in a few words, names
+and numbers - never CAD files or meshes. The provider is a setting, so a client's approved one or a
+local model can take its place.
+
+Extract, Model and the design space are built; Generate and Simulate are being built. Learn and
+Optimize are shown in the interface and not yet implemented — a shell that hides its unbuilt stages
+describes a tool; one that shows them describes a product.
 
 ## The rule that keeps it general
 
@@ -79,41 +83,55 @@ drawn in inches would otherwise have been silently 25× wrong with nothing to no
 ```
 project.py     a folder of artifacts, and the decisions a person has recorded about them.
 cache.py       derived results, keyed on content and on the code that made them.
-geometry/      B-rep in, tagged surface out. Knows shapes, never purposes.
+geometry/      B-rep in, tagged surface out; the part on a grid of cells, and what the renderer
+               needs of cells and surfaces. Knows shapes, never purposes.
 features.py    generic feature detection. No domain vocabulary anywhere.
 drawing.py     PDF text to callouts. Every one cites its page and literal text.
 extract.py     the deterministic pipeline, and the drawing-to-CAD association.
 provenance.py  Evidence, Fact, Conflict. How anything is known.
-study.py       a design space in the part's named entities: blocks, constraints with strength and
-               source, bound by fingerprint, versioned; what each setting may take, and how many
-               distinct points that makes. A variant is one of one block; a campaign composes its
-               variants into one.
-variants.py    the project's library of variants: a code and a name each, kept in `variants/`,
-               listed with the campaigns that used them.
-knowledge/     design knowledge as data, each with its source: the rules designs are screened
-               with, and the catalogue of casting materials.
-generate/      the part as a distance field; the part read for each kind of change - what stands
-               where, what rises round a floor, the metal under a face, a plate's thickness; a
-               variant filled round what was given and authored by hand; ribs, pads and holes
-               placed, measured from their footprints; designs repaired by CP-SAT, screened, drawn
-               by the thousand for a campaign, and built - faces moved, ribs composed and holes cut
-               in the field - and checked.
-spec.py        a design's pieces - placements of ribs, faces moved, holes - and the words and
-               fingerprints a variant shares.
-agent/         a model with a few general tools over the engine, and skills on composing them;
-               paused, its bar hidden, while variants and campaigns are made by hand.
-cli.py         batches of designs, run without the interface.
-api/app.py     HTTP surface. Routes contain no logic.
+pipeline/      the pipeline as typed entities: the kinds (pydantic, one discriminated union), the
+               Read steps from the extraction, the design space as the last step, one graph with
+               every link read both ways.
+space/         the design space: kept in the project's folder and read back; defined by rules where
+               none is brought - interfaces and their evidence, what sits round them, the inside, the
+               layer over the walls, what is kept clear - and where metal helps.
+volumes/       the design volumes the engineer keeps: a face picked, the closed volume it bounds
+               found in flat slices of the part, what it keeps clear, kept as a recipe.
+ribs/          a rib network made in the kept volumes, one constrained problem held to the target:
+               fins.py (a fin's ten numbers, the gate of placement, the seeders, the optimiser and
+               its rules), oracle.py (every fin judged before any boolean), choose.py (CP-SAT keeps
+               the network), curved.py (a fin's outline on the CAD's own sections, its swept solid),
+               paths.py, sizing.py, multigrid.py, mma.py (the part on cubes, its solve, the MMA
+               step), workflow.py (the nine stages in order), campaign.py (a design fused, meshed,
+               solved and checked), networks.py (what the screens read), jobs.py (the runner's job).
+designs/       what every design shares: a campaign's records, a design's CAD - fused solid by
+               solid - the target, the deck carried onto a design's mesh and solved, the objective
+               it is scored by, the deck's load mixes, its per-load answers.
+simulate/      the engineer's solver deck read as data - its mesh, groups, setup and results - and
+               tied to the CAD faces its groups lie on; a CAD meshed face by face; a deck carried to
+               another mesh by CAD face; solved by cuDSS; results compared quantity by quantity.
+runner/        a process of its own, outside the server, working through jobs kept as folders: the
+               deck solved again by cuDSS, a campaign's designs. One GPU job at a time.
+wsl.py         a script run in WSL, sent whole and stopped on Linux's side past its limit.
+agent/         a model with a few general tools over the pipeline's entities, the part and the
+               drawing; what it reads of the part.
+api/           HTTP surface: app.py (the session and what was read), pipeline.py, designspace.py,
+               simulate.py (the deck and jobs), designs.py. Routes contain no logic.
 ```
 
 `project.json` is not configuration in the usual sense: it holds no facts and no settings, only
-decisions - which CAD designs grow from, which protected areas a person approved. The system
-proposes each one; nothing in it is written except through an approval. Variants live beside it in
-`variants/`, one file each, written when the engineer creates or saves one on Design a variant; one
-deleted is moved to `variants/.deleted/`. What campaigns make is output, not a decision, and lives
-outside the project in `_archived_designs/<project>/<code>-<name>/` beside `assets/`: the card, the
-part's digest, the code's commit and a copy of every variant as it was launched; every design kept,
-with its recipe, its hash and its seed; a summary; and each design built so far.
+decisions - which CAD designs grow from. The design space is kept beside it as `design_space.npz` and
+`design_space.json`: an input like the CAD, read by its own step, never among the artifacts the
+extraction reads. What campaigns make is output, not a decision, and lives outside the project in
+`_archived_designs/<project>/campaigns/<campaign>/<design>/` beside `assets/`: what each design was
+made for and what each stage found, and what each stage made - its layout, plates, STEP, mesh and
+answer.
+
+Code the product no longer runs is kept whole in `_archived_code/` at its own path, for reference;
+nothing in `src/` or `ui/src/` reaches it.
+
+The solver deck and its answer are the engineer's files like the CAD and the drawing, in the project
+folder; what fastcae solves from them is derived and lives in `.fastcae/solve/`.
 
 ## Nothing derived is computed twice
 
@@ -172,93 +190,60 @@ do.
 
 ## The interface
 
-**Five tabs, in the order the work happens**, in the bar at the top: **Drawing**, **CAD**,
-**Generate**, **Learn**, **Optimize**. Every one is shown whether or not it is built yet - a shell
-that hides its unbuilt stages describes a tool, one that shows them describes a product - and each
-names its *subject*: the rail on the left holds that subject's detail, the stage in the middle the
-subject itself, and the pane on the right what is done to it.
+**Four tabs, in the order the work happens**, in the bar at the top: **Input**, **Generate**,
+**Learn**, **Optimize**. Every one is shown whether or not it is built yet - a shell that hides its
+unbuilt stages describes a tool, one that shows them describes a product. Each lays out a rail on
+the left, its subject in the middle, and a pane on the right that folds to a strip at the edge.
 
 | tab | rail | stage | right |
 |---|---|---|---|
-| **Drawing** | callout kinds, and the steps that read them, warnings included | every callout beside the literal text it was parsed from | - |
-| **CAD** | what the CAD yielded, its steps, axes, feature kinds; the selection | the part, pickable; a variant's sample drawn as paths | **Design a variant** |
-| **Generate · Campaign** | the campaigns launched, and the one going | the campaign card: Compose, Check, Sample & launch | - |
-| **Generate · Designs** | a campaign's designs, each with its stages and its variants | the design at a stage - its paths, its field; mesh, setup, results - or the plans of those that differ most | the design: what it is made of by variant, how it screened, its verdict; Build field |
+| **Input · Drawing** | the pipeline | every callout beside the literal text it was parsed from; the one in focus highlighted | the card of what is in focus |
+| **Input · CAD** - *Part* | the pipeline | the part, pickable; the faces in focus selected | the card |
+| **Input · CAD** - *Design space* | the pipeline | the design space as one opaque volume over the part; switches for the part, the design space and where metal helps | the card |
+| **Input · Mesh & setup** - *Setup* | the pipeline | the deck's mesh with its supports, couplings and loads as agenticCAE drew them, the group in focus lit | the card |
+| **Input · Mesh & setup** - *Solve results* | the pipeline | the deck solved, as contours: Code_Aster's run and cuDSS on the same mesh as tabs under the picture; the field, deformed, edges, the signals the deck asks for | the card |
+| **Generate · Campaign** | the campaigns kept; a new one | a campaign as a grid of designs by stages, filled in as they are made; for a new one, the plan to choose from and launch | - |
+| **Generate · Designs** | a campaign's designs, each with its stages | the design at a stage: the optimisation at any iteration with its history, the plates, the CAD's new faces, the mesh, the solve results | the design: what it was made for, each stage's numbers, the deck's signals beside the bare part's |
 | **Learn**, **Optimize** | - | what each will do, and what it waits for | - |
 
-The pipeline report has no tab of its own because it does not need one: every step belongs to an
-artifact, so it appears in that artifact's rail.
+**The pipeline is the rail on Input**: every step, the design space last, what it read and what it made, and
+a click on anything shows it on its canvas and on the card ([pipeline.md](pipeline.md)). What the
+rail, the card, a canvas or the agent picks is **in focus**, and focus alone decides what each
+canvas highlights.
+
+**Everything says where it came from**: imported from the engineer's files, derived from them by a
+rule, inferred - a reading that could be wrong - or generated. A name on
+screen is the file's own: a bore is what the deck calls it, a signal what the deck asks for.
 
 **The agent's place is above the tabs.** One conversation, whichever tab is open: a line to say
-something in - the faces selected go with it - and a drawer under it with what was said, what the
-agent is doing and its answer. It is paused, and its bar hidden, while variants and campaigns are
-made by hand; when it returns, what it writes lands on Design a variant, marked, for the engineer
-to keep or undo.
+something in - what is in focus goes with it - and a drawer under it with what was said, what the
+agent is doing and its answer, the ids in it chips that bring an entity into focus. What it shows
+comes into focus on its canvas.
 
-**Design a variant is the design space, by hand.** On the CAD tab, where the faces it names are: a
-tab for each variant kept and one for a new one. A variant starts from the faces selected and what
-to add there; it says what it stands on, ends on and keeps clear of - the part's named entities, or
-another variant's ribs or holes; webs, the two sides they run between - then what it may vary and
-what it must hold, and how many designs that allows. It is drawn on the part before it is kept - at
-its suggested point, or at another drawn at random, every choice as likely as the next, saying
-which - only once a point of it passes; its name and Create variant are at the bottom.
-
-**A campaign shows everything it runs, at a glance.** Its card composes variants - each with what it
-may vary and how many designs it allows; checks - what each variant varies and the rules it holds,
-what holds always - between variants, the part's interfaces, repair - the screening checks, and what
-a built design is checked for, a few words each with the full rule on hover; and samples - the
-method, how many, the seed, the count, a hundred screened before the launch. The screening checks
-can be switched off for one campaign; nothing else can, and a campaign
-never narrows a variant. Every launch is a campaign of its own, and keeps its card and a copy of its
-variants beside its designs. The interfaces stay closed whatever is switched off.
-
-**A design's stages are letters.** P its paths placed and screened, F its field built and checked, M
-meshed, S the solver set up, R results - each filled once done, green, amber or red for how it came
-out. Thousands are listed by the few that differ most, by those built, or a page at a time, or only
-those holding one variant; a built design's field is kept beside its campaign, so F stays done.
+**The agent composes a few general tools** over the pipeline - its steps, its entities, one entity in
+full, and show - and over the part: what one stands on, what rises round a floor, what
+shares an axis, what lies across the open space in front of it, what lies between several, how far
+it reaches and how thick the metal is under it; and it searches the drawing. No tool is made for one
+kind of request. It never makes geometry or designs.
 
 **Layers rather than one picture.** Where two things occupy the same space - the part and a design's
-new surfaces, or those surfaces and the design's new metal as cells - each is a layer with a colour
-that can be switched off. That is the only honest way to answer "which of these am I looking at".
+new faces, the part and the design space - each is a layer with a colour that can be switched off,
+everything drawn opaque. That is the only honest way to answer "which of these am I looking at".
 
 **Switching a layer off does not throw it away**, and nor does changing tab: the part is loaded into
-the 3D view once and kept while any tab that shows it is open, and a page over it - the campaign,
-the plans - leaves it where it was. Uploading a surface takes about as long as downloading it.
+the 3D view once and kept while any tab that shows it is open, and a page over it leaves it where it
+was. A layer shown once is kept until the space it came from changes.
 
 **Columns that move and fold.** The left and right columns are dragged to width, and the right one
 folds to a strip at the edge with its name on it, a click from open again.
 
-**Nothing is said twice.** The card shows what a variant holds; the agent's answer only the few
-lines it asks the engineer to look at.
+**Every face can be named.** Hovering a face in the 3D view shows its one name, `face:N`, and what it
+is; clicking it opens its card, with what lies on it.
 
-**The agent composes a few general tools.** It finds entities, describes them, relates them to the
-part - what one stands on, what rises round a floor, what shares an axis, what lies across the open
-space in front of it, what lies between several - measures them, searches the drawing, and reads
-and edits the design space. How to compose them for a kind of request is in skills: short recipes
-it reads when needed, holding no ids, numbers or example sentences. No tool is made for one kind of
-request. It knows what those tools answer, and nothing more: the part's regions carry no roles yet,
-and design knowledge is data only for the rules and materials designs are screened with - what it
-lacks is in [ribs.md](ribs.md). Design a variant is the way in by hand; the agent, when it returns,
-the second way in.
-
-**Every face can be named.** Hovering a face in the 3D view shows its one name, `face:N`, and what
-it is, so an engineer can refer to it - on the card, in words or as a chip.
-
-The card vocabulary is the test of whether the model is general — each card renders one *kind of
-thing the platform knows about*, never one kind of part:
-
-| card | shows |
-|---|---|
-| **Artifact** | an extracted input, what was read from it, how far it can be trusted |
-| **Step** | one pipeline stage: what it did, or precisely why it did not run |
-| **Feature** | a detected geometric feature |
-| **Callout** | one claim read off a drawing, beside the literal text it came from |
-| **Fact** | a value with every source behind it |
-| **Metric** | a measured quantity with its unit |
-| **Layer** | one drawable thing, its colour, and whether it is shown |
-
-If a card would be meaningless for a bracket, it belongs somewhere else.
+**The card is the test of whether the model is general** - it renders an entity of any kind from its
+typed fields, its evidence and its links, never one kind of part. If a field would be meaningless
+for a bracket, it belongs somewhere else.
 
 Nothing tints the default 3D view. An always-on colour reads as a selection the viewer did not
-make and competes with the one they did; controlled faces have their own mode, entered
-deliberately.
+make and competes with the one they did; controlled faces, the design space and its paints each
+have their own view, entered deliberately.

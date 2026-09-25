@@ -1,166 +1,44 @@
 """The agent's tools: a few general ones, each doing one job, for the agent to compose.
 
-- **find** entities: features by kind, by what they touch, by which way they face, by the axis
-  they turn about - or the axes themselves.
-- **describe** entities: what each is, and - for several - how they stand to each other.
-- **relate** an entity to the part: what it stands on, what rises round it, what is round it, what
-  shares its axis, what lies across the open space in front of it - or several together: what lies
-  between them, under and over.
-- **measure** an entity: how far it reaches along a direction, or how thick the metal is under it.
-- **search_drawing** for its words.
-- **read_study** and **edit_study**: the study's draft, read, and changed - the only way to change
-  it. An edit comes back with where the ribs would go, counted, so the agent can see its reading
-  makes ribs before the engineer does.
-- **skill**: how to compose these for a kind of request, read when needed.
+Over the pipeline - what fastcae read from the engineer's files, and the design space:
 
-Each calls the engine functions the routes call; nothing here computes geometry of its own, and
-nothing an agent does is out of reach of the interface. Results are compact JSON - enough to reason
-from, never whole meshes. What the agent changes is checked as any study version is - words quoted
-exactly, entities on the part, hard rules citing words - the part's interfaces are closed on it
-whatever it sends, and nothing is written until the engineer accepts it. Designs are the
-engineer's to make.
+- **pipeline**: every step in order, whether it ran, what it said, what it made.
+- **entities**: the typed entities a step made, of a kind, or holding some words.
+- **entity**: one in full - its fields, the evidence behind it, what it is tied to both ways.
+- **show** entities to the engineer, on the canvas each belongs to.
+
+Over the part itself:
+
+- **find** features by kind, by what they touch, which way they face, the axis they turn about.
+- **describe** them, and - for several - how they stand to each other.
+- **relate** them to the part: what they stand on, what rises round them, what lies across or
+  between them.
+- **measure** how far one reaches along a direction, or how thick the metal is under it.
+- **search_drawing** for its words.
+
+Each calls what the routes call; nothing here computes geometry of its own, and nothing an agent
+does is out of reach of the interface. Results are compact JSON - enough to reason from, never
+whole meshes. The agent never changes what was read from the engineer's files, nor the design
+space.
 """
 
 from __future__ import annotations
 
 import json
-import re
 from typing import Any, Literal
 
 import numpy as np
 from langchain_core.tools import BaseTool, tool
-from pydantic import BaseModel, Field
 
-from .. import study as studies
 from ..features import Feature, FeatureKind, extent, neighbours
-from ..generate import reading
-from ..generate import session as sessions
-from ..generate.session import ATTENTION, Session
-from ..generate.slots import CLOSED
-from ..study import Constraint, Objective, Preference, Pull, Target
-from . import skills as skillbook
+from . import context as contexts
+from . import reading
+from .context import Context
 
 LIMIT = 40
-_REF = re.compile(r"\b[a-z_]+:\d+\b")
-# How many questions of the part, since the study was last changed, before every answer reminds
-# the agent that the engineer can be asked instead.
+# How many questions of the part, since the engineer last wrote, before every answer reminds the
+# agent that the engineer can be asked instead.
 QUESTIONS = 8
-
-# What the tools work on: the open project's rib work, and the conversation.
-Context = Session
-
-
-def _kinds() -> str:
-    """The kinds of rule the platform knows, as a rule of each reads - what it needs in angle
-    brackets - for the agent to pick from."""
-    known = []
-    for name, kind in studies.KINDS.items():
-        if name in CLOSED:
-            continue
-        says = re.sub(r"\{(\w+)(:[^}]*)?\}", r"<\1>", kind.says)
-        known.append(f"{name}: {says}")
-    return "; ".join(known)
-
-
-class Setting(BaseModel):
-    """One setting of a block, as the words give it: a value, a low and a high, or the choices."""
-
-    value: float | str | None = None
-    low: float | None = None
-    high: float | None = None
-    step: float | None = None
-    options: list[str | float] | None = None
-
-
-SETTINGS = (
-    "generator (parallel, grid, triangle, radial), centre (what spokes turn about), spread "
-    "(across, round), angle_deg, count, spacing_mm, thickness_mm, root_fillet_mm, edge_round_mm, "
-    "draft_deg, top (slope, level), height_fraction, section (flat, T), flange_width_mm, "
-    "flange_thickness_mm"
-)
-
-
-class BlockEdit(BaseModel):
-    """One block of ribs added, changed or taken out."""
-
-    id: str | None = Field(
-        default=None,
-        description="The block to change, as read_study names it; left out, a new one.",
-    )
-    add: str | None = Field(
-        default=None,
-        description="What the block adds: ribs; thicken - the faces in stand_on moved along their "
-        "normal, thicker or thinner; holes - through the plate in stand_on; material - what the "
-        "part is cast in.",
-    )
-    stand_on: list[str] | None = Field(
-        default=None,
-        description="What its ribs stand on: the floor, as faces or features in one plane. An "
-        "empty list: nothing under them - webs between what end_on names, standing along the "
-        "way all of it runs. For thicken, the faces moved; for holes, the plate.",
-    )
-    end_on: list[str] | None = Field(
-        default=None,
-        description="What its ribs must end on: faces or features. An empty list: whatever rises "
-        "round the floor, read off the part.",
-    )
-    span: Literal["union", "within_one", "must_bridge"] | None = None
-    settings: dict[str, Setting | float | str | list[float | str] | None] = Field(
-        default_factory=dict,
-        description="Settings the words give, by name - "
-        + SETTINGS
-        + ". A value fixes one - given bare or as value; a low and high, or options - or a bare "
-        "list - limit it; null hands it back to the part. What the words leave out is read off "
-        "the part.",
-    )
-    rules: list[Constraint] = Field(
-        default_factory=list,
-        description="Rules for this block alone - what its ribs keep clear of, how tall they "
-        "stand - of the kinds the edit's rules take.",
-    )
-    remove: bool = False
-
-
-class EditStudy(BaseModel):
-    """The study's draft changed from the engineer's words: blocks, rules and the rest."""
-
-    quotes: list[str] = Field(
-        description="The engineer's words this rests on, each copied exactly from what they typed."
-    )
-    blocks: list[BlockEdit] = Field(default_factory=list)
-    rules: list[Constraint] = Field(
-        default_factory=list,
-        description="Rules for the whole study - every block, now and to come - each of a kind "
-        "the platform knows - "
-        + _kinds()
-        + " - with the entities it names in refs: any face or feature, the holes found, or the "
-        "ribs of another block as ribs:b1. A rule for one block goes in that block's rules, or "
-        "names it in block. When no kind fits, a new kind with the engineer's words as its text "
-        "is kept and listed as not enforced. Hard only for what the engineer said; cites may be "
-        "left out.",
-    )
-    drop: list[str] = Field(
-        default_factory=list,
-        description="Ids of rules to take out, as read_study shows them: one the words put in, or "
-        "one the part suggested for a block. Preferences and objectives by id too.",
-    )
-    confirm: list[str] = Field(
-        default_factory=list,
-        description="Ids of rules the part suggested that the engineer's words make theirs.",
-    )
-    prefer: list[Preference] = Field(default_factory=list)
-    objectives: list[Objective] = Field(default_factory=list)
-    pull: Pull | None = None
-    target: Target | None = None
-    attention: list[str] | None = Field(
-        default=None,
-        max_length=ATTENTION,
-        description="At most three short lines for the engineer to look at before accepting the "
-        "draft as it will stand: a question only they can answer that would change every design, "
-        "an assumption that matters, a rule nothing enforces yet - naming entities by id. Never "
-        "what the variant card already shows. Left out, the lines already there stay; an empty "
-        "list clears them.",
-    )
 
 
 def build(ctx: Context) -> list[BaseTool]:
@@ -187,17 +65,89 @@ def build(ctx: Context) -> list[BaseTool]:
         return out
 
     def answered(out: Any) -> str:
-        """An answer about the part - past a few since the study was last changed, with a reminder
-        that the engineer can be asked instead."""
+        """An answer - past a few since the engineer last wrote, with a reminder that the engineer
+        can be asked instead."""
         ctx.questions += 1
         if ctx.questions > QUESTIONS:
             note = (
-                f"{ctx.questions} questions of the part since the study was last changed. Write "
-                "what is clear, and ask the engineer the rest in the attention lines, naming the "
-                "candidates by id."
+                f"{ctx.questions} questions since the engineer last wrote. Say what is clear, "
+                "and ask the engineer the rest, naming the candidates by id."
             )
             out = {**out, "note": note} if isinstance(out, dict) else {"answer": out, "note": note}
         return json.dumps(out)
+
+    # --- the pipeline -------------------------------------------------------------------------
+
+    def graph():  # type: ignore[no-untyped-def]
+        from ..api import pipeline as pipeline_api
+
+        return pipeline_api.current_graph()
+
+    @tool
+    def pipeline() -> str:
+        """The pipeline that read the engineer's files - drawing, CAD, solver deck - and the design
+        space, last: every step in order, whether it ran, what it said, and what it made, each group
+        of entities by label, kind and count. Start here."""
+        from ..api import designspace
+
+        steps = []
+        for stage in graph().stages:
+            for step in stage.steps:
+                item: dict[str, Any] = {
+                    "step": step.id,
+                    "stage": stage.id,
+                    "label": step.label,
+                    "status": step.status,
+                    "said": step.detail,
+                    "made": [f"{g.count} {g.label} ({g.kind})" for g in step.outputs],
+                }
+                if step.warnings:
+                    item["warnings"] = step.warnings[:3]
+                steps.append(item)
+        return answered({"steps": steps, "reading_design_space": designspace.held.running})
+
+    @tool
+    def entities(
+        kind: str | None = None, step: str | None = None, text: str | None = None, limit: int = 30
+    ) -> str:
+        """Entities the pipeline made, in a few words each: of one kind, made by one step, or whose
+        label or id holds some words. Kinds: artifact, part, health, face, feature, axis, callout,
+        control, conflict, deck_group, support, coupling, load, material, signal, result_field,
+        anchor, design_space."""
+        found = graph().find(kind, step, None, text, limit=max(1, min(int(limit), LIMIT)))
+        rows = [
+            {k: e[k] for k in ("id", "kind", "label", "status", "origin")}
+            for e in found["entities"]
+        ]
+        return answered({"total": found["total"], "found": rows})
+
+    @tool
+    def entity(id: str) -> str:
+        """One entity in full: its typed fields, the evidence behind it and where that was found,
+        what it is tied to and what is tied to it - each named in a few words."""
+        found = graph().entity(id)
+        if found is None:
+            return answered({"error": f"no entity {id!r}; entities finds them"})
+        found.pop("show", None)
+        for key in ("links", "backlinks"):
+            rows = found.get(key, [])
+            if len(rows) > LIMIT:
+                found[key] = rows[:LIMIT] + [{"and_more": len(rows) - LIMIT}]
+        return answered(found)
+
+    @tool
+    def show(ids: list[str]) -> str:
+        """Show entities to the engineer: each on the canvas it belongs to - the drawing, the CAD,
+        the deck's mesh, the design space - highlighted, with the first one's card open. Show what
+        you talk about rather than describing where it is."""
+        known = graph().entities
+        out: dict[str, Any] = {"shown": [i for i in ids if i in known]}
+        missing = [i for i in ids if i not in known]
+        if missing:
+            out["unknown"] = missing
+        return json.dumps(out)
+
+    # --- the part --------------------------------------------------------------------------------
 
     @tool
     def find(
@@ -309,9 +259,9 @@ def build(ctx: Context) -> list[BaseTool]:
         """
         try:
             if relation == "between":
-                return answered(reading.between(extraction, sessions._measure(ctx), list(ids)))
+                return answered(reading.between(extraction, contexts.measure(ctx), list(ids)))
             if relation == "across":
-                finder = sessions._measure(ctx)
+                finder = contexts.measure(ctx)
                 return answered({ref: reading.across(extraction, finder, ref) for ref in ids[:6]})
             if relation == "stands_on":
                 return answered({ref: reading.stands_on(extraction, ref) for ref in ids[:6]})
@@ -375,7 +325,7 @@ def build(ctx: Context) -> list[BaseTool]:
         if f is None:
             return answered({"error": _unknown(id)})
         if direction is None:
-            through = reading.thickness_at(extraction, sessions._measure(ctx).exit_along, id)
+            through = reading.thickness_at(extraction, contexts.measure(ctx).exit_along, id)
             return answered({"id": id, "metal_under_it_mm": through})
         low, high = extent(tess, f.face_ids, tuple(direction))
         return answered(
@@ -392,149 +342,17 @@ def build(ctx: Context) -> list[BaseTool]:
         hits = [{"page": page, "text": line} for page, line in drawing.search(text)]
         return answered({"total": len(hits), "lines": hits[:LIMIT]})
 
-    @tool
-    def read_study() -> str:
-        """The study's draft as the engineer sees it on the variant card: each block - what its ribs
-        stand on, end on and keep clear of, its settings, fixed or what they may take and who said
-        so, its rules with their ids - the rules for the whole study, what is needed and what
-        cannot be built yet, whether it differs from the study as last accepted, and the words it
-        rests on."""
-        card = sessions.view(ctx)
-        study = studies.active(ctx.project)
-        out = _compact(card)
-        out["words"] = [w.text for w in study.current.words] if study else []
-        return json.dumps(out)
-
-    @tool(args_schema=EditStudy)
-    def edit_study(
-        quotes: list[str],
-        blocks: list[BlockEdit] | None = None,
-        rules: list[Constraint] | None = None,
-        drop: list[str] | None = None,
-        confirm: list[str] | None = None,
-        prefer: list[Preference] | None = None,
-        objectives: list[Objective] | None = None,
-        pull: Pull | None = None,
-        target: Target | None = None,
-        attention: list[str] | None = None,
-    ) -> str:
-        """Change the study's draft from the engineer's words - the only way to change the study.
-        What a block needs that the words leave open is read off the part, as a range. Checked as
-        a study version is: refused, with the reason and nothing changed, if a quote is not their
-        exact words, an entity is not on the part or a rule is incomplete. The part's interfaces
-        are closed on it. What comes back is the draft as it now reads, and where each block's
-        ribs would go at its suggested point, counted."""
-        changes = []
-        for change in blocks or []:
-            data = change.model_dump(exclude_unset=True)
-            if "settings" in data:
-                data["settings"] = {name: _setting(s) for name, s in data["settings"].items()}
-            changes.append(data)
-        card = sessions.edit(
-            ctx,
-            quotes=list(quotes),
-            blocks=changes,
-            rules=[_plain(r) for r in rules or []],
-            drop=list(drop or []),
-            confirm=list(confirm or []),
-            prefer=[_plain(p) for p in prefer or []],
-            objectives=[_plain(o) for o in objectives or []],
-            pull=_plain(pull) if pull is not None else None,
-            target=_plain(target) if target is not None else None,
-            attention=attention,
-        )
-        if isinstance(card.get("refused"), str):
-            return json.dumps({"refused": card["refused"]})
-        ctx.questions = 0
-        out = _compact(card)
-        drawn = sessions.paths(ctx)
-        out["where_ribs_go"] = drawn.get("blocks") or drawn.get("cannot")
-        if drawn.get("waiting"):
-            out["waiting"] = drawn["waiting"]
-        out["next"] = (
-            "The variant card now shows all this to the engineer, with the attention lines above. "
-            "If a line no longer holds for the draft as it now is, send attention again - an empty "
-            "list clears it. End the turn with no text, unless a block makes no ribs or reads the "
-            "words wrongly - then edit again, or ask in the attention lines."
-        )
-        out["attention"] = list(ctx.attention)
-        return json.dumps(out)
-
-    @tool
-    def skill(name: str) -> str:
-        """How to compose these tools for a kind of request. The skills there are, and when each
-        is worth reading, are listed in the instructions."""
-        text = skillbook.read(name)
-        if text is None:
-            return json.dumps({"error": f"no skill {name!r}", "skills": sorted(skillbook.index())})
-        return text
-
     return [
-        read_study,
-        edit_study,
+        pipeline,
+        entities,
+        entity,
+        show,
         find,
         describe,
         relate,
         measure,
         search_drawing,
-        skill,
     ]
-
-
-def _compact(card: dict) -> dict:
-    """The draft as the agent reads it, in words: each block by what it stands on, ends on and
-    keeps clear of; its settings; every rule by id; and the draft against the study."""
-    out: dict[str, Any] = {"accepted_version": card["accepted"], "differs": card["differs"]}
-    if card.get("cannot"):
-        out["cannot"] = card["cannot"]
-        return out
-    blocks = []
-    for block in card["blocks"]:
-        ends = block["end_on"]["refs"]
-        item: dict[str, Any] = {
-            "id": block["id"],
-            "add": block["add"],
-            "stands_on": block["stand_on"]["refs"],
-            "ends_on": ends[:12] + ([f"and {len(ends) - 12} more"] if len(ends) > 12 else []),
-        }
-        if block["end_on"]["read_off"]:
-            item["ends_on_read_off_the_part"] = True
-        item["keeps_clear_of"] = [_said(r) for r in block["keep_clear"]]
-        item["settings"] = {s["name"]: f"{s['says']} ({s['source']})" for s in block["settings"]}
-        item["rules"] = [_said(r) for r in block["rules"]]
-        for key in ("needed", "problems"):
-            if block[key]:
-                item[key] = block[key]
-        if block["cannot"]:
-            item["cannot_build"] = block["cannot"]
-        if block["note"]:
-            item["read_off_the_part"] = block["note"]
-        blocks.append(item)
-    out["blocks"] = blocks
-    out["rules"] = [_said(r) for r in card["rules"]]
-    out["interfaces_closed"] = len(card["interfaces"])
-    rest = card["rest"] or {}
-    for key in ("prefer", "objectives"):
-        if rest.get(key):
-            out[key] = [f"{item['id']}: {item['says']}" for item in rest[key]]
-    out["pull"] = rest["pull"]["says"] if rest.get("pull") else None
-    if rest.get("target"):
-        out["target"] = rest["target"]["says"]
-    named = sorted({ref for ref in _REF.findall(json.dumps(blocks)) if ref in card["names"]})
-    if named:
-        out["names"] = {ref: card["names"][ref] for ref in named[:LIMIT]}
-    if card["changes"]:
-        out["changes"] = card["changes"][:LIMIT]
-    if card["attention"]:
-        out["attention"] = card["attention"]
-    return out
-
-
-def _said(rule: dict) -> dict:
-    out = {"id": rule["id"], "says": rule["says"], "strength": rule["strength"], "by": rule["by"]}
-    if rule["until"]:
-        out["not_enforced"] = rule["until"]
-    return out
 
 
 def _relation(a, b, diagonal: float) -> dict:
@@ -593,18 +411,3 @@ def _unknown(ref: str) -> str:
         f"no feature or face {ref!r} - ids look like planar_group:114, hole:3, bore:196, "
         "or face:1453 for a single face"
     )
-
-
-def _plain(value: Any) -> Any:
-    return value.model_dump() if isinstance(value, BaseModel) else value
-
-
-def _setting(given: Any) -> dict | None:
-    """A setting as the draft holds it: a bare value is the value, a bare list the options."""
-    if given is None:
-        return None
-    if isinstance(given, list):
-        return {"options": given}
-    if not isinstance(given, dict):
-        return {"value": given}
-    return {k: v for k, v in given.items() if v is not None}

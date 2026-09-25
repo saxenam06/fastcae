@@ -83,7 +83,7 @@ function at run time, the product code unchanged); `mesh_clean.py 20 25 1.0 --gm
 field's surface, repairs it and fills it with gmsh; `against_baseline.py design7gpu` sets the
 answer beside the slow route's. Needs `pymeshlab`, `pymeshfix`, `gmsh` (and `tetgen` to try it).
 Straight from the field: `mesh_cgal.py` in WSL - compiled (`cgal_field.cpp`, built into the
-`fieldmesh` environment by `build_cgal_field.sh`: conda-forge python 3.12, numpy, scipy, cgal-cpp,
+`fieldmesh` environment by `native/cgal_field/build.sh`: conda-forge python 3.12, numpy, scipy, cgal-cpp,
 tbb-devel, pybind11, cxx-compiler), or `--python` through pygalmesh in the `galmesh` environment -
 then `finish_mesh.py cgal_tets.npz`; `mesh_field.py` is the MMG attempt (`mmgpy`). Its options:
 `--sizes` (a size map from `sizes.py`, or from another mesh by `sizes_from_mesh.py`), `--lines` (edge

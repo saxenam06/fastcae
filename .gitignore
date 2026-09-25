@@ -45,3 +45,8 @@ _archived_designs/
 # The bench's raw JSON records: written locally by its scripts, written again by running them. The
 # numbers that matter are in bench/solvers/RESULTS.md and each case's results.md.
 bench/solvers/results/**/*.json
+
+.fastcae-open
+
+# Code the product no longer runs, kept on this machine for reference: never tracked.
+_archived_code/

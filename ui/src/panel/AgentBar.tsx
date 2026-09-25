@@ -1,61 +1,48 @@
 /**
- * The agent, above every tab: the engineer's words - with the faces selected on the part - go to it,
- * it reads the drawing and the part, and it writes the design space on the variant card, which waits
- * there for Accept or Undo. One conversation, whichever tab is open.
+ * The agent, above every tab: the engineer's words - with what is in focus on the screen - go to
+ * it; it reads the pipeline, its entities and the part, and shows what it talks about. One
+ * conversation, whichever tab is open.
  *
  * One line to say something; under it a drawer with what was said, what the agent is doing while it
- * reads, and its answer - opened when something is sent, closed at a click. When it filled the card,
- * only the few lines it asked the engineer to look at are said here, with faces as chips that show
- * them on the part.
+ * reads, and its answer - opened when something is sent, closed at a click. Entity ids in the answer
+ * are chips: a click brings one into focus.
  */
 
 import { useCallback, useEffect, useState } from "react";
 
 import { api, type AgentEvent, type AgentMessage } from "../api/client";
-import { Said, Written } from "./shared";
 
 // What each of the agent's tools is doing, as the engineer would say it.
 const DOING: Record<string, string> = {
-  read_study: "reading the design space",
-  edit_study: "writing the design space",
-  find: "looking for entities",
-  describe: "reading entities",
-  relate: "relating them to the part",
+  pipeline: "reading the pipeline",
+  entities: "looking for entities",
+  entity: "reading an entity",
+  show: "showing you",
+  find: "looking at the part",
+  describe: "reading the part",
+  relate: "relating it to the part",
   measure: "measuring",
   search_drawing: "reading the drawing",
-  skill: "reading a skill",
 };
 
+/** An entity's id as the pipeline names it: ``face:196``, ``group:BORE_MAIN_S2``, ``design_space``. */
+const ENTITY_ID = /\bdesign_space\b|\b[a-z_]+(?::[A-Za-z0-9_.-]*[A-Za-z0-9_])+/g;
+
 interface AgentBarProps {
-  /** The faces selected on the part: they go with what is said. */
-  selection: number[];
-  /** The agent changed the variant card: read it again. */
-  onCardChanged: () => void;
-  /** Open the variant card, where what the agent wrote waits. */
-  onOpenCard: () => void;
-  /** Whether the variant card is in view: if not, the answer says where to find it. */
-  cardInView: boolean;
-  /** Show these faces and features on the part. */
-  onShow: (refs: string[]) => void;
+  /** The entities in focus on the screen: they go with what is said. */
+  focus: string[];
+  /** Bring these entities into focus, on their canvases. */
+  onShow: (ids: string[]) => void;
+  /** The agent changed something: read it again. */
+  onChanged: (what: string[]) => void;
 }
-
-/** What the agent answered: the lines it asked the engineer to look at, when it filled the card;
- * or what it wrote, when it did not. */
-interface Answer {
-  filled: boolean;
-  attention: string[];
-  needed: string[];
-  text: string;
-}
-
-const NOTHING: Answer = { filled: false, attention: [], needed: [], text: "" };
 
 export function AgentBar(props: AgentBarProps) {
-  const { selection, onCardChanged, onShow } = props;
+  const { focus, onShow, onChanged } = props;
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState<string | null>(null);
-  const [answer, setAnswer] = useState<Answer>(NOTHING);
+  const [answer, setAnswer] = useState("");
   const [doing, setDoing] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -79,25 +66,18 @@ export function AgentBar(props: AgentBarProps) {
     setOpen(true);
     setSaid(message);
     setText("");
-    setAnswer(NOTHING);
+    setAnswer("");
     setDoing([]);
     setError(null);
     try {
-      await api.chat(message, selection, (event: AgentEvent) => {
-        if (event.type === "token")
-          setAnswer((before) => ({ ...before, text: before.text + event.text }));
-        else if (event.type === "tool_start")
+      await api.chat(message, focus, (event: AgentEvent) => {
+        if (event.type === "token") setAnswer((before) => before + event.text);
+        else if (event.type === "tool_start") {
           setDoing((before) => [...before, DOING[event.name] ?? event.name]);
-        else if (event.type === "tool_result" && event.summary.startsWith("refused"))
+        } else if (event.type === "tool_result" && event.summary.startsWith("refused"))
           setDoing((before) => [...before, event.summary]);
-        else if (event.type === "draft")
-          setAnswer((before) => ({
-            ...before,
-            filled: true,
-            attention: event.attention,
-            needed: event.needed,
-          }));
-        else if (event.type === "changed" && event.what.includes("draft")) onCardChanged();
+        else if (event.type === "show" && event.ids.length) onShow(event.ids);
+        else if (event.type === "changed" && event.what.length) onChanged(event.what);
         else if (event.type === "error") setError(event.message);
       });
     } catch (caught) {
@@ -105,28 +85,28 @@ export function AgentBar(props: AgentBarProps) {
     } finally {
       setBusy(false);
     }
-  }, [text, busy, selection, onCardChanged]);
+  }, [text, busy, focus, onShow, onChanged]);
 
   const fresh = useCallback(async () => {
     await api.newChat().catch(() => undefined);
     setSaid(null);
-    setAnswer(NOTHING);
+    setAnswer("");
     setDoing([]);
     setError(null);
   }, []);
 
-  const something = Boolean(said || answer.text || answer.filled || error);
+  const something = Boolean(said || answer || error);
 
   return (
     <section className="agent-bar" data-open={open && something}>
       <div className="agent-line">
-        <span className="agent-label" title="Reads the drawing and the part, and writes the design space">
+        <span className="agent-label" title="Reads the pipeline, the part and the drawing, and shows what it talks about">
           Agent
         </span>
         <input
           value={text}
           disabled={busy}
-          placeholder="Say what you want - what to add, where, what must hold. The faces selected go with it."
+          placeholder="Ask what was read, what holds a face, where metal may go."
           onChange={(event) => setText(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter") void send();
@@ -135,8 +115,8 @@ export function AgentBar(props: AgentBarProps) {
         <button onClick={() => void send()} disabled={busy || !text.trim()}>
           {busy ? "Reading…" : "Send"}
         </button>
-        <span className="dim agent-selected">
-          {selection.length ? `${selection.length} faces selected` : "no faces selected"}
+        <span className="dim agent-selected" title={focus.join(", ")}>
+          {focus.length ? `${focus[0]}${focus.length > 1 ? ` +${focus.length - 1}` : ""} in focus` : "nothing in focus"}
         </span>
         {something ? (
           <button
@@ -155,12 +135,19 @@ export function AgentBar(props: AgentBarProps) {
         <div className="agent-drawer">
           {said ? <div className="said-line">&ldquo;{said}&rdquo;</div> : null}
           {doing.length ? <div className="card-note">{doing.join(" · ")}</div> : null}
-          <AnswerView
-            answer={answer}
-            onShow={onShow}
-            cardInView={props.cardInView}
-            onOpenCard={props.onOpenCard}
-          />
+          {answer ? (
+            <div className="agent-reply">
+              {answer
+                .replace(/\*\*|__|`/g, "")
+                .split("\n")
+                .filter((line) => line.trim())
+                .map((line, index) => (
+                  <p key={index}>
+                    <WithIds text={line} onShow={onShow} />
+                  </p>
+                ))}
+            </div>
+          ) : null}
           {error ? <div className="warn">{error}</div> : null}
         </div>
       ) : null}
@@ -168,61 +155,48 @@ export function AgentBar(props: AgentBarProps) {
   );
 }
 
-/** The agent's answer. When it filled the card, the card says what changed: only what it asked
- * the engineer to look at is said here - and where the card is, when it is not in view. */
-function AnswerView(props: {
-  answer: Answer;
-  onShow: (refs: string[]) => void;
-  cardInView: boolean;
-  onOpenCard: () => void;
-}) {
-  const { answer, onShow } = props;
-  if (answer.filled) {
-    return (
-      <div className="agent-reply attention">
-        {answer.attention.length ? (
-          <ul className="written-list">
-            {answer.attention.map((line) => (
-              <li key={line}>
-                <Said text={line} onShow={onShow} />
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <div className="dim">Wrote the design space: what changed is marked on the variant card.</div>
-        )}
-        {answer.needed.length ? (
-          <div className="dim">Still needed: {answer.needed.join(", ")}.</div>
-        ) : null}
-        {!props.cardInView ? (
-          <button className="link" onClick={props.onOpenCard}>
-            open the variant card, on CAD
-          </button>
-        ) : null}
-      </div>
-    );
+/** A line of the answer with every entity id in it as a chip that brings it into focus. */
+function WithIds({ text, onShow }: { text: string; onShow: (ids: string[]) => void }) {
+  const pieces: (string | { id: string })[] = [];
+  let last = 0;
+  for (const match of text.matchAll(ENTITY_ID)) {
+    const at = match.index ?? 0;
+    if (at > last) pieces.push(text.slice(last, at));
+    pieces.push({ id: match[0] });
+    last = at + match[0].length;
   }
-  if (!answer.text) return null;
+  if (last < text.length) pieces.push(text.slice(last));
   return (
-    <div className="agent-reply">
-      <Written text={answer.text} onShow={onShow} />
-    </div>
+    <>
+      {pieces.map((piece, index) =>
+        typeof piece === "string" ? (
+          <span key={index}>{piece}</span>
+        ) : (
+          <button
+            key={index}
+            className="ref-inline"
+            onClick={() => onShow([piece.id])}
+            title={`show ${piece.id}`}
+          >
+            {piece.id}
+          </button>
+        ),
+      )}
+    </>
   );
 }
 
 /** The engineer's last words in a conversation, and what came back to them. */
-function lastExchange(messages: AgentMessage[]): [string | null, Answer] {
+function lastExchange(messages: AgentMessage[]): [string | null, string] {
   let at = -1;
   messages.forEach((message, index) => {
     if (message.role === "engineer") at = index;
   });
-  if (at < 0) return [null, NOTHING];
-  const said = (messages[at] as { text: string }).text.split("\n\n(selected on the part")[0];
-  let answer: Answer = NOTHING;
+  if (at < 0) return [null, ""];
+  const said = (messages[at] as { text: string }).text.split("\n\n(in focus on the screen")[0];
+  let answer = "";
   for (const message of messages.slice(at + 1)) {
-    if (message.role === "draft")
-      answer = { ...answer, filled: true, attention: message.attention, needed: message.needed };
-    else if (message.role === "agent") answer = { ...answer, text: message.text };
+    if (message.role === "agent") answer = message.text;
   }
   return [said, answer];
 }

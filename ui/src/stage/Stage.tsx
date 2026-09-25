@@ -6,10 +6,12 @@
  * props. Recreating a WebGL context per render would re-upload 13 MB of vertices on every hover.
  */
 
-import { useEffect, useRef } from "react";
-import type { ColourMode, LineSet, OverlayPick } from "../render/renderer";
+import { useEffect, useMemo, useRef } from "react";
+import type { ColourMode, Ghost, LineSet, OverlayPick, VoxelLayer } from "../render/renderer";
 import { Renderer } from "../render/renderer";
 import type { Mesh, VoxelCells } from "../api/client";
+import { SectionControl, useSection } from "./Section";
+import { outlineOf, planeKey, planeOf } from "./sectionPlane";
 
 interface StageProps {
   mesh: Mesh;
@@ -22,6 +24,12 @@ interface StageProps {
    */
   overlay?: Mesh | null;
   voxels?: VoxelCells | null;
+  /** Layers of cells over the part, each its own colour: the design space, a design's metal. */
+  voxelLayers?: VoxelLayer[];
+  /** Each face its own colour, for the paint colour mode: a per-face value painted on the part. */
+  facePaint?: Map<number, [number, number, number]> | null;
+  /** A box to look at, and the side to look at it from: the camera moves there once per box. */
+  focusBox?: { box: number[]; from: number[] | null } | null;
   /** Lines over everything: where a layout would put ribs, before any design is made. */
   lines?: LineSet | null;
   overlayAlpha?: number;
@@ -32,6 +40,13 @@ interface StageProps {
   showSurface?: boolean;
   showOverlay?: boolean;
   showVoxels?: boolean;
+  /** The part's faces left out of the picture: those a design cuts, whose own surface the overlay
+   * draws instead, so a hole looks like one. */
+  hidden?: Set<number>;
+  /** Offer the section control: not while another page covers this canvas. */
+  sectionControl?: boolean;
+  /** Volumes drawn see-through over the part, each its own colour: design volumes. */
+  ghosts?: Ghost[];
   faceCount: number;
   bbox: number[];
   selected: Set<number>;
@@ -44,6 +59,9 @@ interface StageProps {
 }
 
 const OCHRE: [number, number, number] = [0.541, 0.416, 0.122];
+const NONE: Set<number> = new Set();
+const NO_LAYERS: VoxelLayer[] = [];
+const NO_GHOSTS: Ghost[] = [];
 
 export function Stage(props: StageProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -51,6 +69,10 @@ export function Stage(props: StageProps) {
   const dirtyRef = useRef(true);
   const propsRef = useRef(props);
   propsRef.current = props;
+  const { section } = useSection();
+  const plane = useMemo(() => planeOf(section, props.bbox), [section, props.bbox]);
+  const planeRef = useRef(plane);
+  planeRef.current = plane;
 
   // Renderer setup, once. The dependency list is deliberately the mesh alone: everything else is
   // read through propsRef, so a hover cannot tear down the GL context.
@@ -67,8 +89,14 @@ export function Stage(props: StageProps) {
     renderer.overlayPick = props.overlayPick ?? "none";
     renderer.setOverlay(props.overlay ?? null);
     renderer.setVoxels(props.voxels ?? null);
+    renderer.setVoxelLayers(props.voxelLayers ?? NO_LAYERS);
+    renderer.setFacePaint(props.facePaint ?? null);
     renderer.setLines(props.lines ?? null);
+    renderer.setHidden(props.hidden ?? NONE);
+    renderer.setGhosts(props.ghosts ?? NO_GHOSTS);
     renderer.frame(props.bbox);
+    const cut = planeRef.current;
+    renderer.setSection(cut, cut ? outlineOf(cut, props.bbox) : null);
     rendererRef.current = renderer;
     dirtyRef.current = true;
 
@@ -114,9 +142,53 @@ export function Stage(props: StageProps) {
   useEffect(() => {
     const renderer = rendererRef.current;
     if (!renderer) return;
+    renderer.setVoxelLayers(props.voxelLayers ?? NO_LAYERS);
+    dirtyRef.current = true;
+  }, [props.voxelLayers]);
+
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    renderer.setFacePaint(props.facePaint ?? null);
+    dirtyRef.current = true;
+  }, [props.facePaint]);
+
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer || !props.focusBox) return;
+    renderer.focusBox(props.focusBox.box, props.focusBox.from);
+    dirtyRef.current = true;
+  }, [props.focusBox]);
+
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
     renderer.setLines(props.lines ?? null);
     dirtyRef.current = true;
   }, [props.lines]);
+
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    renderer.setHidden(props.hidden ?? NONE);
+    dirtyRef.current = true;
+  }, [props.hidden]);
+
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    renderer.setGhosts(props.ghosts ?? NO_GHOSTS);
+    dirtyRef.current = true;
+  }, [props.ghosts]);
+
+  // The section, as the one plane every view shares.
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    renderer.setSection(plane, plane ? outlineOf(plane, props.bbox) : null);
+    dirtyRef.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planeKey(plane), props.bbox]);
 
   // Cheap to change and cheap to apply, so these ride along with the face state rather than
   // rebuilding anything.
@@ -244,5 +316,12 @@ export function Stage(props: StageProps) {
     };
   }, []);
 
-  return <canvas ref={canvasRef} />;
+  return (
+    <>
+      <canvas ref={canvasRef} />
+      {props.sectionControl ?? true ? (
+        <SectionControl bbox={props.bbox} facing={() => rendererRef.current?.facing() ?? null} />
+      ) : null}
+    </>
+  );
 }

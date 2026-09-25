@@ -26,49 +26,80 @@ export const PRODUCT = {
 } as const;
 
 /**
- * The tabs, in the order the work happens: what the drawing states, the part as its CAD describes
- * it - where single variants are designed by hand - campaigns of thousands and the designs they
- * keep, surrogates trained on them, and the search.
+ * The tabs, in the order the work happens: what the engineer brought - the files read into typed
+ * entities, and the design space; designs generated in that space; surrogates learnt from them; and
+ * the search.
  *
  * Every tab is shown whether or not it is built yet. A shell that hides its unbuilt stages
  * describes a tool; one that shows them describes a product, and tells anyone looking where what
  * they are doing now leads.
  */
-export type View = "drawing" | "cad" | "generate" | "learn" | "optimize";
+export type View = "input" | "generate" | "learn" | "optimize";
 
-export const VIEWS: { id: View; label: string; summary: string; ready: boolean }[] = [
-  {
-    id: "drawing",
-    label: "Drawing",
-    summary: "What the drawing states, callout by callout, beside the text it was read from.",
-    ready: true,
-  },
+/** Input's three: the engineer's own files, as the pipeline read them. */
+export type InputTab = "drawing" | "cad" | "mesh";
+/** The CAD as its faces, with the design space round it, or with the design volumes picked on it. */
+export type CadView = "part" | "space" | "volumes";
+/** The deck as it sets the part up, or what its solve gave. */
+export type DeckView = "setup" | "results";
+/** Generate's two: campaigns launched, and every design they kept. */
+export type GenerateTab = "campaign" | "designs";
+
+export const INPUT_TABS: { id: InputTab; label: string; summary: string }[] = [
+  { id: "drawing", label: "Drawing", summary: "What the drawing states, callout by callout" },
   {
     id: "cad",
     label: "CAD",
+    summary: "The part as its CAD describes it, and the design space round it",
+  },
+  {
+    id: "mesh",
+    label: "Mesh & setup",
+    summary: "The solver deck's mesh, supports, couplings and loads, and what its solve gave",
+  },
+];
+
+export const CAD_VIEWS: { id: CadView; label: string }[] = [
+  { id: "part", label: "Part" },
+  { id: "space", label: "Design space" },
+  { id: "volumes", label: "Design volumes" },
+];
+
+export const DECK_VIEWS: { id: DeckView; label: string }[] = [
+  { id: "setup", label: "Setup" },
+  { id: "results", label: "Solve results" },
+];
+
+export const GENERATE_TABS: { id: GenerateTab; label: string; summary: string }[] = [
+  { id: "campaign", label: "Campaign", summary: "Campaigns launched, and how each run is going" },
+  { id: "designs", label: "Designs", summary: "Every design a campaign kept, through its stages" },
+];
+
+export const VIEWS: { id: View; label: string; summary: string; ready: boolean }[] = [
+  {
+    id: "input",
+    label: "Input",
     summary:
-      "The part as its CAD describes it - faces, axes and the features on them - and single " +
-      "variants designed on it by hand.",
+      "What the engineer brought - the drawing, the CAD, the solver deck and its results - read " +
+      "into typed entities, and the design space.",
     ready: true,
   },
   {
     id: "generate",
     label: "Generate",
-    summary:
-      "Campaigns: thousands of variants spread over the design space, each screened - and every " +
-      "design followed through its stages to the data it yields.",
+    summary: "Designs made in the design space, meshed and solved as the deck solves the part.",
     ready: true,
   },
   {
     id: "learn",
     label: "Learn",
-    summary: "Surrogates trained on a campaign's results, and how far they can be believed.",
+    summary: "Surrogates trained on the solved designs, and how far they can be believed.",
     ready: false,
   },
   {
     id: "optimize",
     label: "Optimize",
-    summary: "The surrogate searched, candidates proposed, the ones worth solving verified.",
+    summary: "The search on the surrogates, confirmed by the solver.",
     ready: false,
   },
 ];

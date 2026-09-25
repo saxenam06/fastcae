@@ -4,23 +4,29 @@
 
 ---
 
-## Seven steps
+## Ten steps
 
 Each declares the artifact kinds it needs. A step that cannot run reports `skipped` with the
 reason; it is never silently absent.
 
 | step | needs | produces |
 |---|---|---|
-| Discover artifacts | — | files classified by extension |
+| Discover artifacts | — | files classified by extension: CAD, drawing, solver deck, solver results |
 | Read CAD | CAD | solid count, faces, volume, area, bbox, content digest, declared unit |
 | Check geometry health | CAD | tessellation, watertightness, volume error |
 | Measure every face | CAD | the atlas: type, area, axis, radius, adjacency, dihedrals, facing, visibility |
 | Detect features | CAD | axes, bores, bosses, hole patterns, planar groups, fillets |
 | Read drawing | Drawing | callouts, each citing a page and its literal text |
 | Cross-check | CAD + Drawing | candidate associations, ambiguities, unresolved pairings |
+| Read the solver deck | Solver deck | its mesh and groups, and its setup - material, what is held, couplings, loads, signals, analysis - with what was not read and anything that cannot solve (a reference point nothing ties) |
+| Read the deck's answer | Solver results | the fields and tables the run wrote |
+| Tie the deck's groups to the CAD | CAD + Solver deck | each group a support, coupling or load acts on as the CAD faces it lies on, and how far off |
 
-A project with only CAD runs the first five and reports `no Drawing in this project` on the last
-two. That is the whole test of whether this is a platform, and it passes.
+A project with only CAD runs the CAD steps and reports `no Drawing in this project` and `no solver
+deck in this project` on the rest. That is the whole test of whether this is a platform, and it
+passes. A deck step that fails leaves the part's own steps standing: the CAD still opens.
+
+How a deck is read - its commands parsed as data and never run - is in [simulate.md](simulate.md).
 
 ## The geometry gate
 

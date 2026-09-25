@@ -7,7 +7,7 @@ and every call is refused. OpenRouter speaks chat completions, not the Responses
 stays off. Reasoning effort and a pinned upstream provider ride in the request body.
 
 **The conversation** is kept with the project, in SQLite under ``.fastcae/agent/``, one thread at a
-time. What the engineer typed is also kept as text, because a study may quote only that.
+time. What the engineer typed is also kept as text, because an answer may quote only that.
 """
 
 from __future__ import annotations
@@ -24,18 +24,11 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, Too
 from ..extract import Extraction
 from ..project import Project
 from . import tools as agent_tools
+from .context import Context
 from .prompt import SYSTEM
 
 MODEL = "openrouter:deepseek/deepseek-v4-pro"
 RECURSION_LIMIT = 60
-
-# What the engineer can say a selection is for, and how it reads to the agent.
-ROLES = {
-    "auto": "",
-    "host": " as where ribs stand",
-    "supports": " as what ribs run between",
-    "keep_out": " as what ribs keep clear of",
-}
 
 
 def model_name() -> str:
@@ -98,7 +91,7 @@ class Runtime:
         project: Project,
         extraction: Extraction,
         model: Any = None,
-        context: agent_tools.Context | None = None,
+        context: Context | None = None,
     ):
         from langchain.agents import create_agent
         from langgraph.checkpoint.sqlite import SqliteSaver
@@ -107,9 +100,8 @@ class Runtime:
         self.folder = project.root / ".fastcae" / "agent"
         self.folder.mkdir(parents=True, exist_ok=True)
         self.thread = self._thread()
-        self.context = context or agent_tools.Context(project, extraction, said=[])
+        self.context = context or Context(project, extraction)
         self.context.said[:] = self._said()
-        self.context.selections[:] = self._selections()
         self.connection = sqlite3.connect(
             self.folder / "checkpoints.sqlite", check_same_thread=False
         )
@@ -134,13 +126,6 @@ class Runtime:
         path = self._said_path()
         return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
 
-    def _selections_path(self) -> Path:
-        return self.folder / f"selected-{self.thread}.json"
-
-    def _selections(self) -> list[list[int]]:
-        path = self._selections_path()
-        return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
-
     def remember_said(self) -> None:
         """Keep what the engineer has said and typed, for this thread."""
         self._said_path().write_text(json.dumps(self.context.said, indent=1), encoding="utf-8")
@@ -149,7 +134,6 @@ class Runtime:
         self.thread = str(int(self.thread) + 1 if self.thread.isdigit() else 1)
         (self.folder / "thread.txt").write_text(self.thread, encoding="utf-8")
         self.context.said[:] = []
-        self.context.selections[:] = []
 
     def config(self) -> dict:
         return {
@@ -174,34 +158,24 @@ class Runtime:
                 for call in message.tool_calls or []:
                     out.append({"role": "tool", "name": call["name"], "args": call.get("args", {})})
             elif isinstance(message, ToolMessage):
-                filled = _draft(message)
-                if filled is not None:
-                    out.append({"role": "draft", **filled})
+                shown = _shown(message)
+                if shown:
+                    out.append({"role": "shown", "ids": shown})
         return out
 
     # --- a turn ---------------------------------------------------------------------------------
 
-    def turn(
-        self, message: str, selection: list[int] | None = None, role: str = "auto"
-    ) -> Iterator[dict]:
-        """Send one message - with the faces selected on the part, if any, and what the engineer
-        said they are for - and yield what happens: text as it comes, tools as they run, the card
-        as it is filled. The selection goes to the agent with the words; only the agent puts it
-        on the card, so a question about a face changes nothing."""
+    def turn(self, message: str, focus: list[str] | None = None) -> Iterator[dict]:
+        """Send one message - with what is in focus on the engineer's screen, if anything - and
+        yield what happens: text as it comes, tools as they run, and what the agent shows, for the
+        screen to bring into focus. What is in focus goes with the words; it changes nothing by
+        itself."""
         self.context.said.append(message)
         self._said_path().write_text(json.dumps(self.context.said, indent=1), encoding="utf-8")
         self.context.questions = 0
         text = message
-        if selection:
-            chosen = sorted({int(f) for f in selection})
-            self.context.selections.append(chosen)
-            self._selections_path().write_text(
-                json.dumps(self.context.selections), encoding="utf-8"
-            )
-            what = ROLES.get(role, ROLES["auto"])
-            text += (
-                f"\n\n(selected on the part{what}: " + ", ".join(f"face:{f}" for f in chosen) + ")"
-            )
+        if focus:
+            text += "\n\n(in focus on the screen: " + ", ".join(focus[:40]) + ")"
         self.context.changed.clear()
         streamed = False
         try:
@@ -232,9 +206,9 @@ class Runtime:
                                 }
                             streamed = False
                         elif isinstance(m, ToolMessage):
-                            filled = _draft(m)
-                            if filled is not None:
-                                yield {"type": "draft", **filled}
+                            shown = _shown(m)
+                            if shown:
+                                yield {"type": "show", "ids": shown}
                             yield {
                                 "type": "tool_result",
                                 "id": m.tool_call_id,
@@ -258,19 +232,15 @@ def _text(message: Any) -> str:
     return ""
 
 
-def _draft(message: ToolMessage) -> dict | None:
-    """The study, changed by the agent and let through by the checks: what the pane says of it -
-    only what the agent asked the engineer to look at. The variant card shows the rest."""
-    if message.name != "edit_study":
-        return None
+def _shown(message: ToolMessage) -> list[str]:
+    """What the agent showed the engineer: the entities to bring into focus."""
+    if message.name != "show":
+        return []
     try:
         data = json.loads(_text(message))
     except (ValueError, TypeError):
-        return None
-    if not isinstance(data, dict) or "refused" in data:
-        return None
-    needed = [f"{b['id']}: {n}" for b in data.get("blocks", []) for n in b.get("needed", [])]
-    return {"attention": list(data.get("attention", [])), "needed": needed}
+        return []
+    return list(data.get("shown", [])) if isinstance(data, dict) else []
 
 
 def _summary(message: ToolMessage) -> str:
@@ -281,6 +251,15 @@ def _summary(message: ToolMessage) -> str:
         return _text(message)[:120]
     if isinstance(data, dict) and "answer" in data and "note" in data:
         data = data["answer"]
+    if message.name == "pipeline" and isinstance(data, dict):
+        steps = data.get("steps", [])
+        ran = sum(s["status"] in ("done", "cached") for s in steps)
+        reading = " - reading the design space" if data.get("reading_design_space") else ""
+        return f"{ran} of {len(steps)} steps done" + reading
+    if message.name == "entity" and isinstance(data, dict) and "label" in data:
+        return f"{data['id']}: {data['label']}"[:240]
+    if message.name == "show" and isinstance(data, dict):
+        return f"shown: {', '.join(data.get('shown', [])) or 'nothing'}"[:240]
     if isinstance(data, list):
         return f"{len(data)} described"
     if not isinstance(data, dict):
@@ -288,16 +267,6 @@ def _summary(message: ToolMessage) -> str:
     for key in ("refused", "error"):
         if key in data:
             return f"{key}: {data[key]}"[:240]
-    if "accepted_version" in data:
-        if data.get("cannot"):
-            return f"the study cannot be written: {data['cannot']}"[:240]
-        placed = data.get("where_ribs_go")
-        if isinstance(placed, dict) and placed:
-            return "ribs at the suggested point - " + "; ".join(
-                f"{block}: {found['ribs']}" for block, found in placed.items()
-            )
-        changes = len(data.get("changes", []))
-        return f"the study: {changes} changes" if changes else "the study, as accepted"
     if "entities" in data:
         return f"{len(data['entities'])} described"
     if "axes" in data:

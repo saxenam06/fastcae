@@ -71,7 +71,7 @@ Every design is stored as a distance map: a grid of points 3 mm apart at preview
 it is from the part's surface, negative inside the metal and positive outside. The surface is where
 the distance is zero. Adding a rib, thickening a floor or cutting a hole is an edit to the map;
 drawing the surface at the end turns the map back into a shape that can be seen and checked. How each
-edit is made: [../generate.md](../generate.md).
+edit is made: [../archive/generate.md](../archive/generate.md).
 
 ### Once per part, kept
 
@@ -96,7 +96,7 @@ Design #7 - six variants, 15 ribs and 11 pads - on the fast build (`bench/solver
 | 6. Blend ribs and pads in | Each rib's own shape - thickness, height, draft - merged into the map, with round fillets where it meets the floor and walls; pads the same way | CPU | 2.5 s |
 | 7. Cut holes | Hole shapes subtracted from the map | CPU | none on #7 |
 | 8. Draw the surface | Dual contouring re-draws the cells the design changed and splices them into the part's surface. Each triangle keeps the CAD face it is nearest, so seats and bolt faces are known later; volume and faults are reported | CPU | 23 s |
-| 9. Check | The [checks](../generate.md#checks): protected areas unchanged, within the grid, nothing floating, rib thickness, rib against wall, root gap, the root fillet (read off the surface), rib ends, blends bridging or clipped, thick spots, the surface closed (read off the surface) | CPU | 25 s |
+| 9. Check | The [checks](../archive/generate.md#checks): protected areas unchanged, within the grid, nothing floating, rib thickness, rib against wall, root gap, the root fillet (read off the surface), rib ends, blends bridging or clipped, thick spots, the surface closed (read off the surface) | CPU | 25 s |
 | 10. Weigh and save | Mass and added volume from the surface; the viewer's surfaces and the verdict saved. The bench also writes out the map, the surface and which faces are seats and bolts | CPU | - |
 
 The exact distances of steps 4 and 5 take 8 s on the GPU in all, 3 s of it splitting the part's
@@ -149,8 +149,10 @@ only 1.7× today's code. The GPU with split triangles is the way.
 field's 50.8 M cells changes side, its distances agree within 0.005 mm, the surface has the same
 2.54 M triangles, and 8 of its 1.27 M vertices lie more than 0.01 mm from before (dual contouring's
 vertex placement is sensitive in a few nearly degenerate cells). What is left of the 79 s: the
-checks 25 s, contouring the surface 23 s, moving faces 17 s, the distances 8 s. Still a trial -
-`bench/solvers/build_gpu.py` swaps the function in at run time; the product code is unchanged.
+checks 25 s, contouring the surface 23 s, moving faces 17 s, the distances 8 s. Measured by
+`bench/solvers/build_gpu.py`, which swapped the function in at run time; the product now builds this
+way itself (`fastcae.generate.distance`), and its checks, surface and faces moved as the list above
+says.
 
 ## 2. Meshing
 
@@ -212,7 +214,7 @@ its default, a thousandth of a box round a sphere about the origin: surface poin
 from where the field is zero on the housing, whose sphere is 1,241 mm - part of the boundary spread
 above. Without feature lines it rounds sharp edges at the facet size.
 
-**Compiled** (`bench/solvers/cgal_field.cpp`), the questions are answered in C++ inside CGAL: the same
+**Compiled** (`native/cgal_field/cgal_field.cpp`), the questions are answered in C++ inside CGAL: the same
 sizes mesh in 4.4 s on four cores, the surface within 0.005 mm of the field; with element sizes from
 the rules and the seats' edges given as lines, 8-14 s. Measured, and checked against meshing the CAD
 itself, in [field-meshing-gate.md](field-meshing-gate.md).

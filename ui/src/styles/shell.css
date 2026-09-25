@@ -71,22 +71,6 @@
   background: var(--blue);
 }
 
-/* The card's button in the bar: a mark and a word, lit when its pane is open. */
-.pane-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.pane-toggle[data-open="true"] {
-  border-color: var(--blue);
-  color: var(--blue);
-}
-
-.pane-toggle svg {
-  display: block;
-}
-
 .topbar {
   grid-area: topbar;
   display: flex;
@@ -268,14 +252,6 @@
   color: var(--faint);
 }
 
-/* The selection, now at the foot of the left column rather than in a pane of its own. It only
-   applies to two of the three tabs, and a panel that is empty on the third is a panel in the wrong
-   place. */
-.selection-panel {
-  display: block;
-  border-top: 2px solid var(--hairline);
-}
-
 /* The drawing's title block: what revision of what, on what evidence. Always visible, because a
    number on screen without its geometry hash is a number you cannot reproduce. */
 .titleblock {
@@ -408,18 +384,6 @@
   color: var(--muted);
 }
 
-.conflict {
-  margin: 8px 0;
-  padding: 8px 10px;
-  background: var(--conflict-wash);
-  border-left: 3px double var(--conflict);
-}
-
-.conflict .subject {
-  font-weight: 600;
-  color: var(--conflict);
-}
-
 .empty {
   padding: 10px 12px;
   color: var(--faint);
@@ -490,11 +454,6 @@
 
 .stage-scroll > .metrics {
   margin-bottom: 20px;
-}
-
-.stage-pending h2 {
-  font-size: 15px;
-  color: var(--ink);
 }
 
 .block {
@@ -657,42 +616,6 @@
   font-family: var(--mono);
   color: var(--faint);
   margin-left: 3px;
-}
-
-.axis-row {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 2px 0;
-  font-size: 12px;
-}
-
-.axis-row .detail {
-  flex: 1;
-  text-align: right;
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 11px;
-}
-
-.actions {
-  display: flex;
-  gap: 6px;
-  margin-top: 10px;
-  flex-wrap: wrap;
-}
-
-.slider {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin-top: 8px;
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.slider input {
-  flex: 1;
 }
 
 /* --- shell before a project is open ------------------------------------------------------- */
@@ -984,18 +907,6 @@ button.primary:disabled {
   white-space: nowrap;
 }
 
-.viewswitch {
-  display: flex;
-  gap: 2px;
-  padding: 8px 12px;
-}
-
-.viewswitch button {
-  flex: 1;
-  font-size: 11.5px;
-  padding: 4px 6px;
-}
-
 /* The prompt shown where a stage has something to build before it can show anything. Centred and
    narrow, because it is a sentence to read and a decision to make rather than a panel to scan. */
 .empty-stage {
@@ -1021,31 +932,6 @@ button.primary:disabled {
 .callouts {
   display: flex;
   flex-direction: column;
-}
-
-.actions button .detail {
-  margin-left: 8px;
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--faint);
-}
-
-/* One lever: what it is, and the dial that moves it. */
-.parameter {
-  padding: 8px 12px 10px;
-  border-bottom: 1px solid var(--hairline);
-}
-
-.parameter:last-child {
-  border-bottom: none;
-}
-
-.parameter .card-head {
-  margin-bottom: 2px;
-}
-
-.parameter .card-note {
-  margin-top: 4px;
 }
 
 button.quiet {
@@ -1080,16 +966,6 @@ button.quiet:hover {
 
 /* --- formations ---------------------------------------------------------------------------- */
 
-/* One thing a person approves: a zone, the protected areas, a correction. */
-.approval {
-  padding: 6px 0 8px;
-  border-bottom: 1px solid var(--hairline);
-}
-
-.approval:last-child {
-  border-bottom: none;
-}
-
 .chip {
   margin-left: auto;
   padding: 1px 6px;
@@ -1118,21 +994,6 @@ button.quiet:hover {
 
 /* How firmly a study's rule holds: hard - the engineer or the drawing said it; assumed - a default
    the system took, to confirm or relax; learned - from a rejection the engineer confirmed. */
-.study-rules {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.study-rule {
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.study-rule .chip {
-  margin: 0 5px 0 0;
-}
-
 .chip[data-strength="hard"] {
   color: var(--ink);
   border-color: var(--ink);
@@ -1148,14 +1009,6 @@ button.quiet:hover {
   border-color: var(--measured);
 }
 
-.study-lines {
-  margin: 0;
-  padding-left: 16px;
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--muted);
-}
-
 /* Say what you want: the engineer's words to the agent, and what it asks them to look at. */
 .said-line {
   margin-top: 8px;
@@ -1169,16 +1022,6 @@ button.quiet:hover {
   font-size: 12px;
   line-height: 1.4;
   white-space: pre-wrap;
-}
-
-.study-fold {
-  margin-top: 4px;
-}
-
-.study-fold summary {
-  cursor: pointer;
-  font-size: 11px;
-  color: var(--muted);
 }
 
 /* In the Generate rail: a word that does something - show on the part - rather than a button. */
@@ -1204,64 +1047,8 @@ button.quiet:hover {
   margin: 0 0 4px;
 }
 
-.written-list {
-  margin: 2px 0 6px;
-  padding-left: 16px;
-}
-
 .section > header .chip {
   margin-left: 8px;
-}
-
-.parameter select {
-  margin-left: auto;
-  font-size: 11.5px;
-}
-
-/* A check's verdict: the outcome, the check, and why. The rule it used is on hover. */
-.findings {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  margin-top: 8px;
-}
-
-.finding {
-  display: grid;
-  grid-template-columns: 44px 1fr;
-  gap: 6px;
-  font-size: 11px;
-  line-height: 1.4;
-  padding: 3px 0 3px 6px;
-  border-left: 2px solid var(--hairline);
-}
-
-.finding .mark {
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--muted);
-}
-
-.finding[data-outcome="pass"] {
-  border-left-color: var(--measured);
-}
-
-.finding[data-outcome="warn"] {
-  border-left-color: var(--running);
-  background: var(--running-wash);
-}
-
-.finding[data-outcome="reject"] {
-  border-left-color: var(--conflict);
-  background: var(--conflict-wash);
-}
-
-.finding .assumed {
-  color: var(--faint);
-}
-
-.busy-note {
-  padding: 8px 12px;
 }
 
 /* What is under the cursor, small: one name, a few measurements. Pinned by a click. */
@@ -1340,356 +1127,12 @@ button.quiet:hover {
   line-height: 1.4;
 }
 
-.verdict-part {
-  margin: 10px 0 4px;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-}
-
 .card-note.warn {
   color: var(--conflict);
   padding: 8px 12px;
 }
 
-/* The selection on the stage: the faces clicked, each grown by its own angle, and the one the
-   grow control acts on. */
-.stage-body .selection-bar {
-  position: absolute;
-  left: 12px;
-  bottom: 34px;
-  max-width: calc(100% - 24px);
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px 10px;
-  padding: 4px 8px;
-  background: var(--sheet);
-  border: 1px solid var(--hairline);
-  border-radius: 3px;
-  font-size: 11px;
-}
-
-.selection-bar[data-empty="true"] {
-  color: var(--faint);
-}
-
-.selection-bar label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-}
-
-.selection-bar input[type="range"] {
-  width: 90px;
-}
-
-.selection-bar .count {
-  font-family: var(--mono);
-}
-
-.selection-bar .seed {
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid var(--hairline);
-  border-radius: 2px;
-}
-
-.selection-bar .seed[data-active="true"] {
-  border-color: var(--blue);
-  background: var(--blue-wash);
-}
-
-.selection-bar .seed button {
-  border: none;
-  background: none;
-  padding: 1px 5px;
-  font-family: var(--mono);
-  font-size: 10.5px;
-  color: var(--blue);
-}
-
-.selection-bar .seed .grown {
-  color: var(--muted);
-}
-
-.selection-bar .seed .remove {
-  color: var(--muted);
-  padding: 1px 4px 1px 0;
-}
-
 /* --- the rib card -------------------------------------------------------------------------- */
-
-/* A column: the head, the slots scrolling in the middle, the design buttons and verdict below. */
-.rib-card {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-  font-size: 12px;
-}
-
-.rib-card > .card-note {
-  padding: 10px 12px;
-}
-
-.rib-card-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--hairline);
-}
-
-.rib-card-head button {
-  margin-left: auto;
-}
-
-.rib-slots {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-}
-
-.rib-slot {
-  padding: 6px 12px 7px;
-  border-bottom: 1px solid var(--hairline);
-}
-
-.rib-slot header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 3px;
-}
-
-.rib-slot .slot-label {
-  font-weight: 600;
-}
-
-.rib-slot[data-source="needed"] .slot-label {
-  color: var(--conflict);
-}
-
-.rib-slot header .chip {
-  margin-left: 0;
-}
-
-.rib-slot header .spacer {
-  flex: 1;
-}
-
-.rib-card button.icon,
-.rib-card button.link {
-  border: none;
-  background: none;
-  padding: 0 2px;
-  font-size: 11px;
-  color: var(--blue);
-}
-
-.rib-card button.icon {
-  color: var(--faint);
-}
-
-.rib-card button.icon:hover:not(:disabled),
-.rib-card button.link:hover:not(:disabled) {
-  text-decoration: underline;
-}
-
-.rib-card button:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.rib-card .chip[data-source="you"],
-.rib-card .chip[data-source="selected"] {
-  background: var(--blue-wash);
-  color: var(--blue);
-  border-color: var(--blue-wash);
-}
-
-.rib-card .chip[data-source="measured"],
-.rib-card .chip[data-source="drawing"] {
-  background: var(--measured-wash);
-  color: var(--measured);
-  border-color: var(--measured-wash);
-}
-
-.rib-card .chip[data-source="default"] {
-  background: var(--running-wash);
-  color: var(--running);
-  border-color: var(--running-wash);
-}
-
-.rib-card .chip[data-source="needed"] {
-  background: var(--conflict-wash);
-  color: var(--conflict);
-  border-color: var(--conflict);
-}
-
-.rib-card .chip[data-source="words"] {
-  background: var(--blue-wash);
-  color: var(--blue);
-  border-color: var(--blue);
-}
-
-/* The card is the draft of the study's next version: a row the draft changes is marked until it
-   is accepted or undone. */
-.rib-slot[data-changed="true"] {
-  background: var(--running-wash);
-  box-shadow: inset 3px 0 0 var(--running);
-}
-
-.rib-card-head .draft-chip {
-  margin-left: 0;
-}
-
-.draft-chip[data-differs="true"] {
-  color: var(--running);
-  border-color: var(--running);
-}
-
-.draft-bar {
-  padding: 7px 12px 8px;
-  border-bottom: 1px solid var(--hairline);
-  background: var(--running-wash);
-  font-size: 11.5px;
-}
-
-.draft-bar[data-refused="true"] {
-  background: var(--conflict-wash);
-  color: var(--conflict);
-}
-
-.draft-bar .actions {
-  margin-top: 5px;
-}
-
-/* What the study makes of a row: fixed, or what it may vary over - and the rules it holds. */
-.slot-study {
-  margin-top: 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 11px;
-  line-height: 1.4;
-  color: var(--muted);
-}
-
-.slot-study .study-rule,
-.study-extra .study-rule {
-  font-size: 11px;
-  color: var(--ink);
-}
-
-.study-setting .tag,
-.slot-study .tag {
-  display: inline-block;
-  margin-right: 5px;
-  padding: 0 4px;
-  border-radius: 2px;
-  font-family: var(--mono);
-  font-size: 9.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--blue);
-  background: var(--blue-wash);
-}
-
-.study-setting .tag[data-fixed="true"] {
-  color: var(--muted);
-  background: var(--hairline);
-}
-
-.study-rule[data-enforced="false"] > .chip {
-  border-style: dashed;
-}
-
-.rule-until {
-  padding-left: 2px;
-  color: var(--faint);
-  font-size: 10.5px;
-}
-
-.slot-said.heard {
-  padding-left: 6px;
-  border-left: 2px solid var(--blue-wash);
-  font-style: italic;
-}
-
-.study-extra .kv {
-  margin: 2px 0 0;
-}
-
-/* The study card: a block by the entities its ribs stand on, end on and keep clear of, then its
-   settings and rules. What the draft changes is marked until it is accepted or undone. */
-.study-block[data-changed="true"] {
-  box-shadow: inset 3px 0 0 var(--running);
-}
-
-.block-where dd[data-changed="true"],
-.keep-clear[data-changed="true"],
-.study-setting[data-changed="true"],
-.study-rule[data-changed="true"] {
-  background: var(--running-wash);
-}
-
-.block-where dd {
-  margin-bottom: 3px;
-}
-
-.keep-clear {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 3px;
-  margin-bottom: 2px;
-}
-
-.keep-clear .chip {
-  margin: 0 3px 0 0;
-}
-
-.ribs-chip {
-  border-style: dashed;
-  padding: 0 4px;
-  font-family: var(--mono);
-  font-size: 10.5px;
-  color: var(--muted);
-}
-
-.refs .tag,
-.slot-study .tag {
-  display: inline-block;
-  margin-left: 4px;
-  padding: 0 4px;
-  border-radius: 2px;
-  font-size: 9.5px;
-  color: var(--muted);
-  background: var(--hairline);
-}
-
-.setting-label {
-  color: var(--ink);
-}
-
-.slot-note.waits {
-  margin-top: 4px;
-  padding: 2px 6px;
-  border-left: 2px solid var(--running);
-  background: var(--running-wash);
-  color: var(--ink);
-}
-
-.slot-parts {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 12px;
-}
 
 .part {
   display: inline-flex;
@@ -1698,67 +1141,13 @@ button.quiet:hover {
   gap: 4px;
 }
 
-.part-label {
-  color: var(--muted);
-}
-
 .part[data-type="faces"],
 .part[data-type="list"] {
   flex-basis: 100%;
 }
 
-.part[data-type="faces"][data-default="true"] .ref-chip {
-  border-style: dashed;
-}
-
 .part[data-type="number"][data-active="false"] input {
   color: var(--faint);
-}
-
-.part-actions {
-  display: inline-flex;
-  gap: 6px;
-}
-
-.refs {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 3px;
-}
-
-/* A face or feature, by the one name it has: shown on the part by a click, taken out by its
-   cross. */
-.ref-chip {
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid var(--blue-wash);
-  border-radius: 2px;
-  background: var(--blue-wash);
-}
-
-.ref-chip button {
-  border: none;
-  background: none;
-  padding: 0 4px;
-  font-family: var(--mono);
-  font-size: 10.5px;
-  color: var(--blue);
-}
-
-/* The × that takes one entity out of a list. */
-.ref-chip button.chip-x {
-  padding: 0 4px 0 1px;
-  font-family: var(--sans);
-  color: var(--muted);
-}
-
-.ref-chip button.chip-x:hover {
-  color: var(--conflict);
-}
-
-.ref-chip .remove {
-  padding: 0 3px 0 0;
-  color: var(--muted);
 }
 
 .ref-inline {
@@ -1769,50 +1158,6 @@ button.quiet:hover {
   font-family: var(--mono);
   font-size: 10.5px;
   color: var(--blue);
-}
-
-/* A number and its unit, with arrows to step it. */
-.stepper {
-  display: inline-flex;
-  align-items: stretch;
-  border: 1px solid var(--hairline);
-  border-radius: 2px;
-  background: var(--sheet);
-}
-
-.stepper input {
-  width: 58px;
-  border: none;
-  padding: 2px 4px;
-  font-family: var(--mono);
-  font-size: 11.5px;
-  text-align: right;
-  background: none;
-}
-
-.stepper input:focus {
-  outline: 1px solid var(--blue);
-}
-
-.stepper .arrows {
-  display: flex;
-  flex-direction: column;
-  border-left: 1px solid var(--hairline);
-}
-
-.stepper .arrows button {
-  border: none;
-  border-radius: 0;
-  padding: 0 4px;
-  font-size: 8px;
-  line-height: 1.1;
-  color: var(--muted);
-  background: none;
-}
-
-.stepper .arrows button:hover:not(:disabled) {
-  color: var(--blue);
-  background: var(--blue-wash);
 }
 
 .part .unit {
@@ -1831,198 +1176,6 @@ button.quiet:hover {
   background: var(--sheet);
 }
 
-/* Words for one slot: typed in place, faces put in from the selection. */
-.words-line {
-  margin-top: 5px;
-}
-
-.words-edit {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.words-edit input {
-  flex: 1;
-  min-width: 0;
-  font: inherit;
-  font-size: 12px;
-  padding: 2px 5px;
-  border: 1px solid var(--blue);
-  border-radius: 2px;
-}
-
-.words-edit button {
-  padding: 1px 7px;
-}
-
-.slot-said {
-  margin-top: 3px;
-  color: var(--ink);
-  font-size: 11.5px;
-  line-height: 1.5;
-}
-
-.slot-note {
-  margin-top: 2px;
-  color: var(--faint);
-  font-size: 10.5px;
-  line-height: 1.35;
-}
-
-.slot-problem {
-  margin-top: 3px;
-  padding: 2px 6px;
-  border-left: 2px solid var(--conflict);
-  background: var(--conflict-wash);
-  color: var(--conflict);
-  font-size: 11px;
-}
-
-.rib-card-foot {
-  border-top: 1px solid var(--hairline);
-  padding: 8px 12px 10px;
-  max-height: 45%;
-  overflow: auto;
-}
-
-.rib-card-foot .actions {
-  margin-top: 6px;
-}
-
-.rib-card-status {
-  color: var(--conflict);
-  font-size: 11px;
-}
-
-.rib-card-status[data-ready="true"] {
-  color: var(--measured);
-}
-
-.rib-card-foot .busy-note {
-  padding: 6px 0 0;
-}
-
-.rib-verdict {
-  margin-top: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  align-items: flex-start;
-}
-
-.rib-verdict .finding {
-  align-self: stretch;
-}
-
-.verdict-line {
-  font-family: var(--mono);
-  font-size: 11px;
-}
-
-.verdict-line .chip {
-  margin-left: 0;
-}
-
-/* What the lines drawn on the part mean: a colour per outcome, with how many. */
-.paths-key {
-  margin-top: 8px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px 12px;
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.paths-key .verdict-line {
-  flex-basis: 100%;
-  color: var(--ink);
-}
-
-.paths-key-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.paths-key-item .swatch {
-  display: inline-block;
-  width: 14px;
-  height: 3px;
-  border-radius: 1px;
-}
-
-/* The study by hand: blocks added from the faces selected, settings changed where they show, what
-   a block keeps clear of - and how many designs. */
-.add-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 12px 7px;
-  font-size: 11px;
-  border-bottom: 1px solid var(--hairline);
-}
-
-.add-row button,
-.setting-editor button {
-  padding: 1px 6px;
-  font-size: 11px;
-}
-
-.study-block > header {
-  display: flex;
-  align-items: center;
-}
-
-.study-block > header .icon {
-  margin-left: auto;
-}
-
-.block-where dd .link,
-.study-setting .link,
-.study-rule .link,
-.keep-clear .link {
-  margin-left: 6px;
-  font-size: 10.5px;
-}
-
-.keep-clear-add,
-.setting-editor,
-.how-many {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 3px;
-  font-size: 11px;
-}
-
-.setting-editor {
-  display: flex;
-  margin: 2px 0 4px 12px;
-  padding: 3px 6px;
-  border-left: 2px solid var(--blue-wash);
-}
-
-/* Typed, and not kept yet. */
-.setting-editor[data-typed="true"] {
-  border-left-color: var(--running);
-  background: var(--running-wash);
-}
-
-.setting-unkept {
-  flex-basis: 100%;
-  color: var(--running);
-  font-size: 10.5px;
-}
-
-.setting-editor label {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  margin-right: 6px;
-}
-
 input.num {
   width: 52px;
   padding: 1px 4px;
@@ -2038,105 +1191,6 @@ input.num:focus {
   outline: none;
   border-color: var(--blue);
   background: var(--sheet);
-}
-
-.keep-clear-add select {
-  font-size: 11px;
-}
-
-.go-progress,
-.go-alone {
-  margin: 2px 0 4px;
-  font-size: 11px;
-}
-
-.varied-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 14px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--hairline);
-}
-
-.varied-head .card-title {
-  margin-right: auto;
-}
-
-.varied-key {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  font-size: 11px;
-}
-
-.varied-grid {
-  flex: 1;
-  overflow: auto;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 10px;
-  padding: 10px 12px;
-}
-
-.varied-defs {
-  position: absolute;
-}
-
-.varied-card {
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--hairline);
-  background: var(--ground);
-}
-
-.varied-plan {
-  width: 100%;
-  aspect-ratio: 1 / 1;
-  background: var(--sheet);
-}
-
-.varied-outline {
-  fill: none;
-  stroke: #adb5bd;
-  stroke-width: 0.6px;
-  vector-effect: non-scaling-stroke;
-}
-
-.varied-rib {
-  stroke-width: 2px;
-  stroke-linecap: round;
-  vector-effect: non-scaling-stroke;
-}
-
-.varied-pad {
-  stroke-width: 3.5px;
-  vector-effect: non-scaling-stroke;
-}
-
-.varied-hole {
-  stroke-width: 1.2px;
-  vector-effect: non-scaling-stroke;
-}
-
-.varied-card figcaption {
-  padding: 4px 6px 6px;
-  font-size: 11px;
-  line-height: 1.35;
-}
-
-.varied-blocks {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0 8px;
-  font-size: 10.5px;
-}
-
-.varied-card .actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 2px;
 }
 
 /* --- the tabs, and the agent above them -------------------------------------------------------- */
@@ -2232,9 +1286,7 @@ input.num:focus {
   margin-top: 4px;
 }
 
-.agent-drawer button.link,
-.campaign-doc button.link,
-.launch-card button.link {
+.agent-drawer button.link {
   border: none;
   background: none;
   padding: 0 2px;
@@ -2243,8 +1295,7 @@ input.num:focus {
   cursor: pointer;
 }
 
-.agent-drawer button.link:hover,
-.campaign-doc button.link:hover {
+.agent-drawer button.link:hover {
   text-decoration: underline;
 }
 
@@ -2275,12 +1326,6 @@ input.num:focus {
   background: var(--ground);
 }
 
-.rib-card-head .pane-fold {
-  margin-left: auto;
-  font-size: 16px;
-  line-height: 1;
-}
-
 /* A few choices side by side, one of them on. */
 .segmented {
   display: inline-flex;
@@ -2307,17 +1352,6 @@ input.num:focus {
   background: var(--blue-wash);
   color: var(--blue);
   font-weight: 500;
-}
-
-.generate-tabs {
-  display: flex;
-  margin: 10px 12px 4px;
-}
-
-.generate-tabs button {
-  flex: 1;
-  padding: 6px 10px;
-  font-size: 12.5px;
 }
 
 /* A page over the part: the part stays loaded underneath, so coming back to it costs nothing. */
@@ -2347,166 +1381,7 @@ input.num:focus {
   line-height: 1.55;
 }
 
-.inline-layers {
-  flex-direction: row;
-  align-items: center;
-  flex-wrap: wrap;
-  padding: 0;
-  gap: 2px;
-  background: rgba(255, 255, 255, 0.88);
-  border: 1px solid var(--hairline);
-}
-
-/* --- where a design is: a letter a stage, filled once done ------------------------------------ */
-
-.stage-badges {
-  display: inline-flex;
-  gap: 2px;
-  flex: none;
-}
-
-.stage-badge {
-  display: inline-grid;
-  place-items: center;
-  width: 15px;
-  height: 15px;
-  font-family: var(--mono);
-  font-size: 9.5px;
-  font-weight: 600;
-  line-height: 1;
-  color: var(--faint);
-  background: var(--sheet);
-  border: 1px solid var(--hairline);
-  border-radius: 2px;
-}
-
-.stage-badge[data-state="done"],
-.stage-badge[data-state="pass"] {
-  color: #fff;
-  background: var(--measured);
-  border-color: var(--measured);
-}
-
-.stage-badge[data-state="warn"] {
-  color: #fff;
-  background: var(--running);
-  border-color: var(--running);
-}
-
-.stage-badge[data-state="reject"] {
-  color: #fff;
-  background: var(--conflict);
-  border-color: var(--conflict);
-}
-
 /* --- Campaign ----------------------------------------------------------------------------------- */
-
-.campaign-doc {
-  max-width: 1000px;
-  padding: 16px 22px 40px;
-}
-
-.campaign-section {
-  margin-bottom: 12px;
-  padding: 10px 14px 12px;
-  background: var(--sheet);
-  border: 1px solid var(--hairline);
-}
-
-.campaign-section h2 {
-  margin-bottom: 8px;
-  font-size: 11.5px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.campaign-section h2 .dim {
-  font-weight: 400;
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.campaign-section > .card-note {
-  margin-bottom: 6px;
-}
-
-.switch-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 6px;
-  padding: 3px 0;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.switch-row input {
-  margin: 0 3px 0 0;
-  transform: translateY(1px);
-}
-
-.switch-row[data-off="true"] > :not(input) {
-  color: var(--faint);
-  text-decoration: line-through;
-}
-
-.campaign-block {
-  padding: 6px 0;
-  border-top: 1px solid var(--hairline);
-}
-
-.campaign-block:first-of-type {
-  border-top: none;
-}
-
-.campaign-block-body {
-  padding-left: 24px;
-}
-
-.campaign-setting {
-  padding: 1px 0;
-  font-size: 11.5px;
-}
-
-.campaign-setting .tag,
-.campaign-block .tag {
-  font-family: var(--mono);
-  font-size: 9.5px;
-  padding: 0 4px;
-  margin-right: 4px;
-  border-radius: 2px;
-  color: var(--blue);
-  background: var(--blue-wash);
-}
-
-.campaign-setting .tag[data-fixed="true"] {
-  color: var(--muted);
-  background: var(--ground);
-}
-
-.rule-switch {
-  font-size: 11.5px;
-}
-
-.knowledge-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 3px 0;
-  font-size: 12px;
-  border-bottom: 1px dotted var(--hairline);
-}
-
-.knowledge-row dt,
-.knowledge-row dd {
-  margin: 0;
-}
-
-.knowledge-row dd {
-  font-size: 11px;
-  text-align: right;
-}
 
 table.materials {
   width: 100%;
@@ -2527,90 +1402,7 @@ table.materials th {
   color: var(--muted);
 }
 
-.stage-list-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 0;
-  font-size: 12px;
-}
-
-.launch-line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 14px;
-  font-size: 12px;
-}
-
-.launch-line input.num {
-  width: 72px;
-}
-
-.launch-off {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-  margin-top: 8px;
-  font-size: 11.5px;
-}
-
-.off-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  max-width: 100%;
-  padding: 1px 4px 1px 7px;
-  font-size: 11px;
-  background: var(--running-wash);
-  border: 1px solid var(--running);
-  border-radius: 9px;
-}
-
-.run-row {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
-}
-
-.run-row .run-name {
-  font-size: 12px;
-}
-
-.run-row .run-detail {
-  font-size: 11px;
-  color: var(--muted);
-}
-
 /* --- Designs ------------------------------------------------------------------------------------ */
-
-.run-select {
-  width: 100%;
-  padding: 3px;
-  font-size: 12px;
-}
-
-.stage-counts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 8px;
-}
-
-.stage-count {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-}
-
-.design-filters {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-}
 
 .design-row {
   display: grid;
@@ -2623,489 +1415,6 @@ table.materials th {
 .design-row[data-active="true"] {
   background: var(--blue-wash);
   border-left-color: var(--blue);
-}
-
-.design-name {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
-}
-
-.rank {
-  padding: 0 4px;
-  font-family: var(--mono);
-  font-size: 9.5px;
-  color: var(--muted);
-  border: 1px solid var(--hairline);
-  border-radius: 8px;
-}
-
-.design-detail {
-  overflow: hidden;
-  color: var(--muted);
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.pager {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding-top: 8px;
-}
-
-.design-tabs button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-}
-
-.stage-body .overlay.design-key {
-  flex-direction: column;
-  align-items: flex-start;
-  max-width: min(460px, 70%);
-}
-
-.design-key .paths-key,
-.design-key > .card-note {
-  padding: 6px 8px;
-  background: rgba(255, 255, 255, 0.9);
-  border: 1px solid var(--hairline);
-}
-
-.readout-stages {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.readout-stage {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 6px;
-  font-size: 11.5px;
-}
-
-.readout-made div {
-  padding: 1px 0;
-  font-size: 11.5px;
-}
-
-.plans {
-  display: flex;
-  flex-direction: column;
-  min-height: 100%;
-  background: var(--sheet);
-}
-
-.plans > .card-note {
-  padding: 12px;
-}
-
-.plans .varied-grid {
-  flex: 1;
-  overflow: visible;
-}
-
-.varied-card {
-  cursor: pointer;
-}
-
-.varied-card[data-selected="true"] {
-  outline: 2px solid var(--blue);
-  outline-offset: -1px;
-}
-
-.varied-line .stage-badge {
-  margin-left: 4px;
-  vertical-align: 1px;
-}
-
-.add-hint {
-  flex-basis: 100%;
-  margin-top: 4px;
-  padding: 4px 8px;
-  font-size: 11px;
-  line-height: 1.4;
-  color: var(--ink);
-  background: var(--blue-wash);
-  border-left: 2px solid var(--blue);
-}
-
-.switch-row .chip {
-  margin-left: 0;
-}
-
-.knowledge-row > span:last-child:not(:first-child) {
-  flex: none;
-  max-width: 45%;
-  text-align: right;
-  font-size: 11px;
-}
-
-.paths-said summary {
-  cursor: pointer;
-}
-
-.paths-said .dim {
-  max-height: 22vh;
-  overflow: auto;
-  margin-top: 4px;
-}
-
-
-/* Design a variant: a tab for each variant kept, and one for a new one. */
-.variant-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 6px 10px 8px;
-  border-bottom: 1px solid var(--hairline);
-}
-
-.variant-tab {
-  max-width: 100%;
-  padding: 3px 8px;
-  font-size: 11.5px;
-  text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  background: var(--sheet);
-  border: 1px solid var(--hairline);
-  border-radius: 3px;
-}
-
-.variant-tab .mono {
-  color: var(--muted);
-  font-size: 10.5px;
-}
-
-.variant-tab[data-active="true"] {
-  color: var(--blue);
-  border-color: var(--blue);
-  background: var(--blue-wash);
-}
-
-.variant-tab.new {
-  color: var(--blue);
-  border-style: dashed;
-}
-
-.variant-id {
-  padding: 6px 12px 2px;
-  font-size: 11.5px;
-}
-
-.variant-used {
-  padding: 0 12px 6px;
-  font-size: 11.5px;
-}
-
-.variant-count {
-  margin: 8px 0 2px;
-  font-size: 11.5px;
-  color: var(--muted);
-}
-
-/* --- Design a variant: one change, in a sentence, then its shape and its rules ---------------- */
-
-.variant-block {
-  padding: 8px 12px 10px;
-}
-
-.variant-block-head {
-  display: flex;
-  align-items: center;
-  margin-bottom: 2px;
-}
-
-.variant-block-head .variant-kind {
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.variant-block-head .icon {
-  margin-left: auto;
-}
-
-.where-summary {
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.where-summary .where-edit {
-  margin-left: 6px;
-}
-
-.where-details {
-  margin: 6px 0 4px;
-  padding: 6px 8px;
-  background: var(--ground);
-  border-radius: 4px;
-}
-
-.variant-section {
-  margin-top: 12px;
-}
-
-.variant-section .section-title {
-  margin-bottom: 4px;
-  padding-bottom: 2px;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted);
-  border-bottom: 1px solid var(--hairline);
-}
-
-.setting-row {
-  display: grid;
-  grid-template-columns: 92px minmax(0, 1fr);
-  column-gap: 8px;
-  align-items: baseline;
-  padding: 3px 0;
-  font-size: 12px;
-}
-
-.setting-row .setting-name {
-  color: var(--muted);
-}
-
-.setting-row .setting-value {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px;
-}
-
-.setting-row .setting-editor {
-  grid-column: 1 / -1;
-  margin-left: 0;
-}
-
-.setting-row .reset {
-  font-size: 11px;
-}
-
-.mine-dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  margin-left: 5px;
-  vertical-align: middle;
-  background: var(--blue);
-  border-radius: 50%;
-}
-
-.choice-chips {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px;
-}
-
-.choice {
-  padding: 1px 8px;
-  font-size: 11px;
-  color: var(--muted);
-  background: var(--sheet);
-  border: 1px solid var(--hairline);
-  border-radius: 10px;
-  cursor: pointer;
-}
-
-.choice[data-on="true"] {
-  color: var(--blue);
-  background: var(--blue-wash);
-  border-color: var(--blue);
-}
-
-.choice:disabled {
-  cursor: default;
-}
-
-.choice[data-on="true"]:disabled {
-  opacity: 1;
-}
-
-.more-settings > summary {
-  margin: 6px 0 2px;
-  font-size: 11.5px;
-  color: var(--muted);
-  cursor: pointer;
-}
-
-.rule-row {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  padding: 2px 0;
-  font-size: 12px;
-}
-
-.rule-row .rule-text {
-  flex: 1;
-}
-
-.rule-row[data-changed="true"],
-.setting-row[data-changed="true"] {
-  background: var(--running-wash);
-}
-
-/* A new variant is all new: nothing in it is marked as changed. */
-.variant-block[data-kept="false"] [data-changed="true"] {
-  background: none;
-  box-shadow: none;
-}
-
-.rule-tag {
-  padding: 0 6px;
-  font-size: 10px;
-  color: var(--muted);
-  background: none;
-  border: 1px solid var(--hairline);
-  border-radius: 8px;
-}
-
-button.rule-tag {
-  cursor: pointer;
-}
-
-.add-rule {
-  margin-top: 4px;
-  font-size: 11.5px;
-}
-
-.interfaces-fold {
-  margin-top: 8px;
-}
-
-.paths-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px 10px;
-  margin: 4px 0;
-}
-
-.slot-sub,
-.step-sub {
-  margin: 10px 0 4px;
-  font-size: 10.5px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.rule-add {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px;
-  margin-top: 6px;
-  font-size: 11.5px;
-}
-
-.rule-add select {
-  max-width: 100%;
-  font-size: 11.5px;
-}
-
-.variant-foot {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.variant-look,
-.variant-keep {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.variant-keep {
-  padding-top: 8px;
-  border-top: 1px solid var(--hairline);
-}
-
-.variant-name {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-}
-
-.variant-name input {
-  flex: 1;
-  min-width: 0;
-  padding: 3px 6px;
-  font: inherit;
-  border: 1px solid var(--hairline);
-}
-
-.sample-about {
-  font-size: 11.5px;
-}
-
-button.danger {
-  color: var(--conflict);
-}
-
-/* Generate, Campaign: the card in three steps, side by side where there is room. */
-.campaign-card {
-  padding: 16px 22px 40px;
-}
-
-.campaign-card-head h1 {
-  font-size: 16px;
-  margin-bottom: 4px;
-}
-
-.campaign-card-head p {
-  max-width: 900px;
-  margin-bottom: 12px;
-  font-size: 12.5px;
-}
-
-.campaign-steps {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 12px;
-  align-items: start;
-}
-
-.campaign-step {
-  min-width: 0;
-  padding: 10px 14px 14px;
-  background: var(--sheet);
-  border: 1px solid var(--hairline);
-}
-
-.campaign-step[data-waiting="true"] {
-  opacity: 0.55;
-}
-
-.campaign-step h2 {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-  font-size: 13px;
-}
-
-.step-number {
-  display: inline-grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  font-size: 11px;
-  color: var(--sheet);
-  background: var(--blue);
-  border-radius: 50%;
 }
 
 .campaign-name {
@@ -3123,239 +1432,114 @@ button.danger {
   border: 1px solid var(--hairline);
 }
 
-.variant-choice {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 6px;
-  padding: 4px 0;
-  font-size: 12px;
-  border-top: 1px solid var(--hairline);
-  cursor: pointer;
-}
-
-.variant-choice .mono {
-  color: var(--muted);
-  font-size: 10.5px;
-}
-
-.variant-choice .tag {
-  font-family: var(--mono);
-  font-size: 9.5px;
-  padding: 0 4px;
-  border-radius: 2px;
-  color: var(--blue);
-  background: var(--blue-wash);
-}
-
-.variant-choice[data-on="true"] b {
-  color: var(--blue);
-}
-
-/* Check: each variant, what holds always and the checks - a few words each, the rule on hover. */
-.variant-held {
-  padding: 5px 0;
-  font-size: 12px;
-  border-bottom: 1px solid var(--hairline);
-}
-
-.variant-held-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 6px;
-  margin-bottom: 3px;
-}
-
-.variant-held-head .mono {
-  color: var(--muted);
-  font-size: 10.5px;
-}
-
-.variant-held-head .tag {
-  font-family: var(--mono);
-  font-size: 9.5px;
-  padding: 0 4px;
-  border-radius: 2px;
-  color: var(--blue);
-  background: var(--blue-wash);
-}
-
-.held-line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 3px 4px;
-  padding: 1px 0;
-  font-size: 11px;
-}
-
-.held-what {
-  flex: none;
-  width: 40px;
-  font-size: 10px;
-  color: var(--muted);
-}
-
-.held-pill {
-  padding: 0 7px;
-  line-height: 18px;
-  white-space: nowrap;
-  background: var(--ground);
-  border: 1px solid var(--hairline);
-  border-radius: 9px;
-  cursor: default;
-}
-
-.held-pill b {
-  font-weight: 600;
-}
-
-.held-pill.rule {
-  background: var(--sheet);
-}
-
-.held-pill.rule[data-strength="assumed"] {
-  border-style: dashed;
-}
-
-.held-always {
-  margin: 0;
-  padding: 0;
-  font-size: 11.5px;
-  line-height: 1.6;
-  list-style: none;
-}
-
-.held-always li::before {
-  content: "✓";
-  margin-right: 6px;
-  color: var(--blue);
-}
-
-.check-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.check-pill {
-  padding: 0 8px;
-  font: inherit;
-  font-size: 11px;
-  line-height: 20px;
-  color: var(--blue);
-  background: var(--blue-wash);
-  border: 1px solid transparent;
-  border-radius: 10px;
-  cursor: pointer;
-}
-
-.check-pill::before {
-  content: "✓ ";
-}
-
-.check-pill[data-off="true"] {
-  color: var(--faint);
-  text-decoration: line-through;
-  background: transparent;
-  border-color: var(--hairline);
-}
-
-.check-pill[data-off="true"]::before,
-.check-pill.fixed::before {
-  content: "";
-}
-
-.check-pill.fixed {
-  color: var(--ink);
-  background: var(--ground);
-  cursor: default;
-}
-
-.field-checks {
-  margin-top: 8px;
-  font-size: 11.5px;
-}
-
-.field-checks summary {
-  margin-bottom: 4px;
-  color: var(--muted);
-  cursor: pointer;
-}
-
-.field-checks .dim {
-  margin-top: 4px;
-  font-size: 11px;
-}
-
-.held-hint {
-  margin-top: 8px;
-  font-size: 10.5px;
-}
-
-.method-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 6px;
-  padding: 3px 0;
-  font-size: 12px;
-}
-
-.method-row[data-off="true"] {
-  color: var(--faint);
-}
-
-.estimate-line,
-.screen-said {
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.launch-actions {
-  margin-top: 10px;
-}
-
-/* Generate, Designs: each design's variants as dots, and the filter. */
-.variant-filter {
-  display: flex;
-  flex-wrap: wrap;
+/* The section control: bottom right of every 3D canvas - a button until a section is on, then the
+   plane itself. One section for all the views, so it looks the same on each. */
+.section-toggle {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 5;
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
-  margin-top: 6px;
+  gap: 6px;
+  padding: 4px 10px;
   font-size: 11.5px;
+  background: var(--sheet);
+  border: 1px solid var(--hairline);
+  cursor: pointer;
 }
 
-.variant-filter select {
-  max-width: 100%;
-  font-size: 11.5px;
+.section-toggle:hover {
+  border-color: var(--blue);
+  color: var(--blue);
 }
 
-.design-variants {
+.section-panel {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 5;
+  width: 256px;
   display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-  grid-column: 1 / -1;
+  flex-direction: column;
+  gap: 7px;
+  padding: 8px 10px 9px;
+  font-size: 11.5px;
+  background: var(--sheet);
+  border: 1px solid var(--hairline);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
 }
 
-.variant-dot {
-  padding: 0 4px;
-  font-family: var(--mono);
-  font-size: 9.5px;
-  color: #fff;
-  border-radius: 2px;
+.section-panel header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
 }
 
-.made-row {
-  padding: 2px 0;
+.section-panel header .icon {
+  margin-left: auto;
+  border: none;
+  background: none;
+  padding: 0 2px;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--muted);
+  cursor: pointer;
 }
 
-.made-values {
-  padding-left: 12px;
+.section-panel .segmented button {
+  padding: 3px 8px;
   font-size: 11px;
 }
 
-.recipe {
-  font-size: 10.5px;
+.section-row {
+  display: grid;
+  grid-template-columns: 30px 1fr 40px;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.section-row input[type="range"] {
+  width: 100%;
+  margin: 0;
+}
+
+.section-row .num {
+  text-align: right;
+  color: var(--ink);
+}
+
+.section-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.section-actions button {
+  font-size: 11px;
+  padding: 3px 10px;
+}
+
+/* A screen that threw: what threw, rather than a white page. */
+.crash {
+  margin: 48px auto;
+  max-width: 820px;
+  padding: 24px 28px;
+  border: 1px solid var(--line, #d8d8d8);
+  border-radius: 8px;
+  background: #fff;
+}
+.crash h2 { margin: 0 0 8px; }
+.crash p { margin: 0 0 16px; color: #555; }
+.crash pre {
+  margin: 0 0 16px;
+  padding: 12px;
+  overflow: auto;
+  max-height: 340px;
+  background: #faf7f5;
+  border: 1px solid #eadfd8;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
 }

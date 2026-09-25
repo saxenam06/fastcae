@@ -18,7 +18,8 @@
 
 import type { Mesh, VoxelCells } from "../api/client";
 
-export type ColourMode = "surface" | "frozen" | "exterior";
+/** How the part is coloured: plain, frozen faces, exterior faces, or each face its own paint. */
+export type ColourMode = "surface" | "frozen" | "exterior" | "paint";
 
 export interface FaceState {
   selected: Set<number>;
@@ -65,12 +66,17 @@ in float v_standing;
 flat in uint v_faceId;
 
 uniform sampler2D u_faceState;
+uniform sampler2D u_paint;
 uniform int u_faceStateWidth;
 uniform vec3 u_eye;
 uniform int u_colourMode;
 uniform float u_alpha;
 uniform int u_tinted;
 uniform vec3 u_tint;
+// A section: the plane (normal, offset) and whether there is one. What lies on the far side,
+// dot(p, normal) > offset, is not drawn.
+uniform vec4 u_clip;
+uniform int u_clipOn;
 
 out vec4 fragColour;
 
@@ -83,6 +89,12 @@ const vec3 MEASURED   = vec3(0.184, 0.420, 0.310);
 const vec3 OCHRE      = vec3(0.541, 0.416, 0.122);
 const vec3 INTERIOR   = vec3(0.478, 0.502, 0.494);
 
+// A section drawn as a drawing marks one: flat, in the solid's own colour, hatched on the diagonal.
+vec3 hatched(vec3 solid) {
+  float line = mod(gl_FragCoord.x + gl_FragCoord.y, 9.0) < 1.5 ? 0.52 : 0.84;
+  return solid * line;
+}
+
 vec4 faceState(uint faceId) {
   int index = int(faceId);
   int width = u_faceStateWidth;
@@ -91,8 +103,18 @@ vec4 faceState(uint faceId) {
 }
 
 void main() {
+  if (u_clipOn == 1 && dot(v_worldPosition, u_clip.xyz) > u_clip.w) discard;
   vec3 normal = normalize(v_normal);
   vec3 viewDirection = normalize(u_eye - v_worldPosition);
+
+  // Where the plane cuts a solid its own inside shows through the cut - the only place a face of
+  // a closed, outward surface is ever seen from behind - and drawn flat and hatched it reads as
+  // the solid cut, not as the far wall of a hollow.
+  if (u_clipOn == 1 && dot(normal, viewDirection) < 0.0) {
+    vec3 solid = u_tinted == 1 ? u_tint : STEEL;
+    fragColour = vec4(pow(hatched(solid), vec3(0.4545)), u_alpha);
+    return;
+  }
 
   // Two-sided: a bore's far wall is seen from behind, and lighting it as if it faced away turns
   // every bore into a black hole.
@@ -119,6 +141,11 @@ void main() {
     base = isFrozen ? MEASURED : STEEL;
   } else if (u_colourMode == 2) {
     base = isExterior ? OCHRE : INTERIOR;
+  } else if (u_colourMode == 3) {
+    // Each face its own colour, as a pipeline step paints the part; unpainted faces stay steel.
+    int index = int(v_faceId);
+    vec4 paint = texelFetch(u_paint, ivec2(index % u_faceStateWidth, index / u_faceStateWidth), 0);
+    base = paint.a > 0.5 ? pow(paint.rgb, vec3(2.2)) : STEEL;
   }
   // Nothing tints the default view. An always-on colour reads as a selection the user did not
   // make, and it competes with the one they did. Controlled faces get their own mode, entered
@@ -147,9 +174,12 @@ uniform mat4 u_model;
 uniform int u_useConstant;
 uniform uint u_constant;
 flat out uint v_faceId;
+out vec3 v_world;
 void main() {
   v_faceId = u_useConstant == 1 ? u_constant : a_faceId;
-  gl_Position = u_viewProjection * u_model * vec4(a_position, 1.0);
+  vec4 world = u_model * vec4(a_position, 1.0);
+  v_world = world.xyz;
+  gl_Position = u_viewProjection * world;
 }`;
 
 /**
@@ -165,11 +195,23 @@ export const DESIGN_PICK = 0xfffffe;
  */
 export type OverlayPick = "none" | "faces" | "design";
 
+/** A closed volume drawn see-through over the part in its own colour: a design volume. */
+export interface Ghost {
+  mesh: Mesh;
+  tint: [number, number, number];
+  alpha: number;
+}
+
 const PICK_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
 flat in uint v_faceId;
+in vec3 v_world;
+uniform vec4 u_clip;
+uniform int u_clipOn;
 out vec4 fragColour;
 void main() {
+  // What a section takes away cannot be hovered or clicked.
+  if (u_clipOn == 1 && dot(v_world, u_clip.xyz) > u_clip.w) discard;
   // Face id + 1, little-endian across RGB, so 0 can mean "nothing here". Three bytes covers
   // 16.7 million faces against this part's 2167.
   uint id = v_faceId + 1u;
@@ -201,6 +243,8 @@ precision highp float;
 
 layout(location = 0) in vec2 a_corner;
 layout(location = 1) in uint a_face;
+// A value per face, for a layer coloured by it; the constant 0 for one that is not.
+layout(location = 2) in float a_value;
 
 uniform mat4 u_viewProjection;
 uniform ivec3 u_shape;
@@ -209,6 +253,7 @@ uniform float u_size;
 
 out vec3 v_normal;
 out vec3 v_worldPosition;
+out float v_value;
 
 void main() {
   // Cell index and face direction, packed into one integer by fastcae.generate.cells. Both halves
@@ -235,6 +280,7 @@ void main() {
   vec3 world = centre + normal * (0.5 * u_size) + (across * a_corner.x + up * a_corner.y) * u_size;
   v_worldPosition = world;
   v_normal = normal;
+  v_value = a_value;
   gl_Position = u_viewProjection * vec4(world, 1.0);
 }`;
 
@@ -243,22 +289,54 @@ precision highp float;
 
 in vec3 v_normal;
 in vec3 v_worldPosition;
+in float v_value;
 
 uniform vec3 u_eye;
 uniform vec3 u_tint;
 uniform float u_alpha;
+// 1: coloured by value on a log scale between u_range (logs of the low and high ends).
+uniform int u_heat;
+uniform vec2 u_range;
+uniform vec4 u_clip;
+uniform int u_clipOn;
 
 out vec4 fragColour;
 
+// A section drawn as a drawing marks one: flat, in the solid's own colour, hatched on the diagonal.
+vec3 hatched(vec3 solid) {
+  float line = mod(gl_FragCoord.x + gl_FragCoord.y, 9.0) < 1.5 ? 0.52 : 0.84;
+  return solid * line;
+}
+
+// Pale yellow through orange to dark red, in linear light.
+vec3 heat(float t) {
+  vec3 low = pow(vec3(1.0, 0.93, 0.62), vec3(2.2));
+  vec3 mid = pow(vec3(0.99, 0.55, 0.24), vec3(2.2));
+  vec3 high = pow(vec3(0.70, 0.0, 0.15), vec3(2.2));
+  return t < 0.5 ? mix(low, mid, t * 2.0) : mix(mid, high, (t - 0.5) * 2.0);
+}
+
 void main() {
+  if (u_clipOn == 1 && dot(v_worldPosition, u_clip.xyz) > u_clip.w) discard;
   vec3 normal = normalize(v_normal);
   vec3 viewDirection = normalize(u_eye - v_worldPosition);
+  // A cell face points out of the cells, so one seen from behind is the inside, through a cut.
+  bool cut = u_clipOn == 1 && dot(normal, viewDirection) < 0.0;
   if (dot(normal, viewDirection) < 0.0) normal = -normal;
 
+  vec3 base = u_tint;
+  if (u_heat == 1) {
+    float t = (log(max(v_value, 1e-30)) - u_range.x) / max(u_range.y - u_range.x, 1e-6);
+    base = heat(clamp(t, 0.0, 1.0));
+  }
+  if (cut) {
+    fragColour = vec4(pow(hatched(base), vec3(0.4545)), u_alpha);
+    return;
+  }
   vec3 keyDirection = normalize(vec3(0.45, 0.35, 0.82));
   float key = max(dot(normal, keyDirection), 0.0);
   float fill = max(dot(normal, vec3(0.0, 0.0, -1.0)), 0.0) * 0.22;
-  vec3 colour = u_tint * (0.34 + 0.66 * key + fill);
+  vec3 colour = base * (0.34 + 0.66 * key + fill);
   fragColour = vec4(pow(colour, vec3(0.4545)), u_alpha);
 }`;
 
@@ -269,19 +347,44 @@ layout(location = 0) in vec3 a_position;
 layout(location = 1) in vec3 a_colour;
 uniform mat4 u_viewProjection;
 out vec3 v_colour;
+out vec3 v_world;
 void main() {
   v_colour = a_colour;
+  v_world = a_position;
   gl_Position = u_viewProjection * vec4(a_position, 1.0);
 }`;
 
 const LINE_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
 in vec3 v_colour;
+in vec3 v_world;
 uniform float u_alpha;
+uniform vec4 u_clip;
+uniform int u_clipOn;
 out vec4 fragColour;
 void main() {
+  if (u_clipOn == 1 && dot(v_world, u_clip.xyz) > u_clip.w) discard;
   fragColour = vec4(v_colour, u_alpha);
 }`;
+
+/**
+ * One layer of cells over the part: what a pipeline step produced, in its own colour - or, with
+ * ``values``, coloured by them on a log scale across ``range``. Colours are 0-1 sRGB.
+ */
+export interface VoxelLayer {
+  key: string;
+  cells: VoxelCells;
+  tint: [number, number, number];
+  alpha: number;
+  values?: Float32Array;
+  range?: [number, number];
+}
+
+interface UploadedLayer {
+  layer: VoxelLayer;
+  vao: WebGLVertexArrayObject;
+  buffers: WebGLBuffer[];
+}
 
 /** Line segments: two points per segment, and a colour per point. */
 export interface LineSet {
@@ -312,6 +415,17 @@ export class Renderer {
   private overlayIndexCount = 0;
   private faceCount: number;
 
+  /** The part's triangles as they arrived, and which of them are drawn: all of them, or all but
+   * those of the faces hidden. */
+  private indices: Uint32Array;
+  private faceIds: Uint32Array;
+  private indexBuffer: WebGLBuffer;
+  private shownBuffer: WebGLBuffer | null = null;
+  private shownCount = 0;
+
+  /** Volumes drawn see-through over everything, each its own colour; kept on the GPU by mesh. */
+  private ghosts: { mesh: Mesh; vao: WebGLVertexArrayObject; buffers: WebGLBuffer[]; tint: [number, number, number]; alpha: number }[] = [];
+
   /** A second surface drawn over the first, for comparing one against the other. */
   private overlayVao: WebGLVertexArrayObject | null = null;
   private overlayBuffers: WebGLBuffer[] = [];
@@ -329,11 +443,25 @@ export class Renderer {
   private voxelShape: [number, number, number] = [1, 1, 1];
   private voxelOrigin: [number, number, number] = [0, 0, 0];
 
+  /** Layers of cells, each its own colour: what the design space's steps produced. */
+  private layers: UploadedLayer[] = [];
+
+  /** Each face its own colour, for the paint mode. */
+  private paintTexture: WebGLTexture;
+  private paintData: Uint8Array;
+
   /** Lines drawn over everything: where a layout would put ribs. */
   private lineProgram: WebGLProgram | null = null;
   private lineVao: WebGLVertexArrayObject | null = null;
   private lineBuffers: WebGLBuffer[] = [];
   private lineVertexCount = 0;
+
+  /** A section's plane as (normal, offset), or null: what lies beyond it is neither drawn nor
+   * picked. With its outline, drawn over everything. */
+  private clip: Float32Array | null = null;
+  private outlineVao: WebGLVertexArrayObject | null = null;
+  private outlineBuffers: WebGLBuffer[] = [];
+  private outlineCount = 0;
 
   /** Colour and opacity of the voxel layer. */
   voxelTint: [number, number, number] = [0.059, 0.239, 0.569];
@@ -376,7 +504,9 @@ export class Renderer {
     mesh: Mesh,
     faceCount: number,
   ) {
-    const gl = canvas.getContext("webgl2", { antialias: true, depth: true });
+    // Opaque: a canvas with an alpha channel lets the page show through every blended pixel, and
+    // see-through volumes and parts come out washed pale.
+    const gl = canvas.getContext("webgl2", { antialias: true, depth: true, alpha: false });
     if (!gl) throw new Error("WebGL2 is not available in this browser");
     this.gl = gl;
     this.faceCount = faceCount;
@@ -393,6 +523,10 @@ export class Renderer {
     const indexBuffer = createIndexBuffer(gl, mesh.indices);
     this.buffers.push(positionBuffer, normalBuffer, faceIdBuffer, indexBuffer);
     this.indexCount = mesh.indexCount;
+    this.shownCount = mesh.indexCount;
+    this.indices = mesh.indices;
+    this.faceIds = mesh.faceIds;
+    this.indexBuffer = indexBuffer;
 
     this.vao = gl.createVertexArray()!;
     gl.bindVertexArray(this.vao);
@@ -426,6 +560,18 @@ export class Renderer {
       gl.RGBA, gl.UNSIGNED_BYTE, this.faceStateData,
     );
 
+    this.paintData = new Uint8Array(this.faceStateWidth * rows * 4);
+    this.paintTexture = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, this.paintTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(
+      gl.TEXTURE_2D, 0, gl.RGBA8, this.faceStateWidth, rows, 0,
+      gl.RGBA, gl.UNSIGNED_BYTE, this.paintData,
+    );
+
     this.pickFramebuffer = gl.createFramebuffer()!;
     this.pickTexture = gl.createTexture()!;
     this.pickDepth = gl.createRenderbuffer()!;
@@ -446,6 +592,26 @@ export class Renderer {
     this.camera.distance = extent * 1.7;
     this.camera.far = extent * 12;
     this.camera.near = extent / 500;
+  }
+
+  /**
+   * Look at a box inside the part: centred on it and close enough to see it, keeping the part's own
+   * depth range so nothing behind it is clipped away.
+   */
+  focusBox(bbox: number[], from: number[] | null = null): void {
+    const [x0, y0, z0, x1, y1, z1] = bbox;
+    this.camera.target = [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2];
+    const extent = Math.max(x1 - x0, y1 - y0, z1 - z0, this.extent * 0.08);
+    this.camera.distance = Math.min(extent * 2.4, this.extent * 1.7);
+    // Looked at from a direction of its own, when it has one: the camera on that side of it.
+    if (from) {
+      const length = Math.hypot(from[0], from[1], from[2]);
+      if (length > 1e-6) {
+        const [dx, dy, dz] = from.map((v) => v / length);
+        this.camera.elevation = clamp(Math.asin(dz), -1.5, 1.5);
+        this.camera.azimuth = Math.atan2(dy, dx);
+      }
+    }
   }
 
   setFaceState(state: FaceState): void {
@@ -485,9 +651,12 @@ export class Renderer {
     gl.uniform3fv(gl.getUniformLocation(this.program, "u_eye"), eye);
     gl.uniform1i(
       gl.getUniformLocation(this.program, "u_colourMode"),
-      this.colourMode === "surface" ? 0 : this.colourMode === "frozen" ? 1 : 2,
+      { surface: 0, frozen: 1, exterior: 2, paint: 3 }[this.colourMode],
     );
     gl.uniform1i(gl.getUniformLocation(this.program, "u_faceStateWidth"), this.faceStateWidth);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.paintTexture);
+    gl.uniform1i(gl.getUniformLocation(this.program, "u_paint"), 1);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.faceStateTexture);
     gl.uniform1i(gl.getUniformLocation(this.program, "u_faceState"), 0);
@@ -495,11 +664,12 @@ export class Renderer {
     const alpha = gl.getUniformLocation(this.program, "u_alpha");
     const tinted = gl.getUniformLocation(this.program, "u_tinted");
 
+    this.applyClip(this.program);
     gl.uniform1f(alpha, 1.0);
     gl.uniform1i(tinted, 0);
     if (this.showSurface) {
       gl.bindVertexArray(this.vao);
-      gl.drawElements(gl.TRIANGLES, this.indexCount, gl.UNSIGNED_INT, 0);
+      gl.drawElements(gl.TRIANGLES, this.shownCount, gl.UNSIGNED_INT, 0);
     }
 
     if (this.showVoxels && this.voxelProgram && this.voxelVao && this.voxelCount > 0) {
@@ -512,8 +682,15 @@ export class Renderer {
       gl.uniform3fv(at("u_origin"), this.voxelOrigin);
       gl.uniform3fv(at("u_tint"), this.voxelTint);
       gl.uniform1f(at("u_alpha"), this.voxelAlpha);
+      gl.uniform1i(at("u_heat"), 0);
+      this.applyClip(this.voxelProgram);
       gl.bindVertexArray(this.voxelVao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.voxelCount);
+      gl.useProgram(this.program);
+    }
+
+    if (this.showVoxels && this.voxelProgram && this.layers.length) {
+      this.drawLayers(viewProjection, eye);
       gl.useProgram(this.program);
     }
 
@@ -553,6 +730,36 @@ export class Renderer {
       }
     }
 
+    // Design volumes, see-through over everything drawn so far and never hiding one another.
+    if (this.ghosts.length) {
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.depthMask(false);
+      gl.enable(gl.POLYGON_OFFSET_FILL);
+      gl.polygonOffset(-1.0, -1.0);
+      gl.uniform1i(tinted, 1);
+      // Twice, as lines are: faint where the part hides it - a volume inside the part is still
+      // seen - and clear where it does not.
+      for (const [depthTest, share] of [
+        [false, 0.35],
+        [true, 1.0],
+      ] as const) {
+        if (depthTest) gl.enable(gl.DEPTH_TEST);
+        else gl.disable(gl.DEPTH_TEST);
+        for (const ghost of this.ghosts) {
+          gl.uniform1f(alpha, ghost.alpha * share);
+          gl.uniform3fv(gl.getUniformLocation(this.program, "u_tint"), ghost.tint);
+          gl.bindVertexArray(ghost.vao);
+          gl.drawElements(gl.TRIANGLES, ghost.mesh.indexCount, gl.UNSIGNED_INT, 0);
+        }
+      }
+      gl.enable(gl.DEPTH_TEST);
+      gl.disable(gl.POLYGON_OFFSET_FILL);
+      gl.polygonOffset(0.0, 0.0);
+      gl.depthMask(true);
+      gl.disable(gl.BLEND);
+    }
+
     // Lines last, twice: faint where the part hides them - a line behind a wall is still found -
     // and solid where it does not.
     if (this.lineProgram && this.lineVao && this.lineVertexCount > 0) {
@@ -563,6 +770,7 @@ export class Renderer {
         viewProjection,
       );
       const lineAlpha = gl.getUniformLocation(this.lineProgram, "u_alpha");
+      this.applyClip(this.lineProgram);
       gl.bindVertexArray(this.lineVao);
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -575,7 +783,67 @@ export class Renderer {
       gl.disable(gl.BLEND);
       gl.useProgram(this.program);
     }
+
+    // Where the section's plane runs through the model's box: over everything, never cut.
+    if (this.outlineVao && this.outlineCount > 0) {
+      if (!this.lineProgram) this.lineProgram = linkProgram(gl, LINE_VERTEX_SHADER, LINE_FRAGMENT_SHADER);
+      gl.useProgram(this.lineProgram);
+      gl.uniformMatrix4fv(gl.getUniformLocation(this.lineProgram, "u_viewProjection"), false, viewProjection);
+      gl.uniform1i(gl.getUniformLocation(this.lineProgram, "u_clipOn"), 0);
+      gl.uniform1f(gl.getUniformLocation(this.lineProgram, "u_alpha"), 0.75);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.disable(gl.DEPTH_TEST);
+      gl.bindVertexArray(this.outlineVao);
+      gl.drawArrays(gl.LINES, 0, this.outlineCount);
+      gl.enable(gl.DEPTH_TEST);
+      gl.disable(gl.BLEND);
+      gl.useProgram(this.program);
+    }
     gl.bindVertexArray(null);
+  }
+
+  /**
+   * Cut everything with this plane - ``normal . x > d`` taken away - or, null, cut nothing; and draw
+   * the plane's outline in the model's box.
+   */
+  setSection(plane: { normal: [number, number, number]; d: number } | null, outline: Float32Array | null): void {
+    const gl = this.gl;
+    this.clip = plane ? new Float32Array([...plane.normal, plane.d]) : null;
+    if (this.outlineVao) {
+      gl.deleteVertexArray(this.outlineVao);
+      for (const b of this.outlineBuffers) gl.deleteBuffer(b);
+      this.outlineVao = null;
+      this.outlineBuffers = [];
+      this.outlineCount = 0;
+    }
+    if (!plane || !outline || outline.length === 0) return;
+    const count = outline.length / 3;
+    const colours = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) colours.set([0.059, 0.239, 0.569], i * 3);
+    const position = createBuffer(gl, outline);
+    const colour = createBuffer(gl, colours);
+    this.outlineBuffers = [position, colour];
+    this.outlineVao = gl.createVertexArray()!;
+    gl.bindVertexArray(this.outlineVao);
+    bindFloatAttribute(gl, position, 0, 3);
+    bindFloatAttribute(gl, colour, 1, 3);
+    gl.bindVertexArray(null);
+    this.outlineCount = count;
+  }
+
+  /** The way the camera looks, towards it: the normal of a plane square to the view. */
+  facing(): [number, number, number] {
+    const eye = this.eyePosition();
+    const t = this.camera.target;
+    const n = normalise([eye[0] - t[0], eye[1] - t[1], eye[2] - t[2]]);
+    return [n[0], n[1], n[2]];
+  }
+
+  private applyClip(program: WebGLProgram): void {
+    const gl = this.gl;
+    gl.uniform1i(gl.getUniformLocation(program, "u_clipOn"), this.clip ? 1 : 0);
+    gl.uniform4fv(gl.getUniformLocation(program, "u_clip"), this.clip ?? NO_PLANE);
   }
 
   /** Draw these lines over the part, or take them away. */
@@ -643,6 +911,153 @@ export class Renderer {
   }
 
   /**
+   * Show these layers of cells over the part, replacing the last set. A layer whose cells and values
+   * are the very objects already uploaded is kept as it is: switching a layer off and on again, or
+   * changing its colour, never uploads anything.
+   */
+  setVoxelLayers(layers: VoxelLayer[]): void {
+    const gl = this.gl;
+    if (!this.voxelProgram && layers.length) {
+      this.voxelProgram = linkProgram(gl, VOXEL_VERTEX_SHADER, VOXEL_FRAGMENT_SHADER);
+    }
+    const kept: UploadedLayer[] = [];
+    const reusable = new Map(this.layers.map((u) => [u.layer.cells, u]));
+    for (const layer of layers) {
+      if (layer.cells.faces.length === 0) continue;
+      const known = reusable.get(layer.cells);
+      if (known && known.layer.values === layer.values) {
+        reusable.delete(layer.cells);
+        kept.push({ ...known, layer });
+        continue;
+      }
+      const quad = createBuffer(gl, QUAD);
+      const faces = createBuffer(gl, layer.cells.faces);
+      const buffers = [quad, faces];
+      const vao = gl.createVertexArray()!;
+      gl.bindVertexArray(vao);
+      bindFloatAttribute(gl, quad, 0, 2);
+      bindIntAttribute(gl, faces, 1);
+      gl.vertexAttribDivisor(1, 1);
+      if (layer.values) {
+        const values = createBuffer(gl, layer.values);
+        buffers.push(values);
+        bindFloatAttribute(gl, values, 2, 1);
+        gl.vertexAttribDivisor(2, 1);
+      } else {
+        gl.disableVertexAttribArray(2);
+        gl.vertexAttrib1f(2, 0.0);
+      }
+      gl.bindVertexArray(null);
+      kept.push({ layer, vao, buffers });
+    }
+    for (const gone of reusable.values()) {
+      gl.deleteVertexArray(gone.vao);
+      for (const buffer of gone.buffers) gl.deleteBuffer(buffer);
+    }
+    this.layers = kept;
+  }
+
+  /** Opaque layers first, then the see-through ones blended over them without writing depth, so a
+   * translucent volume never hides parts of itself drawn after it. */
+  private drawLayers(viewProjection: Float32Array, eye: Float32Array | number[]): void {
+    const gl = this.gl;
+    const program = this.voxelProgram!;
+    gl.useProgram(program);
+    const at = (name: string) => gl.getUniformLocation(program, name);
+    gl.uniformMatrix4fv(at("u_viewProjection"), false, viewProjection);
+    gl.uniform3fv(at("u_eye"), eye);
+    this.applyClip(program);
+    const linear = (c: [number, number, number]) => c.map((v) => Math.pow(v, 2.2)) as [number, number, number];
+    const opacity = (u: UploadedLayer) => Math.min(u.layer.alpha, 1);
+    const draw = (u: UploadedLayer) => {
+      const { cells, tint, values, range } = u.layer;
+      const alpha = opacity(u);
+      gl.uniform1f(at("u_size"), cells.size);
+      gl.uniform3iv(at("u_shape"), cells.shape);
+      gl.uniform3fv(at("u_origin"), cells.origin);
+      gl.uniform3fv(at("u_tint"), linear(tint));
+      gl.uniform1f(at("u_alpha"), alpha);
+      gl.uniform1i(at("u_heat"), values ? 1 : 0);
+      const [lo, hi] = range ?? [1e-6, 1];
+      gl.uniform2f(at("u_range"), Math.log(Math.max(lo, 1e-30)), Math.log(Math.max(hi, 1e-30)));
+      gl.bindVertexArray(u.vao);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, cells.faces.length);
+    };
+    this.layers.filter((u) => opacity(u) >= 0.999).forEach(draw);
+    const clear = this.layers.filter((u) => opacity(u) < 0.999);
+    if (clear.length) {
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.depthMask(false);
+      clear.forEach(draw);
+      gl.depthMask(true);
+      gl.disable(gl.BLEND);
+    }
+  }
+
+  /** Each face its own colour for the paint mode, or none. Colours are 0-1 sRGB. */
+  setFacePaint(paint: Map<number, [number, number, number]> | null): void {
+    this.paintData.fill(0);
+    if (paint) {
+      for (const [face, [r, g, b]] of paint) {
+        const at = face * 4;
+        if (at + 3 >= this.paintData.length) continue;
+        this.paintData[at] = Math.round(r * 255);
+        this.paintData[at + 1] = Math.round(g * 255);
+        this.paintData[at + 2] = Math.round(b * 255);
+        this.paintData[at + 3] = 255;
+      }
+    }
+    const gl = this.gl;
+    const rows = Math.ceil(this.faceCount / this.faceStateWidth);
+    gl.bindTexture(gl.TEXTURE_2D, this.paintTexture);
+    gl.texSubImage2D(
+      gl.TEXTURE_2D, 0, 0, 0, this.faceStateWidth, rows,
+      gl.RGBA, gl.UNSIGNED_BYTE, this.paintData,
+    );
+  }
+
+  /**
+   * Leave these faces of the part out of the picture - and out of picking - or, empty, draw them
+   * all again.
+   *
+   * What a design cuts - a hole through a plate, a face thinned - would still be drawn by the part's
+   * own faces over the design's surface, and a hole would look blind; hidden, the design's own
+   * surface drawn there shows it. The part's triangles stay on the GPU: only which of them are
+   * drawn changes, a list of indices rebuilt once per design.
+   */
+  setHidden(faces: Set<number>): void {
+    const gl = this.gl;
+    if (this.shownBuffer) {
+      gl.deleteBuffer(this.shownBuffer);
+      this.shownBuffer = null;
+    }
+    let buffer = this.indexBuffer;
+    this.shownCount = this.indexCount;
+    if (faces.size) {
+      const kept = new Uint32Array(this.indexCount);
+      let count = 0;
+      for (let t = 0; t + 2 < this.indexCount; t += 3) {
+        // A triangle is the face its last corner carries - the one a flat attribute is read
+        // from, so what is hidden is what the picture calls that face.
+        if (faces.has(this.faceIds[this.indices[t + 2]])) continue;
+        kept[count++] = this.indices[t];
+        kept[count++] = this.indices[t + 1];
+        kept[count++] = this.indices[t + 2];
+      }
+      this.shownBuffer = createIndexBuffer(gl, kept.subarray(0, count));
+      buffer = this.shownBuffer;
+      this.shownCount = count;
+    }
+    // Which elements a vertex array draws is part of the array's state: both are told.
+    for (const vao of [this.vao, this.pickVao]) {
+      gl.bindVertexArray(vao);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffer);
+    }
+    gl.bindVertexArray(null);
+  }
+
+  /**
    * Put a second surface over the first, or take it away.
    *
    * Whether it can be picked, and as what, is {@link overlayPick}.
@@ -686,6 +1101,37 @@ export class Renderer {
   }
 
   /**
+   * The volumes drawn see-through, in order. A mesh already on the GPU stays there; one no longer
+   * asked for is handed back.
+   */
+  setGhosts(ghosts: Ghost[]): void {
+    const gl = this.gl;
+    const kept = new Set(ghosts.map((g) => g.mesh));
+    for (const old of this.ghosts) {
+      if (kept.has(old.mesh)) continue;
+      gl.deleteVertexArray(old.vao);
+      for (const buffer of old.buffers) gl.deleteBuffer(buffer);
+    }
+    const onGpu = new Map(this.ghosts.filter((g) => kept.has(g.mesh)).map((g) => [g.mesh, g]));
+    this.ghosts = ghosts.map((ghost) => {
+      const known = onGpu.get(ghost.mesh);
+      if (known) return { ...known, tint: ghost.tint, alpha: ghost.alpha };
+      const position = createBuffer(gl, ghost.mesh.positions);
+      const normal = createBuffer(gl, ghost.mesh.normals);
+      const faceId = createBuffer(gl, ghost.mesh.faceIds);
+      const index = createIndexBuffer(gl, ghost.mesh.indices);
+      const vao = gl.createVertexArray()!;
+      gl.bindVertexArray(vao);
+      bindFloatAttribute(gl, position, 0, 3);
+      bindNormalAttribute(gl, normal, 1);
+      bindIntAttribute(gl, faceId, 2);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, index);
+      gl.bindVertexArray(null);
+      return { mesh: ghost.mesh, vao, buffers: [position, normal, faceId, index], tint: ghost.tint, alpha: ghost.alpha };
+    });
+  }
+
+  /**
    * Hand everything back to the GL context.
    *
    * Not optional. A renderer is replaced whenever the mesh it was built for changes, and a browser
@@ -695,8 +1141,13 @@ export class Renderer {
   dispose(): void {
     const gl = this.gl;
     this.setOverlay(null);
+    this.setGhosts([]);
     this.setVoxels(null);
+    this.setVoxelLayers([]);
     this.setLines(null);
+    this.setSection(null, null);
+    if (this.shownBuffer) gl.deleteBuffer(this.shownBuffer);
+    this.shownBuffer = null;
     if (this.voxelProgram) gl.deleteProgram(this.voxelProgram);
     if (this.lineProgram) gl.deleteProgram(this.lineProgram);
     for (const buffer of this.buffers) gl.deleteBuffer(buffer);
@@ -704,6 +1155,7 @@ export class Renderer {
     gl.deleteVertexArray(this.vao);
     gl.deleteVertexArray(this.pickVao);
     gl.deleteTexture(this.faceStateTexture);
+    gl.deleteTexture(this.paintTexture);
     gl.deleteTexture(this.pickTexture);
     gl.deleteRenderbuffer(this.pickDepth);
     gl.deleteFramebuffer(this.pickFramebuffer);
@@ -733,12 +1185,13 @@ export class Renderer {
       this.viewProjection(width / height),
     );
     gl.uniformMatrix4fv(gl.getUniformLocation(this.pickProgram, "u_model"), false, IDENTITY);
+    this.applyClip(this.pickProgram);
     const useConstant = gl.getUniformLocation(this.pickProgram, "u_useConstant");
     // Only what is on screen can be picked: a hidden part is not under the cursor.
     if (this.showSurface) {
       gl.uniform1i(useConstant, 0);
       gl.bindVertexArray(this.pickVao);
-      gl.drawElements(gl.TRIANGLES, this.indexCount, gl.UNSIGNED_INT, 0);
+      gl.drawElements(gl.TRIANGLES, this.shownCount, gl.UNSIGNED_INT, 0);
     }
     if (this.overlayPick !== "none" && this.showOverlay && this.overlayVao) {
       gl.uniform1i(useConstant, this.overlayPick === "design" ? 1 : 0);
@@ -869,6 +1322,7 @@ export class Renderer {
 }
 
 const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+const NO_PLANE = new Float32Array([0, 0, 1, 0]);
 
 function linkProgram(gl: WebGL2RenderingContext, vertexSource: string, fragmentSource: string) {
   const program = gl.createProgram()!;

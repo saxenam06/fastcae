@@ -1,0 +1,369 @@
+/*
+ * Simulate's views: the deck's mesh and setup, the answers as contours, the variant route.
+ * The same sheet as the rest: hairlines, the one blue, colour carried by pattern as well.
+ */
+
+.fe-page {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  background: var(--ground);
+}
+
+.fe-view {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Out of the flow: a canvas's own size must never size its view, or it feeds back on a resize. */
+.fe-view canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+}
+
+.fe-view canvas:active {
+  cursor: grabbing;
+}
+
+.fe-caption {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid var(--hairline);
+  font-size: 11.5px;
+}
+
+.fe-page .overlay {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  display: flex;
+  gap: 6px;
+  z-index: 4;
+}
+
+.fe-page .overlay button {
+  font-size: 11.5px;
+  padding: 3px 9px;
+}
+
+.fe-readout {
+  position: absolute;
+  left: 12px;
+  right: 180px;
+  bottom: 44px;
+  font-size: 12px;
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fe-key {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 9px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--hairline);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.fe-key span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.fe-key i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 1px;
+}
+
+.split-stage {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.split-stage[data-split="true"] {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1px;
+  background: var(--hairline);
+}
+
+/* The legend: agenticCAE's card, top right. */
+.fe-legend {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 132px;
+  padding: 8px 10px 9px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--hairline);
+  z-index: 4;
+  font-size: 11px;
+}
+
+.fe-legend-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.fe-legend-body {
+  display: flex;
+  gap: 8px;
+  height: 200px;
+}
+
+.fe-legend-bar {
+  width: 17px;
+  height: 100%;
+  border: 1px solid var(--hairline);
+}
+
+.fe-legend-ticks {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  font-size: 10.5px;
+}
+
+.fe-legend-unit {
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.fe-legend-clip {
+  margin-top: 3px;
+  color: var(--running);
+  font-size: 10px;
+}
+
+.fe-legend-limits {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.fe-legend-limits input {
+  width: 100%;
+  font-size: 10.5px;
+  padding: 2px 4px;
+  border: 1px solid var(--hairline);
+}
+
+.fe-legend-limits button {
+  grid-column: span 2;
+  font-size: 10.5px;
+  padding: 2px 4px;
+}
+
+.fe-note {
+  position: absolute;
+  top: 12px;
+  right: 158px;
+  font-size: 11px;
+  color: var(--muted);
+  z-index: 4;
+}
+
+.fe-error {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  padding: 8px 12px;
+  background: var(--conflict-wash);
+  color: var(--conflict);
+  border: 1px solid var(--conflict);
+  font-size: 12px;
+  z-index: 5;
+}
+
+/* Where a thing came from. Imported: the engineer's files. Derived: computed from them. Generated:
+   meshed or solved by fastcae. Pattern as well as colour. */
+.prov {
+  display: inline-block;
+  padding: 0 5px;
+  border-radius: 2px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-bottom: 2px solid;
+  line-height: 15px;
+  vertical-align: middle;
+}
+
+.prov[data-kind="imported"] {
+  color: var(--blue);
+  background: var(--blue-wash);
+  border-bottom-style: solid;
+}
+
+.prov[data-kind="derived"] {
+  color: var(--muted);
+  background: var(--ground);
+  border-bottom-style: dotted;
+}
+
+.prov[data-kind="generated"] {
+  color: var(--measured);
+  background: var(--measured-wash);
+  border-bottom-style: dashed;
+}
+
+.prov[data-small="true"] {
+  font-size: 8.5px;
+  line-height: 13px;
+  padding: 0 4px;
+}
+
+.rail-note {
+  padding: 14px 12px;
+  color: var(--muted);
+}
+
+.answers {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 12px 10px;
+}
+
+.answer {
+  padding: 8px 9px;
+  background: var(--sheet);
+  border: 1px solid var(--hairline);
+  border-left: 3px solid var(--hairline);
+}
+
+.answer[data-available="true"] {
+  border-left-color: var(--blue);
+}
+
+button.primary {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: #fff;
+}
+
+button.primary:hover {
+  background: #0b2f73;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.job-line {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 12px 10px;
+  font-size: 11.5px;
+}
+
+.job-bar {
+  height: 4px;
+  background: var(--hairline);
+  overflow: hidden;
+}
+
+.job-bar i {
+  display: block;
+  height: 100%;
+  background: var(--running);
+  transition: width 0.4s;
+}
+
+.section .body .segmented {
+  margin-bottom: 8px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 2px 0;
+}
+
+.verdict {
+  margin: 0 12px 8px;
+  padding: 6px 9px;
+  font-size: 12px;
+  background: var(--running-wash);
+  border-left: 3px solid var(--running);
+}
+
+.verdict[data-good="true"] {
+  background: var(--measured-wash);
+  border-left-color: var(--measured);
+}
+
+.signal-table-wrap {
+  overflow-x: auto;
+  padding: 0 6px;
+}
+
+.signal-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.signal-table th {
+  text-align: right;
+  font-weight: 500;
+  color: var(--muted);
+  padding: 3px 5px;
+  border-bottom: 1px solid var(--hairline);
+  white-space: nowrap;
+}
+
+.signal-table th:first-child,
+.signal-table td:first-child {
+  text-align: left;
+}
+
+.signal-table td {
+  text-align: right;
+  padding: 2px 5px;
+  border-bottom: 1px solid #eef0ed;
+  white-space: nowrap;
+}
+
+.signal-table tr[data-kind="derived"] td:first-child::after {
+  content: " ·";
+  color: var(--faint);
+}
+
+.signal-table .delta {
+  color: var(--measured);
+}

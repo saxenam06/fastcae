@@ -1,5 +1,5 @@
-"""The agent: a language model with tools over the platform, which turns what an engineer asks
-for into a proposed version of the study, for them to accept.
+"""The agent: a language model with tools over the pipeline and the part, which helps an engineer
+read what fastcae made of their files and settle, in their own words, what it could not.
 
 Credentials come from the environment. A ``.env`` at the repository root is read first, before
 anything from LangChain is imported, so tracing and keys are set when those libraries look.

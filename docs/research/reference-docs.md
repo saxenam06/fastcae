@@ -1,12 +1,12 @@
-# The three strategy documents in `docs/`
+# Four outside documents, read against fastcae
 
 What each decides and leaves open for the next phase - mesh, solve, dataset, surrogate, agents,
-positioning.
+positioning. All four sit in [../inputs/](../inputs/README.md).
 
-- **A:** `docs/Neural Concept EV Powertrain Role  GRC Gearbox Demonstration Strategy.md`
-- **B:** `docs/End-to-End CAE + Physics-AI Portfolio for Neural Concept.md`
-- **C:** `docs/physical_ai_cast_housing_design_generation_research.md`
-- **D:** `docs/I want to reduce computational time of build and m.md`
+- **A:** [Neural Concept EV Powertrain Role: GRC Gearbox Demonstration Strategy](../inputs/strategy/Neural%20Concept%20EV%20Powertrain%20Role%20%20GRC%20Gearbox%20Demonstration%20Strategy.md)
+- **B:** [End-to-End CAE + Physics-AI Portfolio for Neural Concept](../inputs/strategy/End-to-End%20CAE%20+%20Physics-AI%20Portfolio%20for%20Neural%20Concept.md)
+- **C:** [Physical-AI Cast Housing Design Generation](../inputs/research/physical_ai_cast_housing_design_generation_research.md)
+- **D:** [Reducing the build and mesh time](../inputs/research/I%20want%20to%20reduce%20computational%20time%20of%20build%20and%20m.md)
 
 A and B are plans for applying to Neural Concept roles; C is about fastcae's own problem; D is a
 study of how to shorten the build and the mesh. None of A-C sets a numeric accuracy target, and none

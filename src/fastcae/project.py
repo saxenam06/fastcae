@@ -32,6 +32,9 @@ ASSETS_ROOT = Path("assets")
 # The file a project's decisions are written to. Not an artifact: it says things *about* the
 # artifacts, and listing it among them would offer it up for extraction as data.
 DATA_FILE_NAME = "project.json"
+DESIGN_SPACE_FILES = ("design_space.npz", "design_space.json")
+"""The design space kept with the project. Read by its own stage, not extracted: defining it again
+must not make the engineer's files look changed."""
 
 # The roles a CAD file can hold. The baseline is what every design grows from. There is no other:
 # an engineer brings a part to add to, not a finished version to compare against.
@@ -49,6 +52,7 @@ class ArtifactKind(StrEnum):
     CAD = "cad"
     DRAWING = "drawing"
     FEM = "fem"
+    RESULTS = "results"
     DATA = "data"
     UNKNOWN = "unknown"
 
@@ -57,7 +61,8 @@ class ArtifactKind(StrEnum):
         return {
             ArtifactKind.CAD: "CAD",
             ArtifactKind.DRAWING: "Drawing",
-            ArtifactKind.FEM: "FEM setup",
+            ArtifactKind.FEM: "Solver deck",
+            ArtifactKind.RESULTS: "Solver results",
             ArtifactKind.DATA: "Data",
             ArtifactKind.UNKNOWN: "Unrecognised",
         }[self]
@@ -72,10 +77,15 @@ _EXTENSIONS = {
     ".pdf": ArtifactKind.DRAWING,
     ".dwg": ArtifactKind.DRAWING,
     ".dxf": ArtifactKind.DRAWING,
-    ".med": ArtifactKind.FEM,
-    ".inp": ArtifactKind.FEM,
+    ".export": ArtifactKind.FEM,
     ".comm": ArtifactKind.FEM,
+    ".med": ArtifactKind.FEM,
+    ".mail": ArtifactKind.FEM,
+    ".inp": ArtifactKind.FEM,
     ".bdf": ArtifactKind.FEM,
+    ".rmed": ArtifactKind.RESULTS,
+    ".resu": ArtifactKind.RESULTS,
+    ".mess": ArtifactKind.RESULTS,
     ".csv": ArtifactKind.DATA,
     ".json": ArtifactKind.DATA,
     ".tdms": ArtifactKind.DATA,
@@ -141,7 +151,9 @@ class Project:
                 size_bytes=path.stat().st_size,
             )
             for path in sorted(self.root.iterdir())
-            if path.is_file() and not path.name.startswith(".") and path.name != DATA_FILE_NAME
+            if path.is_file()
+            and not path.name.startswith(".")
+            and path.name not in (DATA_FILE_NAME, *DESIGN_SPACE_FILES)
         ]
         order = list(ArtifactKind)
         return sorted(found, key=lambda a: (order.index(a.kind), a.path.name))

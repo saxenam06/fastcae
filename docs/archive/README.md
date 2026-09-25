@@ -1,6 +1,8 @@
 # Archive
 
-These documents are **not current**; [ribs.md](../ribs.md) and [generate.md](../generate.md) are.
+These documents are **not current**; [design-space.md](../design-space.md),
+[pipeline.md](../pipeline.md) and [designs.md](../designs.md) are. The code they describe, where
+it no longer runs, is kept whole in `_archived_code/` at the repository's root.
 Four of them were written for the previous project, so they cite
 files that do not exist in this repository: `mesh/surface.py`, `fem/aster.py`, `handbook/`,
 `production.step`, `groups.json`, `basis.npy`. They also disagree with each other on schedule and
@@ -8,6 +10,10 @@ phase order.
 
 | document | what it is | what the current design keeps from it |
 |---|---|---|
+| [rib-families-plan.md](rib-families-plan.md) | Rib designs from a library of production forms: placements and forms vetted one by one, sized by the loads on the voxel model, kept as patterns by CP-SAT under named variants, the most varied built | Design volumes from the engineer's picks, the target as an input, the stages and their checks, the face-by-face mesh and cuDSS - all kept. The library of fixed planes and forms gave way to fins whose ends, curve and heights the optimiser moves, placed by one gate of rules ([designs.md](../designs.md), [rib-optimisation-plan.md](../rib-optimisation-plan.md)) |
+| [designs-voxel.md](designs-voxel.md) | Designs optimised on the voxel design space: BESO on rib planes 48 mm apart, each plane's metal traced into plates, fused, meshed, solved | The stages a design has on screen, the CAD fused plate by plate, the face-by-face mesh and cuDSS - all kept. The voxel design space as what decides where metal goes, and metal free cell by cell, gave way to design volumes the engineer picks and a library of ribs sized by the loads ([designs.md](../designs.md)) |
+| [generate.md](generate.md) | Designs as variants on a distance field: a design a set of variants and their values, built on the field, contoured, checked; campaigns drawn from the variant library, repaired by CP-SAT, screened | That every design is checked and the checks are code; that a campaign keeps what reproduces it. The field, the variants and their campaigns gave way to designs optimised in the design space and built as CAD ([designs.md](../designs.md)) |
+| [ribs.md](ribs.md) | The design space from the engineer's words: variants authored by hand on Variant Setup - where, what may vary, every rule - campaigns composing them, the agent writing studies | Campaigns, repair by CP-SAT, screening and the variant library, which campaigns still read. The design space itself is now derived from the CAD and the deck ([design-space.md](../design-space.md)); variants are no longer authored in the interface |
 | [16-implicit-rib-variants.md](16-implicit-rib-variants.md) | Research note. How nTop builds ribs, with sources; the housing and its ribs as measured; candidate open-source kernels; the case for offset-closing; the measured cost of an immersed grid on this part | The mechanism: layout, then ribs, then blended union, then protected areas. The rib's parameters, the ring zones and the division of work. Offset-closing is kept as the fallback fillet. The grid-cost numbers go to the physics plan |
 | [grc-rib-plan.html](grc-rib-plan.html) | Plain-language plan. Five rules, the checks, milestones M0 and M1, the tools | Ribs follow the mould. Building is not the same as correct. Videos are not designs. The agent suggests and a script checks. Protected areas are cut back after every blend. The check list, and the first campaign of 64 |
 | [gb3-agentic-immersed-ai-platform-master-plan.md](gb3-agentic-immersed-ai-platform-master-plan.md) | Platform master plan. The Design Space Object, evidence states, gated agent actions, an immersed solver, a surrogate roadmap | Every rule and variable carries its evidence state. The rule that the agent proposes and a person confirms, which goes to the campaign plan |
